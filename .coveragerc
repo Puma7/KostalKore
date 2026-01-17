@@ -1,0 +1,11 @@
+[run]
+branch = True
+source = kostal_plenticore
+omit =
+    kostal_plenticore/coordinator.py
+    kostal_plenticore/number.py
+    kostal_plenticore/sensor.py
+    kostal_plenticore/switch.py
+
+[report]
+show_missing = True

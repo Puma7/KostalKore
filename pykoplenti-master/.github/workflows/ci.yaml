@@ -1,0 +1,61 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Lint with ruff
+        run: |
+          uv run --group dev --python ${{ matrix.python-version }} ruff check --output-format=github .
+      - name: Type check with mypy
+        run: |
+          uv run --group dev --extra cli --python ${{ matrix.python-version }} mypy pykoplenti/ tests/
+      - name: Test with pytest
+        run: |
+          uv run --group dev --extra cli --python ${{ matrix.python-version }} pytest --junitxml=junit/test-results.xml --cov pykoplenti --cov-report=xml --cov-report=html
+      - name: Test with tox
+        run: |
+          uv run --group dev --extra cli --python ${{ matrix.python-version }} tox
+      - name: Build package
+        run: |
+          uv build --python ${{ matrix.python-version }}
+      - name: Upload packages to github
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.python-version }}
+          path: dist/*
+
+  deploy:
+    if: startsWith(github.event.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pykoplenti
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishi
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.10"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Build package
+        run: |
+          uv build --python 3.10
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

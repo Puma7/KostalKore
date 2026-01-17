@@ -1,0 +1,36 @@
+quality_scale: no_score
+rules:
+  # Core requirements
+  config_flow: done
+  diagnostics: done
+  entity_unique_id: done
+  translations: done
+  tests: done
+  # Documentation (not on Home Assistant docs site)
+  docs_high_level_description:
+    status: todo
+    comment: "Custom integration; docs are in-repo, not HA docs site."
+  docs_installation:
+    status: todo
+    comment: "Custom integration; docs are in-repo, not HA docs site."
+  docs_entities:
+    status: todo
+    comment: "Entity table not in HA docs format."
+  docs_configuration:
+    status: todo
+    comment: "Configuration docs are in-repo only."
+  # User experience / recovery
+  reauthentication:
+    status: todo
+    comment: "No dedicated reauth flow implemented."
+  repair_issues:
+    status: todo
+    comment: "Repair issues not implemented."
+  # Discovery / onboarding
+  config_flow_discovery:
+    status: todo
+    comment: "No discovery flow implemented."
+  # Naming / entity metadata
+  has_entity_name:
+    status: todo
+    comment: "Entities are not using entity naming via has_entity_name."
