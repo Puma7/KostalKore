@@ -1,5 +1,9 @@
 # Release Notes
 
+## Unreleased
+
+- Performance: rate-limit refresh no longer double-delays; initial refresh debounce lowered to 0.5s.
+
 ## v0.1.0
 
 Initial public release of the integration.
