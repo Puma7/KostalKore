@@ -71,6 +71,15 @@ This integration provides comprehensive monitoring and control capabilities for 
 2. Restart Home Assistant
 3. The integration will be available for configuration
 
+## Development
+
+### Branches
+- `develop` is the default branch for ongoing work.
+- `main` reflects tagged release snapshots.
+
+### Release Notes
+See `RELEASE_NOTES.md` for the latest release highlights.
+
 ## Configuration
 
 ### Initial Setup
