@@ -1159,6 +1159,7 @@ async def async_setup_entry(
     battery_settings_skipped = []
     
     forced_unique_ids: set[str] = set()
+    forced_unique_ids_by_data_id: dict[str, set[str]] = {}
     forced_fetch_pairs: set[tuple[str, str]] = set()
 
     # Special handling: Force create specific battery settings that might be hidden
@@ -1294,8 +1295,12 @@ async def async_setup_entry(
             description.data_id in FORCE_CREATE_KEYS
             or description_to_use.data_id in FORCE_CREATE_KEYS
         ):
-            forced_unique_ids.add(
+            forced_id = (
                 f"{entry.entry_id}_{description_to_use.module_id}_{description_to_use.data_id}"
+            )
+            forced_unique_ids.add(forced_id)
+            forced_unique_ids_by_data_id.setdefault(description_to_use.data_id, set()).add(
+                forced_id
             )
             forced_fetch_pairs.add(
                 (description_to_use.module_id, description_to_use.data_id)
@@ -1327,7 +1332,9 @@ async def async_setup_entry(
                 f"{entry.entry_id}_{description.module_id}_{description.data_id}",
                 f"{entry.entry_id}_{description.module_id}_{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
             }
-            expected_unique_ids.update(forced_unique_ids)
+            expected_unique_ids.update(
+                forced_unique_ids_by_data_id.get(description.data_id, set())
+            )
 
             expected_entry = None
             for uid in expected_unique_ids:
@@ -1406,7 +1413,9 @@ async def async_setup_entry(
                     f"{entry.entry_id}_{description.module_id}_{description.data_id}",
                     f"{entry.entry_id}_{description.module_id}_{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
                 }
-                expected_unique_ids.update(forced_unique_ids)
+                expected_unique_ids.update(
+                    forced_unique_ids_by_data_id.get(description.data_id, set())
+                )
 
                 expected_entry = None
                 for uid in expected_unique_ids:

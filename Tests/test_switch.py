@@ -134,6 +134,14 @@ async def test_shadow_management_switch_state(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
+    entity_registry = er.async_get(hass)
+    for idx in (1, 2):
+        entity_id = f"switch.scb_shadow_management_dc_string_{idx}"
+        entry = entity_registry.async_get(entity_id)
+        if entry and entry.disabled_by is not None:
+            entity_registry.async_update_entity(entity_id, disabled_by=None)
+    await hass.async_block_till_done()
+
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=300))
     await hass.async_block_till_done()
 
@@ -189,6 +197,8 @@ async def test_shadow_management_switch_action(
     entry = entity_registry.async_get(entity_id)
     if entry and entry.disabled_by is not None:
         entity_registry.async_update_entity(entity_id, disabled_by=None)
+        await hass.async_block_till_done()
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=300))
         await hass.async_block_till_done()
 
     await hass.services.async_call(
