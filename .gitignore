@@ -34,3 +34,15 @@ Desktop.ini
 
 # Archives
 *.zip
+
+# Local backups / vendor snapshots
+kostal_plenticore_backup_original_ReadOnly/
+kostal_plenticore_old/
+kostal-2026-01-07/
+pykoplenti-master/
+
+# Local test scripts / outputs
+test_*.py
+test_*.txt
+fix_phase5_*.py
+fix_test_failures.py
