@@ -51,6 +51,11 @@ graph TD
 3.  **`helper.py`**:
     *   **`PlenticoreDataFormatter`**: Static methods to convert API strings to Python types (int, float) and human-readable strings (State Codes -> Text).
     *   **`get_hostname_id`**: Utilities for network discovery.
+    *   **`parse_modbus_exception`**: Central MODBUS error parsing.
+    *   **`ensure_installer_access`**: Shared installer code validation for control writes.
+
+4.  **`const_ids.py`**:
+    *   Centralized identifiers for module IDs and common setting IDs.
 
 4.  **`config_flow.py`**:
     *   Handles the setup UI: Host IP, Password, and optional Service Code.
@@ -108,8 +113,8 @@ To add a writable setting:
 
 ### C. Safety & Error Handling
 *   **Authentication**: The integration handles login/logout automatically. Do not manually instantiate `ExtendedApiClient` outside of the provided structures.
-*   **Modbus Errors**: The `Plenticore` class wraps errors. When implementing new logic, catch `ApiException` and use `parse_modbus_exception`.
-*   **Service Code**: Some settings (Battery Config) require the "Service Code" (Installer Password). Check `entry.data.get(CONF_SERVICE_CODE)` before attempting these writes.
+*   **Modbus Errors**: Catch `ApiException` and use `parse_modbus_exception`.
+*   **Service Code**: Use `ensure_installer_access(...)` before writes that require installer access.
 
 ## 5. Critical Technical Constraints
 *   **Polling Interval**: Logic is sensitive to polling frequency. Do not decrease intervals below 10s to avoid overwhelming the inverter's single-threaded web server.
@@ -117,10 +122,10 @@ To add a writable setting:
 *   **Async**: All I/O is asynchronous. Use `await` for all client calls.
 
 ## 6. Known Issues / Gotchas
-*   **API 500 Errors**: Some models return 500 for supported but inactive features. The code handles this by logging a warning/info rather than crashing.
+*   **API 500 Errors**: Some models return 500 for supported but inactive features. The code logs warning/info and continues.
 *   **Battery Wakeup**: Write operations might fail if the battery is in deep sleep. The integration retries standard Modbus busy errors.
 *   **Legacy Unique IDs**: Older select entities used `entry_id + module_id`. A registry migration now remaps to `entry_id + module_id + key` to avoid duplicate/grey entities.
 *   **Legacy Battery IDs**: Some firmware exposes `Battery:MinSoc` and `Battery:MinHomeComsumption` (typo). The integration auto-falls back to those IDs.
 
 ---
-*Last Updated: 2026-01-16*
+*Last Updated: 2026-01-17*

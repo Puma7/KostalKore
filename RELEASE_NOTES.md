@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.3.1
+
 - Performance: rate-limit refresh no longer double-delays; initial refresh debounce lowered to 0.5s.
 - Reliability: Shadow Management detection now logs only expected API/network errors.
 - Performance: RequestCache key generation simplified to a deterministic hash.

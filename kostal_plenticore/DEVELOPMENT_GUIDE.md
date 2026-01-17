@@ -27,6 +27,7 @@ kostal_plenticore/
 ├── diagnostics.py       # Diagnostic information collection
 ├── helper.py            # Data formatting utilities
 ├── const.py             # Constants (domain, config keys)
+├── const_ids.py         # Centralized module/data IDs
 ├── manifest.json        # Integration metadata
 └── strings.json         # User-facing strings
 ```
@@ -146,10 +147,14 @@ async def async_set_native_value(self, value: float) -> None:
     """Set a new value."""
     if "Battery" in self.data_id:
         # Check installer service code for advanced controls
-        if requires_installer:
-            if entry.data.get(CONF_SERVICE_CODE) is None:
-                _LOGGER.warning("Installer service code required")
-                return
+        if not ensure_installer_access(
+            entry,
+            requires_installer,
+            self.module_id,
+            self.data_id,
+            "battery control",
+        ):
+            return
         
         # Validate value ranges
         if abs(value) > SAFE_LIMIT:
@@ -231,7 +236,7 @@ Never let exceptions crash the platform:
 try:
     # Potentially failing operation
     result = await client.get_setting_values(...)
-except (ApiException, ClientError, TimeoutError, Exception) as err:
+except (ApiException, ClientError, TimeoutError) as err:
     _LOGGER.warning("Operation failed: %s - continuing without feature", err)
     result = {}  # Safe fallback
 ```
@@ -325,7 +330,7 @@ except ApiException as err:
 - Traceback shows `/usr/src/homeassistant/...` instead of `/config/custom_components/...`
 
 **Solution**:
-1. Ensure `manifest.json` has `"version": "2.1.0"` (required for custom components)
+1. Ensure `manifest.json` has `"version": "2.3.1"` (required for custom components)
 2. Ensure folder name matches domain: `custom_components/kostal_plenticore/`
 3. Clear Python cache: Delete `__pycache__` folders and `.pyc` files
 4. **Full Home Assistant restart** (not just reload)
@@ -416,7 +421,6 @@ try:
 except ApiException as err:
     modbus_err = parse_modbus_exception(err)
     _LOGGER.error("MODBUS error: %s", modbus_err.message)
-    # Handle specific MODBUS exceptions
     if isinstance(modbus_err, ModbusServerDeviceBusyError):
         _LOGGER.warning("Inverter busy, retry later")
     elif isinstance(modbus_err, ModbusIllegalDataValueError):
@@ -425,8 +429,6 @@ except ClientError as err:
     _LOGGER.error("Network error: %s", err)
 except TimeoutError as err:
     _LOGGER.error("Timeout: %s", err)
-except Exception as err:
-    _LOGGER.error("Unexpected error: %s", err)
 ```
 
 ### Pattern 4: Entity Setup with Discovery
@@ -478,20 +480,8 @@ async def async_setup_entry(...):
 ```python
 def parse_modbus_exception(api_exception: ApiException) -> ModbusException:
     """Parse ApiException into specific MODBUS exceptions."""
-    error_msg = str(api_exception).lower()
-    
-    if "illegal function" in error_msg:
-        return ModbusIllegalFunctionError(0x03)
-    elif "illegal data address" in error_msg:
-        return ModbusIllegalDataAddressError(0)
-    elif "illegal data value" in error_msg:
-        return ModbusIllegalDataValueError("unknown", 0)
-    elif "server device failure" in error_msg:
-        return ModbusServerDeviceFailureError()
-    elif "server device busy" in error_msg:
-        return ModbusServerDeviceBusyError()
-    else:
-        return ModbusException(f"MODBUS error: {api_exception}")
+    # See helper.py for the centralized implementation.
+    ...
 ```
 
 ---
@@ -604,5 +594,5 @@ ERROR: Could not get settings data for numbers: ...
 
 ---
 
-*Last Updated: 2026-01-16*
+*Last Updated: 2026-01-17*
 

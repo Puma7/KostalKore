@@ -11,6 +11,9 @@
 
 ### 2. Add to number.py (for numeric controls)
 ```python
+from kostal_plenticore.const_ids import ModuleId, SettingId
+from kostal_plenticore.helper import ensure_installer_access
+
 PlenticoreNumberEntityDescription(
     key="battery_feature_name",
     entity_category=EntityCategory.CONFIG,
@@ -21,8 +24,8 @@ PlenticoreNumberEntityDescription(
     native_max_value=100,
     native_min_value=0,
     native_step=1,
-    module_id="devices:local",
-    data_id="Battery:Actual:RestApi:Name",  # ⚠️ Must match REST API exactly!
+    module_id=ModuleId.DEVICES_LOCAL,
+    data_id=SettingId.BATTERY_MIN_SOC,  # ⚠️ Must match REST API exactly!
     fmt_from="format_round",
     fmt_to="format_round_back",
 ),
@@ -38,7 +41,7 @@ PlenticoreNumberEntityDescription(
 
 1. **Advanced controls require installer service code**
    ```python
-   if requires_installer and not entry.data.get(CONF_SERVICE_CODE):
+   if not ensure_installer_access(entry, requires_installer, self.module_id, self.data_id, "battery control"):
        return  # Block operation
    ```
 
