@@ -137,7 +137,7 @@ except ApiException as err:
 | Availability | Subset of MODBUS features | All documented features |
 
 **Important**: Not all MODBUS features are available via REST API!
-**G3 Battery Limitation**: `Battery:MaxChargePowerG3` and `Battery:MaxDischargePowerG3` require cyclic writes; the integration re-applies them periodically to avoid fallback.
+**G3 Battery Limitation**: REST uses `Battery:Limit:Charge_P` and `Battery:Limit:Discharge_P` (fallback via `Battery:Limit:Fallback*`). These are re-applied cyclically to avoid fallback.
 
 ---
 

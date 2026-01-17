@@ -26,6 +26,14 @@ class SettingId(StrEnum):
     BATTERY_MIN_HOME_CONSUMPTION = "Battery:MinHomeConsumption"
     BATTERY_MIN_HOME_CONSUMPTION_LEGACY = "Battery:MinHomeComsumption"
 
+    BATTERY_EXTERN_CONTROL_AC_POWER_ABS = "Battery:ExternControl:AcPowerAbs"
+
+    BATTERY_LIMIT_CHARGE_POWER = "Battery:Limit:Charge_P"
+    BATTERY_LIMIT_DISCHARGE_POWER = "Battery:Limit:Discharge_P"
+    BATTERY_LIMIT_FALLBACK_CHARGE_POWER = "Battery:Limit:FallbackCharge_P"
+    BATTERY_LIMIT_FALLBACK_DISCHARGE_POWER = "Battery:Limit:FallbackDischarge_P"
+    BATTERY_LIMIT_FALLBACK_TIME = "Battery:Limit:FallbackTime"
+
     BATTERY_MAX_CHARGE_POWER_G3 = "Battery:MaxChargePowerG3"
     BATTERY_MAX_DISCHARGE_POWER_G3 = "Battery:MaxDischargePowerG3"
     BATTERY_TIME_UNTIL_FALLBACK = "Battery:TimeUntilFallback"

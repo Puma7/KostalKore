@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v2.3.2
+
+- Fixed REST ID mapping for G3 battery limits and AC charge power (PLENTICORE G3 L).
+- G3 fallback limit/time settings now use REST `Battery:Limit:*` identifiers.
+
 ## v2.3.1
 
 - Performance: rate-limit refresh no longer double-delays; initial refresh debounce lowered to 0.5s.

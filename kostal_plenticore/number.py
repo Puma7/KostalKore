@@ -50,6 +50,12 @@ _LOGGER = logging.getLogger(__name__)
 LEGACY_SETTING_ALIASES: Final[dict[str, str]] = {
     SettingId.BATTERY_MIN_SOC_REL: SettingId.BATTERY_MIN_SOC,
     SettingId.BATTERY_MIN_HOME_CONSUMPTION: SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY,
+    SettingId.BATTERY_EXTERN_CONTROL_AC_POWER_ABS: "Battery:ChargePowerAcAbsolute",
+    SettingId.BATTERY_LIMIT_CHARGE_POWER: SettingId.BATTERY_MAX_CHARGE_POWER_G3,
+    SettingId.BATTERY_LIMIT_DISCHARGE_POWER: SettingId.BATTERY_MAX_DISCHARGE_POWER_G3,
+    SettingId.BATTERY_LIMIT_FALLBACK_CHARGE_POWER: "Battery:MaxChargePowerFallback",
+    SettingId.BATTERY_LIMIT_FALLBACK_DISCHARGE_POWER: "Battery:MaxDischargePowerFallback",
+    SettingId.BATTERY_LIMIT_FALLBACK_TIME: SettingId.BATTERY_TIME_UNTIL_FALLBACK,
 }
 LEGACY_SETTING_REVERSE: Final[dict[str, str]] = {
     v: k for k, v in LEGACY_SETTING_ALIASES.items()
@@ -90,6 +96,8 @@ BATTERY_TIME_MAX_SECONDS: Final[int] = 86400
 BATTERY_TIME_MIN_SECONDS: Final[int] = 0
 BATTERY_TIME_STEP_SECONDS: Final[int] = 1
 G3_CYCLIC_LIMIT_IDS: Final[set[str]] = {
+    SettingId.BATTERY_LIMIT_CHARGE_POWER,
+    SettingId.BATTERY_LIMIT_DISCHARGE_POWER,
     SettingId.BATTERY_MAX_CHARGE_POWER_G3,
     SettingId.BATTERY_MAX_DISCHARGE_POWER_G3,
 }
@@ -310,7 +318,7 @@ NUMBER_SETTINGS_DATA = [
         max_value=BATTERY_MAX_POWER_WATTS,
         min_value=-BATTERY_MAX_POWER_WATTS,
         icon="mdi:battery-charging-100",
-        data_id="Battery:ChargePowerAcAbsolute",
+        data_id=SettingId.BATTERY_EXTERN_CONTROL_AC_POWER_ABS,
     ),
     create_percentage_number_description(
         key="battery_charge_current_dc_relative",
@@ -359,7 +367,7 @@ NUMBER_SETTINGS_DATA = [
         unit=UnitOfPower.WATT,
         max_value=BATTERY_MAX_POWER_WATTS,
         icon="mdi:battery-charging-limit",
-        data_id="Battery:MaxChargePowerG3",
+        data_id=SettingId.BATTERY_LIMIT_CHARGE_POWER,
     ),
     create_battery_number_description(
         key="battery_max_discharge_power_g3",
@@ -367,7 +375,7 @@ NUMBER_SETTINGS_DATA = [
         unit=UnitOfPower.WATT,
         max_value=BATTERY_MAX_POWER_WATTS,
         icon="mdi:battery-discharging-limit",
-        data_id="Battery:MaxDischargePowerG3",
+        data_id=SettingId.BATTERY_LIMIT_DISCHARGE_POWER,
     ),
     create_battery_number_description(
         key="battery_max_charge_power_fallback",
@@ -375,7 +383,7 @@ NUMBER_SETTINGS_DATA = [
         unit=UnitOfPower.WATT,
         max_value=BATTERY_MAX_POWER_WATTS,
         icon="mdi:battery-charging-limit",
-        data_id="Battery:MaxChargePowerFallback",
+        data_id=SettingId.BATTERY_LIMIT_FALLBACK_CHARGE_POWER,
     ),
     create_battery_number_description(
         key="battery_max_discharge_power_fallback",
@@ -383,7 +391,7 @@ NUMBER_SETTINGS_DATA = [
         unit=UnitOfPower.WATT,
         max_value=BATTERY_MAX_POWER_WATTS,
         icon="mdi:battery-discharging-limit",
-        data_id="Battery:MaxDischargePowerFallback",
+        data_id=SettingId.BATTERY_LIMIT_FALLBACK_DISCHARGE_POWER,
     ),
     create_power_number_description(
         key="battery_time_until_fallback",
@@ -393,7 +401,7 @@ NUMBER_SETTINGS_DATA = [
         min_value=BATTERY_TIME_MIN_SECONDS,
         step=BATTERY_TIME_STEP_SECONDS,
         icon="mdi:timer",
-        data_id=SettingId.BATTERY_TIME_UNTIL_FALLBACK,
+        data_id=SettingId.BATTERY_LIMIT_FALLBACK_TIME,
     ),
     # Additional External Control Settings
     create_battery_number_description(
@@ -1594,7 +1602,7 @@ class PlenticoreDataNumber(
         fallback_value = None
         if self.coordinator.data and self.module_id in self.coordinator.data:
             fallback_value = self.coordinator.data[self.module_id].get(
-                SettingId.BATTERY_TIME_UNTIL_FALLBACK
+                SettingId.BATTERY_LIMIT_FALLBACK_TIME
             )
         fallback_seconds = self._parse_seconds(fallback_value)
         if not fallback_seconds or fallback_seconds < 1:

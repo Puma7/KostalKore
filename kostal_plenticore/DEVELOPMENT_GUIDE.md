@@ -330,7 +330,7 @@ except ApiException as err:
 - Traceback shows `/usr/src/homeassistant/...` instead of `/config/custom_components/...`
 
 **Solution**:
-1. Ensure `manifest.json` has `"version": "2.3.1"` (required for custom components)
+1. Ensure `manifest.json` has `"version": "2.3.2"` (required for custom components)
 2. Ensure folder name matches domain: `custom_components/kostal_plenticore/`
 3. Clear Python cache: Delete `__pycache__` folders and `.pyc` files
 4. **Full Home Assistant restart** (not just reload)
