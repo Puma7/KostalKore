@@ -9,13 +9,18 @@ import logging
 from typing import Any, Final, cast
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
+    from homeassistant.helpers.entity_platform import (
+        AddEntitiesCallback as AddConfigEntryEntitiesCallback,
+    )
 else:
     try:
         from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
     except ImportError:
-        from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
+        from homeassistant.helpers.entity_platform import (
+            AddEntitiesCallback as AddConfigEntryEntitiesCallback,
+        )
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.const import EntityCategory
@@ -27,7 +32,6 @@ from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_SERVICE_CODE
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 
@@ -65,7 +69,7 @@ def _normalize_translation_key(key: str) -> str:
 def _handle_api_error(err: Exception, operation: str, context: str = "") -> None:
     """
     Centralized API error handling.
-    
+
     Args:
         err: Exception that occurred
         operation: Description of the operation being performed
@@ -73,13 +77,30 @@ def _handle_api_error(err: Exception, operation: str, context: str = "") -> None
     """
     if isinstance(err, ApiException):
         modbus_err = parse_modbus_exception(err)
-        _LOGGER.error("API error during %s%s: %s", operation, f" ({context})" if context else "", modbus_err.message)
+        _LOGGER.error(
+            "API error during %s%s: %s",
+            operation,
+            f" ({context})" if context else "",
+            modbus_err.message,
+        )
     elif isinstance(err, TimeoutError):
-        _LOGGER.warning("Timeout during %s%s", operation, f" ({context})" if context else "")
+        _LOGGER.warning(
+            "Timeout during %s%s", operation, f" ({context})" if context else ""
+        )
     elif isinstance(err, (ClientError, asyncio.TimeoutError)):
-        _LOGGER.error("Network error during %s%s: %s", operation, f" ({context})" if context else "", err)
+        _LOGGER.error(
+            "Network error during %s%s: %s",
+            operation,
+            f" ({context})" if context else "",
+            err,
+        )
     else:
-        _LOGGER.error("Unexpected error during %s%s: %s", operation, f" ({context})" if context else "", err)
+        _LOGGER.error(
+            "Unexpected error during %s%s: %s",
+            operation,
+            f" ({context})" if context else "",
+            err,
+        )
 
 
 def create_switch_description(
@@ -97,7 +118,7 @@ def create_switch_description(
 ) -> PlenticoreSwitchEntityDescription:
     """
     Factory function for creating switch descriptions with security defaults.
-    
+
     Args:
         module_id: Plenticore module identifier
         key: Setting key within the module
@@ -110,7 +131,7 @@ def create_switch_description(
         entity_registry_enabled_default: Whether entity is enabled by default
         entity_category: Entity category for the switch
         icon: Icon to display
-        
+
     Returns:
         Configured switch entity description
     """
@@ -570,29 +591,28 @@ async def async_setup_entry(
     try:
         available_settings_data = await plenticore.client.get_settings()
     except (ApiException, ClientError, TimeoutError, Exception) as err:
-            error_msg = str(err)
-            if "Unknown API response [500]" in error_msg:
-                _LOGGER.error("Inverter API returned 500 error - feature not supported on this model")
-            elif isinstance(err, ApiException):
-                modbus_err = parse_modbus_exception(err)
-                _LOGGER.error("Could not get settings data: %s", modbus_err.message)
-            else:
-                _LOGGER.error("Could not get settings data: %s", err)
-            # Return early if we can't get basic settings
-            return
+        error_msg = str(err)
+        if "Unknown API response [500]" in error_msg:
+            _LOGGER.error(
+                "Inverter API returned 500 error - feature not supported on this model"
+            )
+        elif isinstance(err, ApiException):
+            modbus_err = parse_modbus_exception(err)
+            _LOGGER.error("Could not get settings data: %s", modbus_err.message)
+        else:
+            _LOGGER.error("Could not get settings data: %s", err)
+        # Return early if we can't get basic settings
+        return
     available_settings_data = available_settings_data or {}
-    
+
     settings_data_update_coordinator = SettingDataUpdateCoordinator(
         hass, entry, _LOGGER, "Settings Data", timedelta(seconds=30), plenticore
     )
     for description in SWITCH_SETTINGS_DATA:
         # Check if the module even exists before trying to access its settings
-        module_available = (
-            description.module_id in plenticore.available_modules
-            or (
-                not plenticore.available_modules
-                and description.module_id in available_settings_data
-            )
+        module_available = description.module_id in plenticore.available_modules or (
+            not plenticore.available_modules
+            and description.module_id in available_settings_data
         )
         if not module_available:
             _LOGGER.debug(
@@ -622,6 +642,7 @@ async def async_setup_entry(
             description.key,
             "setting data",
             log_level="debug",
+            hass=hass,
         ):
             continue
         entities.append(
@@ -645,18 +666,21 @@ async def async_setup_entry(
         except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
             error_msg = str(err)
             if "Unknown API response [500]" in error_msg:
-                _LOGGER.warning("Inverter API returned 500 error for string count - feature not supported")
+                _LOGGER.warning(
+                    "Inverter API returned 500 error for string count - feature not supported"
+                )
             elif isinstance(err, ApiException):
                 modbus_err = parse_modbus_exception(err)
                 _LOGGER.warning("Could not get string count: %s", modbus_err.message)
             else:
                 _LOGGER.warning("Could not get string count: %s", err)
             string_count_setting = {}
-        
+
         try:
             string_count = int(
-                string_count_setting.get(ModuleId.DEVICES_LOCAL, {})
-                .get(SettingId.STRING_COUNT, 0)
+                string_count_setting.get(ModuleId.DEVICES_LOCAL, {}).get(
+                    SettingId.STRING_COUNT, 0
+                )
             )
         except (ValueError, AttributeError):
             string_count = 0
@@ -666,15 +690,19 @@ async def async_setup_entry(
         dc_string_feature_ids = tuple(
             string_feature_id(dc_string) for dc_string in dc_strings
         )
-        
+
         # Skip shadow management if no strings
         if not dc_strings:
             _LOGGER.debug("No DC strings detected, skipping shadow management")
         else:
             dc_string_features: dict[str, dict[str, str]] = {}
-            _LOGGER.debug("Attempting to get DC string features for %s", dc_string_feature_ids)
+            _LOGGER.debug(
+                "Attempting to get DC string features for %s", dc_string_feature_ids
+            )
             try:
-                _LOGGER.debug("Switch: Calling get_setting_values for shadow management")
+                _LOGGER.debug(
+                    "Switch: Calling get_setting_values for shadow management"
+                )
                 dc_string_features = cast(
                     dict[str, dict[str, str]],
                     await plenticore.client.get_setting_values(
@@ -682,50 +710,90 @@ async def async_setup_entry(
                         dc_string_feature_ids,
                     ),
                 )
-                _LOGGER.debug("Successfully got DC string features: %s", dc_string_features)
-            except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
+                _LOGGER.debug(
+                    "Successfully got DC string features: %s", dc_string_features
+                )
+            except (
+                ApiException,
+                ClientError,
+                TimeoutError,
+                asyncio.TimeoutError,
+            ) as err:
                 # Handle API errors gracefully - some inverters may not support DC string features
-                _handle_api_error(err, "DC string features batch query", "shadow management")
-                
+                _handle_api_error(
+                    err, "DC string features batch query", "shadow management"
+                )
+
                 error_msg = str(err)
                 if UNKNOWN_API_500_RESPONSE in error_msg:
-                    _LOGGER.info("DC string batch query not supported - using optimized individual queries")
+                    _LOGGER.info(
+                        "DC string batch query not supported - using optimized individual queries"
+                    )
                     # Use individual queries directly since batch query fails on this inverter
                     dc_string_features = {}
-                    
-                    _LOGGER.info("Using individual DC string feature queries (optimized for your inverter)...")
-                    for dc_string, feature_id in zip(dc_strings, dc_string_feature_ids, strict=True):
+
+                    _LOGGER.info(
+                        "Using individual DC string feature queries (optimized for your inverter)..."
+                    )
+                    for dc_string, feature_id in zip(
+                        dc_strings, dc_string_feature_ids, strict=True
+                    ):
                         try:
-                            _LOGGER.debug("Querying string %d feature: %s", dc_string + 1, feature_id)
+                            _LOGGER.debug(
+                                "Querying string %d feature: %s",
+                                dc_string + 1,
+                                feature_id,
+                            )
                             single_feature = await plenticore.client.get_setting_values(
                                 PlenticoreShadowMgmtSwitch.MODULE_ID,
                                 (feature_id,),
                             )
                             if single_feature:
-                                dc_string_features.setdefault(PlenticoreShadowMgmtSwitch.MODULE_ID, {}).update(single_feature[PlenticoreShadowMgmtSwitch.MODULE_ID])
-                                feature_value = single_feature[PlenticoreShadowMgmtSwitch.MODULE_ID].get(feature_id, '0')
-                                _LOGGER.debug("String %d feature value: %s", dc_string + 1, feature_value)
+                                dc_string_features.setdefault(
+                                    PlenticoreShadowMgmtSwitch.MODULE_ID, {}
+                                ).update(
+                                    single_feature[PlenticoreShadowMgmtSwitch.MODULE_ID]
+                                )
+                                feature_value = single_feature[
+                                    PlenticoreShadowMgmtSwitch.MODULE_ID
+                                ].get(feature_id, "0")
+                                _LOGGER.debug(
+                                    "String %d feature value: %s",
+                                    dc_string + 1,
+                                    feature_value,
+                                )
                         except (
                             ApiException,
                             ClientError,
                             TimeoutError,
                             asyncio.TimeoutError,
                         ) as single_err:
-                            _handle_api_error(single_err, f"DC string {dc_string + 1} feature query", feature_id)
+                            _handle_api_error(
+                                single_err,
+                                f"DC string {dc_string + 1} feature query",
+                                feature_id,
+                            )
                             if UNKNOWN_API_500_RESPONSE in str(single_err):
-                                _LOGGER.warning("String %d shadow management not available", dc_string + 1)
-                                
+                                _LOGGER.warning(
+                                    "String %d shadow management not available",
+                                    dc_string + 1,
+                                )
+
                 elif isinstance(err, ApiException):
                     modbus_err = parse_modbus_exception(err)
-                    _LOGGER.warning("Could not get DC string features: %s", modbus_err.message)
+                    _LOGGER.warning(
+                        "Could not get DC string features: %s", modbus_err.message
+                    )
                     dc_string_features = {}
                 else:
                     _LOGGER.warning("Could not get DC string features: %s", err)
                     dc_string_features = {}
-            
+
             # If we still don't have features, log final state
             if not dc_string_features.get(PlenticoreShadowMgmtSwitch.MODULE_ID):
-                _LOGGER.warning("Could not detect shadow management support for any DC strings")
+                _LOGGER.warning(
+                    "Could not detect shadow management support for any DC strings"
+                )
                 dc_string_features = {}
 
             # Create shadow management switches for strings that support it
@@ -734,15 +802,29 @@ async def async_setup_entry(
             ):
                 try:
                     dc_string_feature = int(
-                        dc_string_features.get(PlenticoreShadowMgmtSwitch.MODULE_ID, {})
-                        .get(dc_string_feature_id, 0)
+                        dc_string_features.get(
+                            PlenticoreShadowMgmtSwitch.MODULE_ID, {}
+                        ).get(dc_string_feature_id, 0)
                     )
                 except (ValueError, AttributeError):
                     dc_string_feature = 0
 
-                if dc_string_feature in (PlenticoreShadowMgmtSwitch.SHADOW_MANAGEMENT_SUPPORT, PlenticoreShadowMgmtSwitch.SHADOW_MANAGEMENT_ADVANCED):
-                    feature_type = "Advanced" if dc_string_feature == PlenticoreShadowMgmtSwitch.SHADOW_MANAGEMENT_ADVANCED else "Standard"
-                    _LOGGER.info("Creating %s shadow management switch for DC string %d (Feature: %d)", feature_type, dc_string + 1, dc_string_feature)
+                if dc_string_feature in (
+                    PlenticoreShadowMgmtSwitch.SHADOW_MANAGEMENT_SUPPORT,
+                    PlenticoreShadowMgmtSwitch.SHADOW_MANAGEMENT_ADVANCED,
+                ):
+                    feature_type = (
+                        "Advanced"
+                        if dc_string_feature
+                        == PlenticoreShadowMgmtSwitch.SHADOW_MANAGEMENT_ADVANCED
+                        else "Standard"
+                    )
+                    _LOGGER.info(
+                        "Creating %s shadow management switch for DC string %d (Feature: %d)",
+                        feature_type,
+                        dc_string + 1,
+                        dc_string_feature,
+                    )
                     entities.append(
                         PlenticoreShadowMgmtSwitch(
                             settings_data_update_coordinator,
@@ -758,17 +840,30 @@ async def async_setup_entry(
                         dc_string + 1,
                         dc_string_feature,
                     )
-    except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as shadow_err:
+    except (
+        ApiException,
+        ClientError,
+        TimeoutError,
+        asyncio.TimeoutError,
+    ) as shadow_err:
         # Catch ANY exception in shadow management setup to prevent platform crash
         # This is a catch-all to ensure basic switches are always created
         error_msg = str(shadow_err)
         if "Unknown API response [500]" in error_msg:
-            _LOGGER.warning("Shadow management features not supported on this inverter model - continuing without shadow management switches")
+            _LOGGER.warning(
+                "Shadow management features not supported on this inverter model - continuing without shadow management switches"
+            )
         elif isinstance(shadow_err, ApiException):
             modbus_err = parse_modbus_exception(shadow_err)
-            _LOGGER.warning("Shadow management setup failed: %s - continuing without shadow management switches", modbus_err.message)
+            _LOGGER.warning(
+                "Shadow management setup failed: %s - continuing without shadow management switches",
+                modbus_err.message,
+            )
         else:
-            _LOGGER.warning("Error setting up shadow management switches: %s - continuing without shadow management switches", shadow_err)
+            _LOGGER.warning(
+                "Error setting up shadow management switches: %s - continuing without shadow management switches",
+                shadow_err,
+            )
         # Ensure we don't crash - basic switches will still be created
 
     # Security: Disable existing entities BEFORE adding new ones
@@ -778,37 +873,41 @@ async def async_setup_entry(
     disabled_count = 0
     try:
         entity_registry = er.async_get(hass)
-        
+
         # Disable existing regular switches that should be hidden
         for description in SWITCH_SETTINGS_DATA:
             # Skip Battery:ManualCharge - it should remain enabled
             if description.key == "Battery:ManualCharge":
                 continue
-            
+
             # Only disable entities that are marked as hidden by default
-            if getattr(description, "entity_registry_enabled_default", True) is not False:
+            if (
+                getattr(description, "entity_registry_enabled_default", True)
+                is not False
+            ):
                 continue
-            
+
             # Check if this setting exists in the API
             if (
                 description.module_id not in available_settings_data
                 or description.key
                 not in (
-                    setting.id for setting in available_settings_data[description.module_id]
+                    setting.id
+                    for setting in available_settings_data[description.module_id]
                 )
             ):
                 continue
-            
+
             # Construct the unique_id that Home Assistant uses
             unique_id = f"{entry.entry_id}_{description.module_id}_{description.key}"
-            
+
             try:
                 # Check if entity exists in registry and is currently enabled
                 entity_entry = entity_registry.async_get(unique_id)
                 if entity_entry and entity_entry.disabled_by is None:
                     _LOGGER.info(
                         "Security: Disabling existing switch entity %s (should be hidden by default)",
-                        description.name
+                        description.name,
                     )
                     entity_registry.async_update_entity(
                         unique_id, disabled_by=RegistryEntryDisabler.INTEGRATION
@@ -821,7 +920,7 @@ async def async_setup_entry(
                     description.name,
                     entity_err,
                 )
-        
+
         # Also disable existing shadow management switches if they exist
         # Shadow management switches use a different unique_id pattern
         for dc_string in range(3):  # Check up to 3 DC strings
@@ -831,7 +930,7 @@ async def async_setup_entry(
                 if shadow_entity_entry and shadow_entity_entry.disabled_by is None:
                     _LOGGER.info(
                         "Security: Disabling existing shadow management switch for DC string %d (should be hidden by default)",
-                        dc_string + 1
+                        dc_string + 1,
                     )
                     entity_registry.async_update_entity(
                         shadow_unique_id, disabled_by=RegistryEntryDisabler.INTEGRATION
@@ -844,11 +943,11 @@ async def async_setup_entry(
                     dc_string + 1,
                     shadow_err,
                 )
-        
+
         if disabled_count > 0:
             _LOGGER.info(
                 "Security: Disabled %d existing switch entities that should be hidden by default",
-                disabled_count
+                disabled_count,
             )
     except Exception as registry_err:
         # Catch-all to ensure entity registry errors don't crash the platform
@@ -856,11 +955,11 @@ async def async_setup_entry(
             "Error accessing entity registry for security disabling: %s - continuing without disabling existing entities",
             registry_err,
         )
-    
+
     # Now add entities - new ones will be created with entity_registry_enabled_default=False
     # Existing ones were just disabled above
     async_add_entities(entities)
-    
+
     # Also schedule a delayed check as a safety net in case entities weren't in registry yet
     # This handles edge cases where entities might be added between our check and async_add_entities
     async def disable_entities_safety_check(_now: datetime) -> None:
@@ -868,28 +967,34 @@ async def async_setup_entry(
         try:
             entity_registry = er.async_get(hass)
             additional_disabled = 0
-            
+
             for description in SWITCH_SETTINGS_DATA:
                 if description.key == "Battery:ManualCharge":
                     continue
-                if getattr(description, "entity_registry_enabled_default", True) is not False:
+                if (
+                    getattr(description, "entity_registry_enabled_default", True)
+                    is not False
+                ):
                     continue
                 if (
                     description.module_id not in available_settings_data
                     or description.key
                     not in (
-                        setting.id for setting in available_settings_data[description.module_id]
+                        setting.id
+                        for setting in available_settings_data[description.module_id]
                     )
                 ):
                     continue
-                
-                unique_id = f"{entry.entry_id}_{description.module_id}_{description.key}"
+
+                unique_id = (
+                    f"{entry.entry_id}_{description.module_id}_{description.key}"
+                )
                 try:
                     entity_entry = entity_registry.async_get(unique_id)
                     if entity_entry and entity_entry.disabled_by is None:
                         _LOGGER.info(
                             "Security: Disabling switch entity %s (safety check)",
-                            description.name
+                            description.name,
                         )
                         entity_registry.async_update_entity(
                             unique_id, disabled_by=RegistryEntryDisabler.INTEGRATION
@@ -897,15 +1002,15 @@ async def async_setup_entry(
                         additional_disabled += 1
                 except Exception:
                     pass
-            
+
             if additional_disabled > 0:
                 _LOGGER.info(
                     "Security: Disabled %d additional switch entities in safety check",
-                    additional_disabled
+                    additional_disabled,
                 )
         except Exception:
             pass  # Silent fail for safety check
-    
+
     # Schedule safety check after configured delay as a backup
     async_call_later(hass, SAFETY_CHECK_DELAY_SECONDS, disable_entities_safety_check)
 
@@ -990,10 +1095,10 @@ class PlenticoreDataSwitch(
         """Return true if device is on."""
         if not self.available or self.coordinator.data is None:
             return None  # Return None during startup to show "unknown" state
-        
+
         value = self.coordinator.data[self.module_id][self.data_id]
         is_on_state = value == self._is_on
-        
+
         if is_on_state:
             self.coordinator.name = f"{self.platform_name} {self._name} {self.on_label}"
         else:

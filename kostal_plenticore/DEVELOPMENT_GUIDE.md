@@ -153,6 +153,7 @@ async def async_set_native_value(self, value: float) -> None:
             self.module_id,
             self.data_id,
             "battery control",
+            hass=self.hass,
         ):
             return
         
@@ -195,6 +196,7 @@ requires_installer = any(control in self.data_id for control in advanced_control
 
 if requires_installer and not entry.data.get(CONF_SERVICE_CODE):
     _LOGGER.warning("Installer service code required")
+    # Missing service code triggers a Home Assistant repair issue.
     return  # Block operation
 ```
 

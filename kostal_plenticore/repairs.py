@@ -49,6 +49,18 @@ def create_inverter_busy_issue(hass: HomeAssistant) -> None:
     )
 
 
+def create_installer_required_issue(hass: HomeAssistant) -> None:
+    """Create a repair issue when installer/service code is required."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _issue_id("installer_required"),
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="installer_required",
+    )
+
+
 def clear_issue(hass: HomeAssistant, suffix: str) -> None:
     """Clear a repair issue if present."""
     ir.async_delete_issue(hass, DOMAIN, _issue_id(suffix))

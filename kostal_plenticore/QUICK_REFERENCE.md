@@ -44,6 +44,7 @@ PlenticoreNumberEntityDescription(
    if not ensure_installer_access(entry, requires_installer, self.module_id, self.data_id, "battery control"):
        return  # Block operation
    ```
+   - Missing service code triggers a Home Assistant repair issue (`installer_required`).
 
 2. **Always validate values**
    ```python

@@ -7,8 +7,11 @@ import logging
 from collections.abc import Callable
 from typing import Any, Final, cast
 
+from homeassistant.core import HomeAssistant
+
 from .const import CONF_SERVICE_CODE
 from .const_ids import SettingId
+from .repairs import clear_issue, create_installer_required_issue
 
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiClient, ApiException
@@ -58,10 +61,10 @@ EM_STATE_BATTERY_MANAGEMENT: Final[int] = 512
 def _safe_int_conversion(state: str) -> int | str:
     """
     Safely convert string to int with fallback.
-    
+
     Args:
         state: String to convert
-        
+
     Returns:
         Integer if successful, original string otherwise
     """
@@ -78,10 +81,10 @@ def _safe_int_conversion(state: str) -> int | str:
 def _safe_float_conversion(state: str) -> float | str:
     """
     Safely convert string to float with fallback.
-    
+
     Args:
         state: String to convert
-        
+
     Returns:
         Float if successful, original string otherwise
     """
@@ -94,11 +97,11 @@ def _safe_float_conversion(state: str) -> float | str:
 def _handle_format_error(state: str, formatter_name: str) -> str:
     """
     Handle formatting errors consistently with logging.
-    
+
     Args:
         state: Input state that caused the error
         formatter_name: Name of the formatter for logging
-        
+
     Returns:
         Original state as fallback
     """
@@ -230,7 +233,7 @@ class PlenticoreDataFormatter:
         modes: Final[dict[int, str]] = {
             0x00: "No external battery management",
             0x01: "External management via digital I/O",
-            0x02: "External management via MODBUS"
+            0x02: "External management via MODBUS",
         }
         try:
             return modes.get(int(state), f"Unknown mode: {state}")
@@ -245,7 +248,7 @@ class PlenticoreDataFormatter:
             0x01: "B-Control EM-300 LR",
             0x02: "Reserved",
             0x03: "KOSTAL Smart Energy Meter",
-            0xFF: "No sensor"
+            0xFF: "No sensor",
         }
         try:
             return sensors.get(int(state), f"Unknown sensor: {state}")
@@ -297,8 +300,7 @@ async def get_hostname_id(client: ApiClient) -> str:
     """Check for known existing hostname ids with timeout protection."""
     try:
         all_settings = await asyncio.wait_for(
-            client.get_settings(),
-            timeout=HOSTNAME_ID_TIMEOUT_SECONDS
+            client.get_settings(), timeout=HOSTNAME_ID_TIMEOUT_SECONDS
         )
     except asyncio.TimeoutError:
         _LOGGER.error("Timeout getting settings for hostname ID")
@@ -306,15 +308,15 @@ async def get_hostname_id(client: ApiClient) -> str:
     except (ApiException, ClientError, TimeoutError) as err:
         _LOGGER.error("Could not get settings for hostname ID: %s", err)
         raise ApiException(f"Could not get settings: {err}") from err  # type: ignore[no-untyped-call]
-    
+
     network_settings = all_settings.get("scb:network", [])
     if not network_settings:
         raise ApiException("No network settings found in API response")  # type: ignore[no-untyped-call]
-    
+
     for entry in network_settings:
         if entry.id in _KNOWN_HOSTNAME_IDS:
             return entry.id
-    
+
     raise ApiException("Hostname identifier not found in KNOWN_HOSTNAME_IDS")  # type: ignore[no-untyped-call]
 
 
@@ -416,6 +418,7 @@ def ensure_installer_access(
     data_id: str,
     operation: str,
     log_level: str = "warning",
+    hass: HomeAssistant | None = None,
 ) -> bool:
     """Return True if installer access is available or not required."""
     if not requires_installer:
@@ -429,6 +432,10 @@ def ensure_installer_access(
             module_id,
             data_id,
         )
+        if hass is not None:
+            create_installer_required_issue(hass)
         return False
 
+    if hass is not None:
+        clear_issue(hass, "installer_required")
     return True

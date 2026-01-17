@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v2.3.3
+
+- Added: Repair issue for missing installer/service code when advanced controls are used.
+
 ## v2.3.2
 
 - Fixed REST ID mapping for G3 battery limits and AC charge power (PLENTICORE G3 L).

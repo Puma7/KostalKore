@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import logging
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException, SettingsData
@@ -17,17 +17,27 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     NumberMode,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfPower, UnitOfElectricCurrent
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfPower,
+    UnitOfElectricCurrent,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
+    from homeassistant.helpers.entity_platform import (
+        AddEntitiesCallback as AddConfigEntryEntitiesCallback,
+    )
 else:
     try:
         from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
     except ImportError:
-        from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
+        from homeassistant.helpers.entity_platform import (
+            AddEntitiesCallback as AddConfigEntryEntitiesCallback,
+        )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
@@ -73,6 +83,7 @@ def _normalize_translation_key(key: str) -> str:
         normalized = normalized.replace("__", "_")
     return normalized.lower()
 
+
 # Performance and validation constants
 DEFAULT_MAX_POWER_WATTS: Final[int] = 38000
 DEFAULT_MIN_POWER_WATTS: Final[int] = 0
@@ -110,11 +121,11 @@ G3_FALLBACK_MAX_SECONDS: Final[int] = 10800
 def _handle_number_error(err: Exception, operation: str) -> dict[str, Any]:
     """
     Centralized error handling for number operations.
-    
+
     Args:
         err: Exception that occurred
         operation: Description of the operation being performed
-        
+
     Returns:
         Empty dict as fallback
     """
@@ -127,25 +138,24 @@ def _handle_number_error(err: Exception, operation: str) -> dict[str, Any]:
         _LOGGER.error("Network error during %s: %s", operation, err)
     else:
         _LOGGER.error("Unexpected error during %s: %s", operation, err)
-    
+
     return {}
 
 
 async def _get_settings_data_safe(plenticore: Any, operation: str) -> dict[str, Any]:
     """
     Get settings data with timeout protection.
-    
+
     Args:
         plenticore: Plenticore client instance
         operation: Description of the operation
-        
+
     Returns:
         Settings data or empty dict if error occurs
     """
     try:
         return await asyncio.wait_for(
-            plenticore.client.get_settings(),
-            timeout=SETTINGS_TIMEOUT_SECONDS
+            plenticore.client.get_settings(), timeout=SETTINGS_TIMEOUT_SECONDS
         )
     except Exception as err:
         return _handle_number_error(err, operation)
@@ -163,7 +173,7 @@ def create_battery_number_description(
 ) -> PlenticoreNumberEntityDescription:
     """
     Factory function for creating battery number descriptions with security defaults.
-    
+
     Args:
         key: Entity key
         name: Entity name
@@ -173,7 +183,7 @@ def create_battery_number_description(
         step: Step value (uses battery defaults if None)
         icon: Icon (uses battery icon if None)
         data_id: Data ID (uses key if None)
-        
+
     Returns:
         Configured PlenticoreNumberEntityDescription
     """
@@ -207,7 +217,7 @@ def create_power_number_description(
 ) -> PlenticoreNumberEntityDescription:
     """
     Factory function for creating power number descriptions with security defaults.
-    
+
     Args:
         key: Entity key
         name: Entity name
@@ -217,7 +227,7 @@ def create_power_number_description(
         step: Step value (uses power defaults if None)
         icon: Icon (uses power icon if None)
         data_id: Data ID (uses key if None)
-        
+
     Returns:
         Configured PlenticoreNumberEntityDescription
     """
@@ -251,13 +261,13 @@ def create_percentage_number_description(
 ) -> PlenticoreNumberEntityDescription:
     """
     Factory function for creating percentage number descriptions with security defaults.
-    
+
     Args:
         key: Entity key
         name: Entity name
         icon: Icon (uses percentage icon if None)
         data_id: Data ID (uses key if None)
-        
+
     Returns:
         Configured PlenticoreNumberEntityDescription
     """
@@ -1157,14 +1167,20 @@ async def async_setup_entry(
     entities = []
 
     # Fetch fresh settings data with timeout protection and retry
-    available_settings_data = await _get_settings_data_safe(plenticore, "number settings")
-    
+    available_settings_data = await _get_settings_data_safe(
+        plenticore, "number settings"
+    )
+
     if not available_settings_data:
-        _LOGGER.warning("Initial number settings fetch failed, retrying in 2 seconds...")
+        _LOGGER.warning(
+            "Initial number settings fetch failed, retrying in 2 seconds..."
+        )
         await asyncio.sleep(2)
-        available_settings_data = await _get_settings_data_safe(plenticore, "number settings (retry)")
+        available_settings_data = await _get_settings_data_safe(
+            plenticore, "number settings (retry)"
+        )
     available_settings_data = available_settings_data or {}
-    
+
     settings_data_update_coordinator = SettingDataUpdateCoordinator(
         hass, entry, _LOGGER, "Settings Data", timedelta(seconds=30), plenticore
     )
@@ -1172,7 +1188,7 @@ async def async_setup_entry(
     # Track battery-related settings for better logging
     battery_settings_found = []
     battery_settings_skipped = []
-    
+
     forced_unique_ids: set[str] = set()
     forced_unique_ids_by_data_id: dict[str, set[str]] = {}
     forced_fetch_pairs: set[tuple[str, str]] = set()
@@ -1232,9 +1248,9 @@ async def async_setup_entry(
         ):
             if description_to_use.data_id in FORCE_CREATE_KEYS and module_available:
                 _LOGGER.debug(
-                    "Force creating hidden setting %s/%s", 
-                    description_to_use.module_id, 
-                    description_to_use.data_id
+                    "Force creating hidden setting %s/%s",
+                    description_to_use.module_id,
+                    description_to_use.data_id,
                 )
                 # Pass None as setting_data, trusting definitions in description defaults.
                 # The entity will fetch the real values via coordinator on next update.
@@ -1247,7 +1263,7 @@ async def async_setup_entry(
                 battery_settings_skipped.append(
                     f"{description_to_use.module_id}/{description_to_use.data_id}"
                 )
-            
+
             # Only debug log if we actually have some data
             if (
                 available_settings_data
@@ -1259,18 +1275,18 @@ async def async_setup_entry(
                     description_to_use.data_id,
                 )
             elif not available_settings_data:
-                 _LOGGER.debug(
+                _LOGGER.debug(
                     "Skipping number %s because settings data fetch failed/empty",
-                    description.name
-                 )
-            
+                    description.name,
+                )
+
             continue
-        
+
         if "Battery" in description_to_use.data_id:
             battery_settings_found.append(
                 f"{description_to_use.module_id}/{description_to_use.data_id}"
             )
-        
+
         # Find the setting data
         if (
             setting_data is None
@@ -1280,12 +1296,12 @@ async def async_setup_entry(
                 if description_to_use.data_id == sd.id:
                     setting_data = sd
                     break
-        
+
         # If we still don't have setting_data, we create a dummy one or pass None
-        # The PlenticoreDataNumber expects setting_data. 
+        # The PlenticoreDataNumber expects setting_data.
         # But wait, looking at PlenticoreDataNumber, it might need it for initial state.
         # If we continue here, we skip creation.
-        
+
         if setting_data is None and description_to_use.data_id not in FORCE_CREATE_KEYS:
             _LOGGER.warning(
                 "Setting data %s/%s not found in available settings despite passing initial check",
@@ -1310,33 +1326,32 @@ async def async_setup_entry(
             description.data_id in FORCE_CREATE_KEYS
             or description_to_use.data_id in FORCE_CREATE_KEYS
         ):
-            forced_id = (
-                f"{entry.entry_id}_{description_to_use.module_id}_{description_to_use.data_id}"
-            )
+            forced_id = f"{entry.entry_id}_{description_to_use.module_id}_{description_to_use.data_id}"
             forced_unique_ids.add(forced_id)
-            forced_unique_ids_by_data_id.setdefault(description_to_use.data_id, set()).add(
-                forced_id
-            )
+            forced_unique_ids_by_data_id.setdefault(
+                description_to_use.data_id, set()
+            ).add(forced_id)
             forced_fetch_pairs.add(
                 (description_to_use.module_id, description_to_use.data_id)
             )
-    
+
     # Log battery settings summary
     if battery_settings_found:
         _LOGGER.info(
-            "Battery number entities created: %s",
-            ", ".join(battery_settings_found)
+            "Battery number entities created: %s", ", ".join(battery_settings_found)
         )
     if battery_settings_skipped:
         _LOGGER.info(
             "Battery number entities NOT available on this inverter model (skipped): %s",
-            ", ".join(battery_settings_skipped)
+            ", ".join(battery_settings_skipped),
         )
 
     # Re-enable critical battery numbers if they were disabled by earlier versions.
     try:
         entity_registry = er.async_get(hass)
-        entries = list(er.async_entries_for_config_entry(entity_registry, entry.entry_id))
+        entries = list(
+            er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        )
         entries_by_unique_id = {e.unique_id: e for e in entries if e.unique_id}
 
         for description in NUMBER_SETTINGS_DATA:
@@ -1416,9 +1431,7 @@ async def async_setup_entry(
             entries = list(
                 er.async_entries_for_config_entry(entity_registry, entry.entry_id)
             )
-            entries_by_unique_id = {
-                e.unique_id: e for e in entries if e.unique_id
-            }
+            entries_by_unique_id = {e.unique_id: e for e in entries if e.unique_id}
 
             for description in NUMBER_SETTINGS_DATA:
                 if description.data_id not in FORCE_CREATE_KEYS:
@@ -1453,7 +1466,10 @@ async def async_setup_entry(
                     name_matches = original_name.endswith(name)
                     if not name_matches:
                         continue
-                    if expected_entry and entity_entry.entity_id != expected_entry.entity_id:
+                    if (
+                        expected_entry
+                        and entity_entry.entity_id != expected_entry.entity_id
+                    ):
                         entity_registry.async_update_entity(
                             entity_entry.entity_id,
                             disabled_by=RegistryEntryDisabler.INTEGRATION,
@@ -1491,7 +1507,7 @@ class PlenticoreDataNumber(
             _LOGGER.debug(
                 "Creating PlenticoreDataNumber for %s/%s",
                 description.module_id,
-                description.data_id
+                description.data_id,
             )
             super().__init__(coordinator)
 
@@ -1507,7 +1523,9 @@ class PlenticoreDataNumber(
             self._attr_mode = NumberMode.BOX
 
             self._formatter = PlenticoreDataFormatter.get_method(description.fmt_from)
-            self._formatter_back = PlenticoreDataFormatter.get_method(description.fmt_to)
+            self._formatter_back = PlenticoreDataFormatter.get_method(
+                description.fmt_to
+            )
 
             self._keepalive_task: asyncio.Task[None] | None = None
             self._keepalive_value: float | None = None
@@ -1518,11 +1536,11 @@ class PlenticoreDataNumber(
                     self._attr_native_min_value = self._formatter(setting_data.min)
                 if setting_data.max is not None:
                     self._attr_native_max_value = self._formatter(setting_data.max)
-            
+
             _LOGGER.debug(
                 "PlenticoreDataNumber created: unique_id=%s, name=%s",
                 self._attr_unique_id,
-                self._attr_name
+                self._attr_name,
             )
         except Exception as err:
             _LOGGER.error(
@@ -1530,7 +1548,7 @@ class PlenticoreDataNumber(
                 description.module_id,
                 description.data_id,
                 err,
-                exc_info=True
+                exc_info=True,
             )
             raise
 
@@ -1554,7 +1572,7 @@ class PlenticoreDataNumber(
             candidate in self.coordinator.data[self.module_id]
             for candidate in self._iter_data_id_candidates()
         )
-        
+
         # Debug logging for forced entities
         if self.data_id in (
             SettingId.BATTERY_MIN_SOC_REL,
@@ -1569,15 +1587,19 @@ class PlenticoreDataNumber(
                 has_data,
                 has_module,
                 has_value,
-                list(self.coordinator.data.keys()) if has_data else "None"
+                list(self.coordinator.data.keys()) if has_data else "None",
             )
             if has_module:
                 _LOGGER.debug(
                     "Module %s contains: %s",
                     self.module_id,
-                    list(self.coordinator.data[self.module_id].keys()) if has_module else "None"
+                    (
+                        list(self.coordinator.data[self.module_id].keys())
+                        if has_module
+                        else "None"
+                    ),
                 )
-        
+
         return base_available and has_data and has_module and has_value
 
     def _requires_installer(self, data_id_for_write: str) -> bool:
@@ -1647,6 +1669,7 @@ class PlenticoreDataNumber(
                     self.module_id,
                     data_id_for_write,
                     "keepalive",
+                    hass=self.hass,
                 ):
                     break
                 str_value = self._formatter_back(self._keepalive_value)
@@ -1662,6 +1685,7 @@ class PlenticoreDataNumber(
                 self.data_id,
                 err,
             )
+
     async def async_added_to_hass(self) -> None:
         """Register this entity on the Update Coordinator."""
         await super().async_added_to_hass()
@@ -1669,7 +1693,7 @@ class PlenticoreDataNumber(
             "Number entity %s registering with coordinator for %s/%s",
             self._attr_name,
             self.module_id,
-            self.data_id
+            self.data_id,
         )
         self.async_on_remove(
             self.coordinator.start_fetch_data(self.module_id, self.data_id)
@@ -1702,20 +1726,21 @@ class PlenticoreDataNumber(
         # Enhanced safety logging and validation for battery controls
         if is_battery_control(data_id_for_write):
             entry = self.coordinator.config_entry
-            
+
             # Check if installer service code is required for advanced battery controls
             # Advanced controls include charge/discharge setpoints and G3 limitation features
             requires_installer = self._requires_installer(data_id_for_write)
-            
+
             if not ensure_installer_access(
                 entry,
                 requires_installer,
                 self.module_id,
                 data_id_for_write,
                 "battery control",
+                hass=self.hass,
             ):
                 return
-            
+
             # Validate value ranges for safety
             if "Power" in data_id_for_write and "Limit" not in data_id_for_write:
                 # Charge/discharge power setpoints can be negative (charge) or positive (discharge)
@@ -1725,9 +1750,13 @@ class PlenticoreDataNumber(
                         value,
                     )
                     return
-            
+
             # Log all battery control operations for safety audit
-            user_type = "installer" if requires_installer and entry.data.get(CONF_SERVICE_CODE) else "user"
+            user_type = (
+                "installer"
+                if requires_installer and entry.data.get(CONF_SERVICE_CODE)
+                else "user"
+            )
             _LOGGER.info(
                 "Setting battery control %s/%s to %s (user: %s)",
                 self.module_id,
@@ -1735,7 +1764,7 @@ class PlenticoreDataNumber(
                 value,
                 user_type,
             )
-        
+
         str_value = self._formatter_back(value)
         await self.coordinator.async_write_data(
             self.module_id, {data_id_for_write: str_value}

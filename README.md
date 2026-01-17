@@ -187,6 +187,10 @@ The integration provides human-readable inverter states:
 2. Verify network stability between Home Assistant and inverter
 3. Review Home Assistant logs for API errors
 
+### Installer Access Required
+1. If Home Assistant shows an "Installer access required" repair issue, reconfigure the integration with the service code
+2. Advanced battery controls will remain blocked until the service code is provided
+
 ### Performance Issues
 1. Reduce polling frequency if experiencing slow response
 2. Check network bandwidth and latency to the inverter

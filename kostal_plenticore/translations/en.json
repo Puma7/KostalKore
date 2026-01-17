@@ -46,6 +46,10 @@
         "inverter_busy": {
             "title": "Inverter busy",
             "description": "The inverter reported an internal communication error (503). Try again later."
+        },
+        "installer_required": {
+            "title": "Installer access required",
+            "description": "This action requires the installer/service code. Reconfigure the integration with the service code to enable advanced controls."
         }
     },
     "entity": {
