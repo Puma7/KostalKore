@@ -6,8 +6,6 @@ import asyncio
 import threading
 import sys
 import os
-import importlib
-import asyncio
 from datetime import timedelta
 from collections.abc import Generator, Iterable
 import copy
@@ -41,9 +39,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# Ensure we can import local package - pointing to current directory
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 # Pre-load local kostal_plenticore (Platinum version)
 try:
     import kostal_plenticore
@@ -59,8 +54,6 @@ try:
     
 except ImportError as e:
     print(f"Warning: Could not import Platinum version: {e}")
-    # Fallback to older version if Platinum version not available
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     import kostal_plenticore
 
 import pytest_socket

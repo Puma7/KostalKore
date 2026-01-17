@@ -32,7 +32,7 @@ DIAGNOSTIC_ENTITY_CATEGORY: Final[EntityCategory] = EntityCategory.DIAGNOSTIC
 except (ApiException, ClientError, TimeoutError, Exception) as err:
     error_msg = str(err)
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.warning("Could not get DC string features: %s", modbus_err.message)
     # ... duplicate pattern
 
@@ -40,7 +40,7 @@ except (ApiException, ClientError, TimeoutError, Exception) as err:
 def _handle_api_error(err: Exception, operation: str, context: str = "") -> None:
     """Centralized API error handling."""
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s%s: %s", operation, f" ({context})" if context else "", modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s%s", operation, f" ({context})" if context else "")

@@ -28,7 +28,7 @@ try:
 except (ApiException, ClientError, TimeoutError, Exception) as err:
     error_msg = str(err)
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("Could not get settings data for select: %s", modbus_err.message)
     # ... duplicate pattern
 
@@ -36,7 +36,7 @@ except (ApiException, ClientError, TimeoutError, Exception) as err:
 def _handle_select_error(err: Exception, operation: str) -> None:
     """Centralized error handling for select operations."""
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("Could not get %s for select: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s for select", operation)

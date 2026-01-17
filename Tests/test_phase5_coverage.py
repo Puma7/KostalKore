@@ -16,10 +16,9 @@ from pykoplenti import ApiException, AuthenticationException
 
 import importlib
 
+kp_init = importlib.import_module("kostal_plenticore.__init__")
 from kostal_plenticore import config_flow, diagnostics, helper, repairs, select
 from kostal_plenticore.const import CONF_HOST, CONF_PASSWORD, DOMAIN
-
-kp_init = importlib.import_module("kostal_plenticore.__init__")
 
 
 @pytest.mark.parametrize(
@@ -33,7 +32,7 @@ kp_init = importlib.import_module("kostal_plenticore.__init__")
 )
 def test_handle_init_error_branches(err) -> None:
     with patch(
-        "kostal_plenticore.__init__._parse_modbus_exception",
+        "kostal_plenticore.__init__.parse_modbus_exception",
         return_value=SimpleNamespace(message="modbus"),
     ):
         assert kp_init._handle_init_error(err, "setup") is False
@@ -71,6 +70,49 @@ async def test_async_setup_entry_platform_setup_error(
 
 
 @pytest.mark.asyncio
+async def test_async_setup_entry_success(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    class DummyPlenticore:
+        def __init__(self, *_args):
+            pass
+
+        async def async_setup(self) -> bool:
+            return True
+
+    mock_config_entry.add_to_hass(hass)
+
+    with patch("kostal_plenticore.__init__.Plenticore", DummyPlenticore), patch(
+        "kostal_plenticore.__init__.clear_issue"
+    ), patch(
+        "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+        AsyncMock(return_value=True),
+    ):
+        assert await kp_init.async_setup_entry(hass, mock_config_entry) is True
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_setup_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    class DummyPlenticore:
+        def __init__(self, *_args):
+            pass
+
+        async def async_setup(self) -> bool:
+            raise RuntimeError("boom")
+
+    mock_config_entry.add_to_hass(hass)
+
+    with patch("kostal_plenticore.__init__.Plenticore", DummyPlenticore), patch(
+        "kostal_plenticore.__init__._handle_init_error", return_value=False
+    ):
+        assert await kp_init.async_setup_entry(hass, mock_config_entry) is False
+
+
+@pytest.mark.asyncio
 async def test_async_unload_entry_branches(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -84,7 +126,7 @@ async def test_async_unload_entry_branches(
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=True),
-    ), patch("kostal_plenticore.__init__.time.time", return_value=0.0):
+    ), patch("kostal_plenticore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]):
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
 
 
@@ -102,6 +144,26 @@ async def test_async_unload_entry_timeout_branch(
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=True),
+    ):
+        assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
+
+
+@pytest.mark.asyncio
+async def test_async_unload_entry_cleanup_warning(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    class DummyPlenticore:
+        async def async_unload(self) -> None:
+            return None
+
+    mock_config_entry.runtime_data = DummyPlenticore()
+
+    with patch(
+        "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
+        AsyncMock(return_value=True),
+    ), patch(
+        "kostal_plenticore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]
     ):
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
 
@@ -125,7 +187,8 @@ def test_handle_config_flow_error_branches() -> None:
     assert errors[CONF_PASSWORD] == "invalid_auth"
 
     errors = config_flow._handle_config_flow_error(ClientError("x"), "net")
-    assert errors[CONF_HOST] == "cannot_connect"
+    expected_net_error = "cannot_connect"
+    assert errors[CONF_HOST] == expected_net_error
 
     errors = config_flow._handle_config_flow_error(ApiException("api"), "api")
     assert errors[CONF_HOST] == "cannot_connect"
@@ -135,6 +198,19 @@ def test_handle_config_flow_error_branches() -> None:
 
     errors = config_flow._handle_config_flow_error(RuntimeError("boom"), "other")
     assert errors
+
+
+def test_check_rate_limit_resets_and_limits() -> None:
+    host = "10.0.0.1"
+    config_flow._connection_attempts[host] = [0.0, 1.0, 2.0]
+
+    with patch("kostal_plenticore.config_flow.time.time", return_value=999.0):
+        assert config_flow._check_rate_limit(host) is False
+        assert config_flow._connection_attempts[host] == []
+
+    config_flow._connection_attempts[host] = [10.0, 20.0, 30.0]
+    with patch("kostal_plenticore.config_flow.time.time", return_value=40.0):
+        assert config_flow._check_rate_limit(host) is True
 
 
 @pytest.mark.asyncio
@@ -151,7 +227,6 @@ async def test_test_connection_safe_success(hass: HomeAssistant) -> None:
     class DummyClient:
         def __init__(self, *_args, **_kwargs):
             pass
-
         async def __aenter__(self):
             return self
 
@@ -171,6 +246,30 @@ async def test_test_connection_safe_success(hass: HomeAssistant) -> None:
             hass, {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
         )
     assert hostname == "scb"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_safe_error(hass: HomeAssistant) -> None:
+    class DummyClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def login(self, _password, service_code=None):
+            raise AuthenticationException("bad", "error")
+
+    with patch("kostal_plenticore.config_flow.ApiClient", DummyClient), patch(
+        "kostal_plenticore.config_flow._handle_config_flow_error"
+    ) as handle_err:
+        with pytest.raises(AuthenticationException):
+            await config_flow.test_connection_safe(
+                hass, {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
+            )
+        assert handle_err.called
 
 
 @pytest.mark.asyncio
@@ -199,8 +298,71 @@ async def test_reauth_confirm_updates_entry(
     assert result["type"] == "abort"
 
 
+@pytest.mark.asyncio
+async def test_reauth_confirm_error_shows_form(hass: HomeAssistant) -> None:
+    flow = config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(side_effect=RuntimeError("boom"))):
+        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
+    assert result["type"] == "form"
+
+
+@pytest.mark.asyncio
+async def test_reauth_confirm_without_entry_id(hass: HomeAssistant) -> None:
+    flow = config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
+    assert result["type"] == "abort"
+
+
+@pytest.mark.asyncio
+async def test_reauth_confirm_missing_entry(hass: HomeAssistant) -> None:
+    flow = config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    flow.context = {"entry_id": "missing"}
+    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
+    assert result["type"] == "abort"
+
+
+@pytest.mark.asyncio
+async def test_user_step_forms_and_success(hass: HomeAssistant) -> None:
+    flow = config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    result = await flow.async_step_user()
+    assert result["type"] == "form"
+
+    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+        result = await flow.async_step_user({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
+    assert result["type"] == "create_entry"
+
+
+@pytest.mark.asyncio
+async def test_user_step_error_shows_form(hass: HomeAssistant) -> None:
+    flow = config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(side_effect=RuntimeError("boom"))):
+        result = await flow.async_step_user({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
+    assert result["type"] == "form"
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_step_success(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
+    flow = config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    mock_config_entry.add_to_hass(hass)
+    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")), patch.object(
+        flow, "_get_reconfigure_entry", return_value=mock_config_entry
+    ):
+        result = await flow.async_step_reconfigure({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
+    assert result["type"] == "abort"
+
+
 def test_diagnostics_error_handling() -> None:
     assert diagnostics._handle_diagnostics_error(ApiException("api"), "version") == "Unknown"
+    assert diagnostics._handle_diagnostics_error(ApiException("api"), "string_count") == 0
+    assert diagnostics._handle_diagnostics_error(ApiException("api"), "other") == {}
     assert diagnostics._handle_diagnostics_error(ValueError("bad"), "string_count") == 0
     assert diagnostics._handle_diagnostics_error(asyncio.TimeoutError(), "me") == "Unknown"
     assert diagnostics._handle_diagnostics_error(RuntimeError("x"), "other") == {}
@@ -217,9 +379,72 @@ async def test_get_diagnostics_data_safe_returns_default() -> None:
     assert result == {"ok": True}
 
 
+@pytest.mark.asyncio
+async def test_get_diagnostics_data_safe_success() -> None:
+    async def _ok():
+        return {"ok": True}
+
+    result = await diagnostics._get_diagnostics_data_safe(
+        SimpleNamespace(), "other", _ok, default_value={"fail": True}
+    )
+    assert result == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_async_get_config_entry_diagnostics(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
+    async def _get_setting_values(module_id, data_id):
+        if data_id == diagnostics.STRING_COUNT_SETTING:
+            return {module_id: {diagnostics.STRING_COUNT_SETTING: "2"}}
+        return {module_id: {data_id[0]: "A", data_id[1]: "B"}}
+
+    plenticore = SimpleNamespace(
+        device_info={"name": "demo"},
+        client=SimpleNamespace(
+            get_process_data=AsyncMock(return_value={"mod": ["p"]}),
+            get_settings=AsyncMock(return_value={"mod": [SimpleNamespace(id="X")]}),
+            get_version=AsyncMock(return_value="1.0"),
+            get_me=AsyncMock(return_value="me"),
+            get_setting_values=AsyncMock(side_effect=_get_setting_values),
+        ),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
+        hass, mock_config_entry
+    )
+    assert diagnostics_data["client"]["version"] == "1.0"
+    assert diagnostics_data["configuration"]
+
+
+@pytest.mark.asyncio
+async def test_async_get_config_entry_diagnostics_string_count_parse_error(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    async def _get_setting_values(module_id, data_id):
+        return {module_id: {diagnostics.STRING_COUNT_SETTING: "bad"}}
+
+    plenticore = SimpleNamespace(
+        device_info={"name": "demo"},
+        client=SimpleNamespace(
+            get_process_data=AsyncMock(return_value={}),
+            get_settings=AsyncMock(return_value={}),
+            get_version=AsyncMock(return_value="1.0"),
+            get_me=AsyncMock(return_value="me"),
+            get_setting_values=AsyncMock(side_effect=_get_setting_values),
+        ),
+    )
+    mock_config_entry.runtime_data = plenticore
+    diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
+        hass, mock_config_entry
+    )
+    assert diagnostics_data["configuration"] == {}
+
+
 def test_helper_formatters_and_conversions() -> None:
+    assert helper._safe_int_conversion("6") == 6
     assert helper._safe_int_conversion("6.0") == 6
     assert helper._safe_int_conversion("bad") == "bad"
+    assert helper._safe_float_conversion("2.5") == 2.5
     assert helper._safe_float_conversion("bad") == "bad"
     assert helper._handle_format_error("x", "round") == "x"
     assert helper.PlenticoreDataFormatter.format_round("4.2") == 4
@@ -238,6 +463,13 @@ def test_helper_formatters_and_conversions() -> None:
 
     assert helper.PlenticoreDataFormatter.format_em_manager_state("0") == "Idle"
     assert helper.PlenticoreDataFormatter.format_em_manager_state("999") == "Unknown EM State 999"
+
+    assert helper.PlenticoreDataFormatter.format_battery_management_mode("1").startswith("External")
+    assert helper.PlenticoreDataFormatter.format_sensor_type("0").startswith("SDM")
+    assert helper.PlenticoreDataFormatter.format_battery_type("2").startswith("PIKO")
+    assert helper.PlenticoreDataFormatter.format_pssb_fuse_state("1") == "Fuse ok"
+    assert helper.PlenticoreDataFormatter.format_string("raw") == "raw"
+    assert helper.PlenticoreDataFormatter.get_method("format_string")("x") == "x"
 
     assert helper.PlenticoreDataFormatter.format_battery_management_mode("99").startswith("Unknown")
     assert helper.PlenticoreDataFormatter.format_battery_management_mode("bad") == "bad"
@@ -276,6 +508,26 @@ async def test_get_hostname_id_errors() -> None:
         await helper.get_hostname_id(UnknownClient())
 
 
+@pytest.mark.asyncio
+async def test_get_hostname_id_success() -> None:
+    class OkClient:
+        async def get_settings(self):
+            return {"scb:network": [SimpleNamespace(id="Hostname")]}
+
+    assert await helper.get_hostname_id(OkClient()) == "Hostname"
+
+
+def test_format_back_exceptions() -> None:
+    class BadFloat:
+        def __float__(self):
+            raise TypeError("bad")
+        def __str__(self):
+            return "bad"
+
+    assert helper.PlenticoreDataFormatter.format_float_back(BadFloat()) == "bad"
+    assert helper.PlenticoreDataFormatter.format_round_back(BadFloat()) == ""
+
+
 def test_repairs_create_and_clear(hass: HomeAssistant) -> None:
     with patch("kostal_plenticore.repairs.ir.async_create_issue") as create_issue, patch(
         "kostal_plenticore.repairs.ir.async_delete_issue"
@@ -294,6 +546,15 @@ def test_select_helpers_and_errors() -> None:
     select._handle_select_error(TimeoutError("timeout"), "timeout")
     select._handle_select_error(ClientError("client"), "client")
     select._handle_select_error(RuntimeError("x"), "other")
+    description = select.PlenticoreSelectEntityDescription(
+        module_id="devices:local",
+        key="battery_charge",
+        name="Battery Charging / Usage mode",
+        options=["None", "Battery:SmartBatteryControl:Enable"],
+    )
+    available = {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+    assert select._validate_select_options(description, available) is True
+    assert select._validate_select_options(description, {}) is False
 
 
 @pytest.mark.asyncio
@@ -308,7 +569,7 @@ async def test_select_setup_skips_unavailable(
         options=["None"],
     )
 
-    plenticore = SimpleNamespace(available_modules=["other"], device_info=DeviceInfo(identifiers={(DOMAIN, "x")}), client=MagicMock(set_setting_values=AsyncMock(return_value=None)))
+    plenticore = SimpleNamespace(available_modules=["other"], device_info=DeviceInfo(identifiers={(DOMAIN, "x")}), client=MagicMock())
     mock_config_entry.runtime_data = plenticore
 
     async def _empty_settings(_plenticore, _op):
@@ -332,6 +593,13 @@ async def test_select_get_settings_data_safe_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_select_get_settings_data_safe_success() -> None:
+    plenticore = SimpleNamespace(client=SimpleNamespace(get_settings=AsyncMock(return_value={"ok": True})))
+    result = await select._get_settings_data_safe(plenticore, "settings data")
+    assert result == {"ok": True}
+
+
+@pytest.mark.asyncio
 async def test_select_registry_migration_and_methods(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -339,7 +607,7 @@ async def test_select_registry_migration_and_methods(
     plenticore = SimpleNamespace(
         available_modules=[],
         device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
-        client=MagicMock(set_setting_values=AsyncMock(return_value=None)),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
     )
     mock_config_entry.runtime_data = plenticore
 
@@ -371,16 +639,69 @@ async def test_select_registry_migration_and_methods(
 
     select_entity = entities[0]
     select_entity.coordinator.async_request_refresh = AsyncMock(side_effect=RuntimeError("boom"))
-    select_entity.coordinator.async_write_data = AsyncMock(return_value=True)
     await select_entity.async_added_to_hass()
-    select_entity.async_write_ha_state = MagicMock()
     select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
     await select_entity.async_select_option("Battery:SmartBatteryControl:Enable")
+    if hasattr(select_entity.coordinator, "async_shutdown"):
+        await select_entity.coordinator.async_shutdown()
+    if hasattr(select_entity.coordinator, "async_shutdown"):
+        await select_entity.coordinator.async_shutdown()
     await select_entity.async_will_remove_from_hass()
-    unsub = getattr(select_entity.coordinator, "_unsub_refresh", None)
-    if callable(unsub):
-        unsub()
     assert select_entity.current_option is None
+
+
+@pytest.mark.asyncio
+async def test_select_current_option_available(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _empty_settings(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _empty_settings):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.coordinator.data = {select_entity.module_id: {select_entity.data_id: "Battery:SmartBatteryControl:Enable"}}
+    assert select_entity.current_option == "Battery:SmartBatteryControl:Enable"
+
+
+@pytest.mark.asyncio
+async def test_select_select_option_writes(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _empty_settings(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _empty_settings):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.coordinator.async_write_data = AsyncMock(return_value=True)
+    select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
+    await select_entity.async_select_option("Battery:SmartBatteryControl:Enable")
+    await select_entity.async_select_option("None")
 
 
 @pytest.mark.asyncio
@@ -391,7 +712,7 @@ async def test_select_registry_migration_error_branch(
     plenticore = SimpleNamespace(
         available_modules=[],
         device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
-        client=MagicMock(set_setting_values=AsyncMock(return_value=None)),
+        client=MagicMock(),
     )
     mock_config_entry.runtime_data = plenticore
 
@@ -414,7 +735,7 @@ async def test_select_registry_migration_old_entry_only(
     plenticore = SimpleNamespace(
         available_modules=[],
         device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
-        client=MagicMock(set_setting_values=AsyncMock(return_value=None)),
+        client=MagicMock(),
     )
     mock_config_entry.runtime_data = plenticore
 
@@ -436,161 +757,3 @@ async def test_select_registry_migration_old_entry_only(
     with patch.object(select, "_get_settings_data_safe", _empty_settings):
         await select.async_setup_entry(hass, mock_config_entry, entities.extend)
 
-
-
-
-@pytest.mark.asyncio
-async def test_async_unload_entry_cleanup_warning(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    class DummyPlenticore:
-        async def async_unload(self) -> None:
-            return None
-
-    mock_config_entry.runtime_data = DummyPlenticore()
-
-    with patch(
-        "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
-        AsyncMock(return_value=True),
-    ), patch("kostal_plenticore.__init__.time.time", side_effect=[0.0, 10.0, 10.0]):
-        assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
-
-
-def test_diagnostics_error_additional_branches() -> None:
-    assert diagnostics._handle_diagnostics_error(ApiException("api"), "string_count") == 0
-    assert diagnostics._handle_diagnostics_error(ApiException("api"), "other") == {}
-    assert diagnostics._handle_diagnostics_error(ValueError("bad"), "other") == {}
-    assert diagnostics._handle_diagnostics_error(asyncio.TimeoutError(), "string_count") == 0
-    assert diagnostics._handle_diagnostics_error(asyncio.TimeoutError(), "other") == {}
-    assert diagnostics._handle_diagnostics_error(RuntimeError("boom"), "me") == "Unknown"
-
-
-def test_helper_additional_branches() -> None:
-    class BadFloat:
-        def __float__(self):
-            raise TypeError("bad")
-
-    assert helper.PlenticoreDataFormatter.format_em_manager_state("bad") == "bad"
-    assert helper.PlenticoreDataFormatter.format_round_back(BadFloat()) == ""
-    assert "BadFloat" in helper.PlenticoreDataFormatter.format_float_back(BadFloat())
-
-
-@pytest.mark.asyncio
-async def test_get_hostname_id_client_error() -> None:
-    class ErrorClient:
-        async def get_settings(self):
-            raise ClientError("boom")
-
-    with pytest.raises(ApiException):
-        await helper.get_hostname_id(ErrorClient())
-
-
-@pytest.mark.asyncio
-async def test_select_option_none(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    plenticore = SimpleNamespace(
-        available_modules=[],
-        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
-        client=MagicMock(set_setting_values=AsyncMock(return_value=None)),
-    )
-    mock_config_entry.runtime_data = plenticore
-
-    async def _settings(_plenticore, _op):
-        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
-
-    entities: list = []
-
-    with patch.object(select, "_get_settings_data_safe", _settings):
-        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
-
-    select_entity = entities[0]
-    select_entity.hass = hass
-    select_entity.async_write_ha_state = MagicMock()
-    select_entity.coordinator.async_write_data = AsyncMock(return_value=True)
-    await select_entity.async_select_option("None")
-    assert select_entity.current_option is None
-
-def test_handle_config_flow_timeout_branch() -> None:
-    errors = config_flow._handle_config_flow_error(asyncio.TimeoutError(), "timeout-branch")
-    assert errors[CONF_HOST] == "timeout"
-
-
-@pytest.mark.asyncio
-async def test_reauth_confirm_exception_branch(hass: HomeAssistant) -> None:
-    flow = config_flow.KostalPlenticoreConfigFlow()
-    flow.hass = hass
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(side_effect=RuntimeError("boom"))):
-        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
-    assert result["type"] == "form"
-
-
-@pytest.mark.asyncio
-async def test_reauth_confirm_updates_entry_branch(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry
-) -> None:
-    mock_config_entry.add_to_hass(hass)
-    flow = config_flow.KostalPlenticoreConfigFlow()
-    flow.hass = hass
-    flow.context = {"entry_id": mock_config_entry.entry_id}
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")), patch.object(
-        hass.config_entries, "async_reload", AsyncMock()
-    ):
-        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
-    assert result["type"] == "abort"
-
-
-def test_diagnostics_unexpected_string_count_branch() -> None:
-    assert diagnostics._handle_diagnostics_error(RuntimeError("boom"), "string_count") == 0
-
-def test_handle_config_flow_api_exception_branch() -> None:
-    errors = config_flow._handle_config_flow_error(ApiException("api"), "api")
-    assert errors[CONF_HOST] == "cannot_connect"
-
-
-def test_handle_config_flow_timeout_branch_again() -> None:
-    errors = config_flow._handle_config_flow_error(asyncio.TimeoutError(), "timeout")
-    assert errors[CONF_HOST] == "timeout"
-
-
-@pytest.mark.asyncio
-async def test_reauth_confirm_updates_entry_explicit(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry
-) -> None:
-    mock_config_entry.add_to_hass(hass)
-    flow = config_flow.KostalPlenticoreConfigFlow()
-    flow.hass = hass
-    flow.context = {"entry_id": mock_config_entry.entry_id}
-    hass.config_entries.async_update_entry = MagicMock()
-    hass.config_entries.async_get_entry = MagicMock(return_value=mock_config_entry)
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")), patch.object(
-        hass.config_entries, "async_reload", AsyncMock()
-    ):
-        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
-    assert result["type"] == "abort"
-
-@pytest.mark.asyncio
-async def test_reauth_confirm_no_entry_id(
-    hass: HomeAssistant,
-) -> None:
-    flow = config_flow.KostalPlenticoreConfigFlow()
-    flow.hass = hass
-    flow.context = {}
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
-        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
-    assert result["type"] == "abort"
-
-
-@pytest.mark.asyncio
-async def test_reauth_confirm_entry_missing(
-    hass: HomeAssistant,
-) -> None:
-    flow = config_flow.KostalPlenticoreConfigFlow()
-    flow.hass = hass
-    flow.context = {"entry_id": "missing"}
-    hass.config_entries.async_get_entry = MagicMock(return_value=None)
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
-        result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
-    assert result["type"] == "abort"

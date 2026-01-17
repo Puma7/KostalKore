@@ -28,22 +28,22 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_SERVICE_CODE
+from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException
 
-# Import MODBUS exception handling from coordinator
-from .coordinator import _parse_modbus_exception
+from .helper import ensure_installer_access, parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
 
 # Security and performance constants
 SAFETY_CHECK_DELAY_SECONDS: Final[float] = 10.0
-SHADOW_MANAGEMENT_MODULE_ID: Final[str] = "devices:local"
-SHADOW_MANAGEMENT_DATA_ID: Final[str] = "Generator:ShadowMgmt:Enable"
+SHADOW_MANAGEMENT_MODULE_ID: Final[str] = ModuleId.DEVICES_LOCAL
+SHADOW_MANAGEMENT_DATA_ID: Final[str] = SettingId.SHADOW_MGMT_ENABLE
 UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
-DC_STRING_FEATURE_DATA_ID: Final[str] = "Properties:String{index}Features"
+DC_STRING_FEATURE_DATA_ID: Final[str] = STRING_FEATURE_TEMPLATE
 SHADOW_MANAGEMENT_SUPPORT: Final[int] = 1
 SHADOW_MANAGEMENT_ADVANCED: Final[int] = 3
 
@@ -72,7 +72,7 @@ def _handle_api_error(err: Exception, operation: str, context: str = "") -> None
         context: Additional context for better logging
     """
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s%s: %s", operation, f" ({context})" if context else "", modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s%s", operation, f" ({context})" if context else "")
@@ -146,7 +146,7 @@ class PlenticoreSwitchEntityDescription(SwitchEntityDescription):
 SWITCH_SETTINGS_DATA = [
     # Battery Strategy Switch (special case - not a simple on/off)
     create_switch_description(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:Strategy",
         name="Battery Strategy",
         on_value="1",
@@ -157,7 +157,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Battery Control Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:ManualCharge",
         name="Battery Manual Charge",
         is_on="1",
@@ -168,7 +168,7 @@ SWITCH_SETTINGS_DATA = [
         installer_required=True,
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:CloseSeparator",
         name="Battery Close Separator",
         is_on="1",
@@ -180,7 +180,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:ComMonitor:Enable",
         name="Battery Communication Monitor",
         is_on="1",
@@ -192,7 +192,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:DynamicSoc:Enable",
         name="Battery Dynamic SoC",
         is_on="1",
@@ -204,7 +204,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:ModeHomeComsumption",
         name="Battery Mode Home Consumption",
         is_on="1",
@@ -216,7 +216,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:SmartBatteryControl:Enable",
         name="Battery Smart Control",
         is_on="1",
@@ -228,7 +228,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Battery:TimeControl:Enable",
         name="Battery Time Control",
         is_on="1",
@@ -241,7 +241,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Energy Management Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="EnergyMgmt:AcStorage",
         name="AC Storage",
         is_on="1",
@@ -253,7 +253,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="EnergyMgmt:BatCtrl:DisabelDischarge",
         name="Battery Disable Discharge",
         is_on="1",
@@ -265,7 +265,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="EnergyMgmt:SmartControl:FallbackEnable",
         name="Smart Control Fallback",
         is_on="1",
@@ -278,7 +278,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Active Power Control Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="ActivePower:ExtCtrl:ModeGradientEnable",
         name="Active Power Gradient Mode",
         is_on="1",
@@ -290,7 +290,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="ActivePower:ExtCtrl:ModePT1Enable",
         name="Active Power PT1 Mode",
         is_on="1",
@@ -303,7 +303,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Inverter Control Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Inverter:ActivePowerConsumLimitationEnable",
         name="Inverter Active Power Consumption Limitation",
         is_on="1",
@@ -316,7 +316,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # LVRT/HVRT Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="LvrtHvrt:EnableHvrt",
         name="HVRT Enable",
         is_on="1",
@@ -328,7 +328,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="LvrtHvrt:EnableLvrt",
         name="LVRT Enable",
         is_on="1",
@@ -341,7 +341,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Power of Frequency Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="POfF:Enable",
         name="Power of Frequency Enable",
         is_on="1",
@@ -353,7 +353,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="POfU:Enable",
         name="Power of Voltage Enable",
         is_on="1",
@@ -366,7 +366,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Digital Input Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="DigitalInputs:Spd:Enable",
         name="SPD Enable",
         is_on="1",
@@ -379,7 +379,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # ESB Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="ESB:SleepmodeAllowed",
         name="ESB Sleep Mode Allowed",
         is_on="1",
@@ -392,7 +392,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Generator Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Generator:SwapDetection:Enable",
         name="Generator Swap Detection",
         is_on="1",
@@ -405,7 +405,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Reactive Power Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="ReactivePower:QOfUP:HoldOnVoltageReturn",
         name="Reactive Power QOfUP Hold On Voltage Return",
         is_on="1",
@@ -418,7 +418,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Power of Frequency/Voltage Additional Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="POfF:HoldPowerOnFrequencyDecrease",
         name="Power of Frequency Hold Power On Decrease",
         is_on="1",
@@ -430,7 +430,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="POfF:IncreaseEnable",
         name="Power of Frequency Increase Enable",
         is_on="1",
@@ -442,7 +442,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="POfU:HoldPowerOnVoltageDecrease",
         name="Power of Voltage Hold Power On Decrease",
         is_on="1",
@@ -455,7 +455,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # LVRT/HVRT Additional Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="LvrtHvrt:AddReactivePowerBeforeFault",
         name="LVRT/HVRT Add Reactive Power Before Fault",
         is_on="1",
@@ -467,7 +467,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="LvrtHvrt:FillUpWithActiveCurrent",
         name="LVRT/HVRT Fill Up With Active Current",
         is_on="1",
@@ -480,7 +480,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Digital Output Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="DigitalOut1:ExternalCtl",
         name="Digital Out 1 External Control",
         is_on="1",
@@ -492,7 +492,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="DigitalOut2:ExternalCtl",
         name="Digital Out 2 External Control",
         is_on="1",
@@ -504,7 +504,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="DigitalOut3:ExternalCtl",
         name="Digital Out 3 External Control",
         is_on="1",
@@ -516,7 +516,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="DigitalOut4:ExternalCtl",
         name="Digital Out 4 External Control",
         is_on="1",
@@ -529,7 +529,7 @@ SWITCH_SETTINGS_DATA = [
     ),
     # Power Average Switches
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Pave:Enable",
         name="Power Average Enable",
         is_on="1",
@@ -541,7 +541,7 @@ SWITCH_SETTINGS_DATA = [
         entity_registry_enabled_default=False,  # Security: Hidden by default
     ),
     PlenticoreSwitchEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Pave:RampAfterPowerReductionNe",
         name="Power Average Ramp After Power Reduction",
         is_on="1",
@@ -574,7 +574,7 @@ async def async_setup_entry(
             if "Unknown API response [500]" in error_msg:
                 _LOGGER.error("Inverter API returned 500 error - feature not supported on this model")
             elif isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("Could not get settings data: %s", modbus_err.message)
             else:
                 _LOGGER.error("Could not get settings data: %s", err)
@@ -615,12 +615,14 @@ async def async_setup_entry(
                 description.key,
             )
             continue
-        if entry.data.get(CONF_SERVICE_CODE) is None and description.installer_required:
-            _LOGGER.debug(
-                "Skipping installer required setting data %s/%s",
-                description.module_id,
-                description.key,
-            )
+        if not ensure_installer_access(
+            entry,
+            description.installer_required,
+            description.module_id,
+            description.key,
+            "setting data",
+            log_level="debug",
+        ):
             continue
         entities.append(
             PlenticoreDataSwitch(
@@ -638,14 +640,14 @@ async def async_setup_entry(
     try:
         try:
             string_count_setting = await plenticore.client.get_setting_values(
-                "devices:local", "Properties:StringCnt"
+                ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
             )
-        except (ApiException, ClientError, TimeoutError, Exception) as err:
+        except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
             error_msg = str(err)
             if "Unknown API response [500]" in error_msg:
                 _LOGGER.warning("Inverter API returned 500 error for string count - feature not supported")
             elif isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.warning("Could not get string count: %s", modbus_err.message)
             else:
                 _LOGGER.warning("Could not get string count: %s", err)
@@ -653,8 +655,8 @@ async def async_setup_entry(
         
         try:
             string_count = int(
-                string_count_setting.get("devices:local", {})
-                .get("Properties:StringCnt", 0)
+                string_count_setting.get(ModuleId.DEVICES_LOCAL, {})
+                .get(SettingId.STRING_COUNT, 0)
             )
         except (ValueError, AttributeError):
             string_count = 0
@@ -662,8 +664,7 @@ async def async_setup_entry(
         # Initialize variables for shadow management
         dc_strings = tuple(range(string_count))
         dc_string_feature_ids = tuple(
-            PlenticoreShadowMgmtSwitch.DC_STRING_FEATURE_DATA_ID % dc_string
-            for dc_string in dc_strings
+            string_feature_id(dc_string) for dc_string in dc_strings
         )
         
         # Skip shadow management if no strings
@@ -682,7 +683,7 @@ async def async_setup_entry(
                     ),
                 )
                 _LOGGER.debug("Successfully got DC string features: %s", dc_string_features)
-            except (ApiException, ClientError, TimeoutError, Exception) as err:
+            except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
                 # Handle API errors gracefully - some inverters may not support DC string features
                 _handle_api_error(err, "DC string features batch query", "shadow management")
                 
@@ -704,13 +705,18 @@ async def async_setup_entry(
                                 dc_string_features.setdefault(PlenticoreShadowMgmtSwitch.MODULE_ID, {}).update(single_feature[PlenticoreShadowMgmtSwitch.MODULE_ID])
                                 feature_value = single_feature[PlenticoreShadowMgmtSwitch.MODULE_ID].get(feature_id, '0')
                                 _LOGGER.debug("String %d feature value: %s", dc_string + 1, feature_value)
-                        except (ApiException, ClientError, TimeoutError, Exception) as single_err:
+                        except (
+                            ApiException,
+                            ClientError,
+                            TimeoutError,
+                            asyncio.TimeoutError,
+                        ) as single_err:
                             _handle_api_error(single_err, f"DC string {dc_string + 1} feature query", feature_id)
                             if UNKNOWN_API_500_RESPONSE in str(single_err):
                                 _LOGGER.warning("String %d shadow management not available", dc_string + 1)
                                 
                 elif isinstance(err, ApiException):
-                    modbus_err = _parse_modbus_exception(err)
+                    modbus_err = parse_modbus_exception(err)
                     _LOGGER.warning("Could not get DC string features: %s", modbus_err.message)
                     dc_string_features = {}
                 else:
@@ -752,14 +758,14 @@ async def async_setup_entry(
                         dc_string + 1,
                         dc_string_feature,
                     )
-    except Exception as shadow_err:
+    except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as shadow_err:
         # Catch ANY exception in shadow management setup to prevent platform crash
         # This is a catch-all to ensure basic switches are always created
         error_msg = str(shadow_err)
         if "Unknown API response [500]" in error_msg:
             _LOGGER.warning("Shadow management features not supported on this inverter model - continuing without shadow management switches")
         elif isinstance(shadow_err, ApiException):
-            modbus_err = _parse_modbus_exception(shadow_err)
+            modbus_err = parse_modbus_exception(shadow_err)
             _LOGGER.warning("Shadow management setup failed: %s - continuing without shadow management switches", modbus_err.message)
         else:
             _LOGGER.warning("Error setting up shadow management switches: %s - continuing without shadow management switches", shadow_err)
@@ -1012,12 +1018,12 @@ class PlenticoreShadowMgmtSwitch(
     _attr_entity_category = EntityCategory.CONFIG
     entity_description: SwitchEntityDescription
 
-    MODULE_ID: Final = "devices:local"
+    MODULE_ID: Final = ModuleId.DEVICES_LOCAL
 
-    SHADOW_DATA_ID: Final = "Generator:ShadowMgmt:Enable"
+    SHADOW_DATA_ID: Final = SettingId.SHADOW_MGMT_ENABLE
     """Settings id for the bit coded shadow management."""
 
-    DC_STRING_FEATURE_DATA_ID: Final = "Properties:String%dFeatures"
+    DC_STRING_FEATURE_DATA_ID: Final = STRING_FEATURE_TEMPLATE
     """Settings id pattern for the DC string features."""
 
     SHADOW_MANAGEMENT_SUPPORT: Final = 1

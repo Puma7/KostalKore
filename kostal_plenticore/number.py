@@ -34,15 +34,22 @@ from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from homeassistant.helpers.event import async_call_later
 
 from .const import CONF_SERVICE_CODE
-from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator, _parse_modbus_exception
-from .helper import PlenticoreDataFormatter
+from .const_ids import ModuleId, SettingId
+from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
+from .helper import (
+    PlenticoreDataFormatter,
+    ensure_installer_access,
+    is_battery_control,
+    parse_modbus_exception,
+    requires_installer_service_code,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 # Legacy setting IDs used by some firmware versions (typos or renamed keys)
 LEGACY_SETTING_ALIASES: Final[dict[str, str]] = {
-    "Battery:MinSocRel": "Battery:MinSoc",
-    "Battery:MinHomeConsumption": "Battery:MinHomeComsumption",
+    SettingId.BATTERY_MIN_SOC_REL: SettingId.BATTERY_MIN_SOC,
+    SettingId.BATTERY_MIN_HOME_CONSUMPTION: SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY,
 }
 LEGACY_SETTING_REVERSE: Final[dict[str, str]] = {
     v: k for k, v in LEGACY_SETTING_ALIASES.items()
@@ -83,8 +90,8 @@ BATTERY_TIME_MAX_SECONDS: Final[int] = 86400
 BATTERY_TIME_MIN_SECONDS: Final[int] = 0
 BATTERY_TIME_STEP_SECONDS: Final[int] = 1
 G3_CYCLIC_LIMIT_IDS: Final[set[str]] = {
-    "Battery:MaxChargePowerG3",
-    "Battery:MaxDischargePowerG3",
+    SettingId.BATTERY_MAX_CHARGE_POWER_G3,
+    SettingId.BATTERY_MAX_DISCHARGE_POWER_G3,
 }
 G3_KEEPALIVE_MIN_SECONDS: Final[int] = 10
 G3_KEEPALIVE_MAX_SECONDS: Final[int] = 300
@@ -104,7 +111,7 @@ def _handle_number_error(err: Exception, operation: str) -> dict[str, Any]:
         Empty dict as fallback
     """
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s", operation)
@@ -172,7 +179,7 @@ def create_battery_number_description(
         entity_category=CONFIG_ENTITY_CATEGORY,
         entity_registry_enabled_default=DEFAULT_ENTITY_REGISTRY_ENABLED,
         icon=icon or "mdi:battery",
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id=data_id or key,
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -220,7 +227,7 @@ def create_power_number_description(
             else entity_registry_enabled_default
         ),
         icon=icon or "mdi:flash",
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id=data_id or key,
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -260,7 +267,7 @@ def create_percentage_number_description(
             else entity_registry_enabled_default
         ),
         icon=icon or "mdi:percent",
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id=data_id or key,
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -282,7 +289,7 @@ NUMBER_SETTINGS_DATA = [
         key="battery_min_soc",
         name="Battery min SoC",
         icon="mdi:battery-negative",
-        data_id="Battery:MinSocRel",
+        data_id=SettingId.BATTERY_MIN_SOC_REL,
         entity_registry_enabled_default=True,
     ),
     create_power_number_description(
@@ -291,7 +298,7 @@ NUMBER_SETTINGS_DATA = [
         unit=UnitOfPower.WATT,
         max_value=DEFAULT_MAX_POWER_WATTS,
         icon="mdi:home-lightning-bolt",
-        data_id="Battery:MinHomeConsumption",
+        data_id=SettingId.BATTERY_MIN_HOME_CONSUMPTION,
         entity_registry_enabled_default=True,
     ),
     # Battery Charge/Discharge Setpoints (Section 3.4 External Battery Management)
@@ -386,7 +393,7 @@ NUMBER_SETTINGS_DATA = [
         min_value=BATTERY_TIME_MIN_SECONDS,
         step=BATTERY_TIME_STEP_SECONDS,
         icon="mdi:timer",
-        data_id="Battery:TimeUntilFallback",
+        data_id=SettingId.BATTERY_TIME_UNTIL_FALLBACK,
     ),
     # Additional External Control Settings
     create_battery_number_description(
@@ -515,7 +522,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=50000,
         native_min_value=0,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="EnergyMgmt:TimedBatCharge:GridPower",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -530,7 +537,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="EnergyMgmt:TimedBatCharge:Soc",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -546,7 +553,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=50000,
         native_min_value=0,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="EnergyMgmt:TimedBatCharge:WD_GridPower",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -561,7 +568,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="EnergyMgmt:TimedBatCharge:WD_Soc",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -577,7 +584,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=6000,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrl:ModeGradient",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -592,7 +599,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=6000,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrl:ModeGradientLowPriority",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -607,7 +614,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=300,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrl:ModePT1Tau",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -622,7 +629,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=300,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrl:ModePT1LowPriorityTau",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -637,7 +644,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=3600,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrl:RampTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -653,7 +660,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=50000,
         native_min_value=0,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrlP:LimitGridSupply",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -668,7 +675,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrlP:P",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -683,7 +690,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrlP:P_fine",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -700,7 +707,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=50000,
         native_min_value=0,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="Inverter:ActivePowerLimitation",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -716,7 +723,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=50000,
         native_min_value=0,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="Inverter:ActivePowerConsumLimitation",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -731,7 +738,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=0.8,
         native_min_value=-0.8,
         native_step=0.01,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:FixCosPhi:DeltaCosPhi",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -746,7 +753,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=-100,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:FixQ:Q",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -760,7 +767,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=26214,
         native_min_value=-26214,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:ExtCtrlFixCosPhi:DeltaCosPhi",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -775,7 +782,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=-100,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:ExtCtrlFixQ:Q",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -790,7 +797,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=300,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:ExtCtrl:SettlingTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -805,7 +812,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:PowerLimitInputPrioHighMode",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -820,7 +827,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=10,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:KFactorLvrt",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -834,7 +841,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=10,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:KFactorHvrt",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -849,7 +856,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=95,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:ThresholdLvrt",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -864,7 +871,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=150,
         native_min_value=105,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:ThresholdHvrt",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -879,7 +886,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=95,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:LowerVoltageLvrt",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -894,7 +901,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=150,
         native_min_value=105,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:UpperVoltageHvrt",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -909,7 +916,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=15,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:GradientAndTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -925,7 +932,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:NominalFrequency",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -940,7 +947,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:ReductionStartFrequency",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -955,7 +962,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:ReductionEndFrequency",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -970,7 +977,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=60,
         native_min_value=0,
         native_step=0.1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:DelayReactionTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -985,7 +992,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=2.0,
         native_min_value=0,
         native_step=0.01,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfU:ReductionStartVoltage",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -999,7 +1006,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=2.0,
         native_min_value=0,
         native_step=0.01,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfU:ReductionEndVoltage",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1014,7 +1021,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=300,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfU:SettlingTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1031,7 +1038,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=1000000,
         native_min_value=10,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut1:PowerCtl:OnPowerThreshold",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1047,7 +1054,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=1000000,
         native_min_value=0,
         native_step=100,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut1:PowerCtl:OffPowerThreshold",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1062,7 +1069,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=720,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut1:PowerCtl:DelayTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1077,7 +1084,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=720,
         native_min_value=1,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut1:PowerCtl:StableTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1092,7 +1099,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=1440,
         native_min_value=1,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut1:PowerCtl:RunTime",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1108,7 +1115,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut:BatDischarge_SoC",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1123,7 +1130,7 @@ NUMBER_SETTINGS_DATA = [
         native_max_value=100,
         native_min_value=0,
         native_step=1,
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         data_id="DigitalOut:OutputEnable_SoC",
         fmt_from="format_round",
         fmt_to="format_round_back",
@@ -1542,10 +1549,10 @@ class PlenticoreDataNumber(
         
         # Debug logging for forced entities
         if self.data_id in (
-            "Battery:MinSocRel",
-            "Battery:MinHomeConsumption",
-            "Battery:MinSoc",
-            "Battery:MinHomeComsumption",
+            SettingId.BATTERY_MIN_SOC_REL,
+            SettingId.BATTERY_MIN_HOME_CONSUMPTION,
+            SettingId.BATTERY_MIN_SOC,
+            SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY,
         ):
             _LOGGER.debug(
                 "Availability check for %s: base=%s, has_data=%s, has_module=%s, has_value=%s, coordinator_data_keys=%s",
@@ -1567,14 +1574,7 @@ class PlenticoreDataNumber(
 
     def _requires_installer(self, data_id_for_write: str) -> bool:
         """Return if this control requires installer service code."""
-        advanced_controls = [
-            "ChargePower",
-            "ChargeCurrent",
-            "MaxChargePower",
-            "MaxDischargePower",
-            "TimeUntilFallback",
-        ]
-        return any(control in data_id_for_write for control in advanced_controls)
+        return requires_installer_service_code(data_id_for_write)
 
     def _should_keepalive(self, data_id_for_write: str) -> bool:
         """Return if keepalive cyclic write is required for this data_id."""
@@ -1594,7 +1594,7 @@ class PlenticoreDataNumber(
         fallback_value = None
         if self.coordinator.data and self.module_id in self.coordinator.data:
             fallback_value = self.coordinator.data[self.module_id].get(
-                "Battery:TimeUntilFallback"
+                SettingId.BATTERY_TIME_UNTIL_FALLBACK
             )
         fallback_seconds = self._parse_seconds(fallback_value)
         if not fallback_seconds or fallback_seconds < 1:
@@ -1633,14 +1633,13 @@ class PlenticoreDataNumber(
                 if not self._should_keepalive(data_id_for_write):
                     break
                 entry = self.coordinator.config_entry
-                if self._requires_installer(data_id_for_write) and entry.data.get(
-                    CONF_SERVICE_CODE
-                ) is None:
-                    _LOGGER.warning(
-                        "Installer service code required for keepalive on %s/%s. Keepalive stopped.",
-                        self.module_id,
-                        data_id_for_write,
-                    )
+                if not ensure_installer_access(
+                    entry,
+                    self._requires_installer(data_id_for_write),
+                    self.module_id,
+                    data_id_for_write,
+                    "keepalive",
+                ):
                     break
                 str_value = self._formatter_back(self._keepalive_value)
                 await self.coordinator.async_write_data(
@@ -1693,21 +1692,21 @@ class PlenticoreDataNumber(
         """Set a new value."""
         data_id_for_write = self._resolve_data_id_for_write()
         # Enhanced safety logging and validation for battery controls
-        if "Battery" in data_id_for_write:
+        if is_battery_control(data_id_for_write):
             entry = self.coordinator.config_entry
             
             # Check if installer service code is required for advanced battery controls
             # Advanced controls include charge/discharge setpoints and G3 limitation features
             requires_installer = self._requires_installer(data_id_for_write)
             
-            if requires_installer:
-                if entry.data.get(CONF_SERVICE_CODE) is None:
-                    _LOGGER.warning(
-                        "Installer service code required for battery control %s/%s. Operation not performed.",
-                        self.module_id,
-                        data_id_for_write,
-                    )
-                    return
+            if not ensure_installer_access(
+                entry,
+                requires_installer,
+                self.module_id,
+                data_id_for_write,
+                "battery control",
+            ):
+                return
             
             # Validate value ranges for safety
             if "Power" in data_id_for_write and "Limit" not in data_id_for_write:

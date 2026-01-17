@@ -23,14 +23,14 @@ else:
         from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const_ids import ModuleId
 from .coordinator import PlenticoreConfigEntry, SelectDataUpdateCoordinator
 
 from pykoplenti import ApiException
 
 from aiohttp.client_exceptions import ClientError
 
-# Import MODBUS exception handling from coordinator
-from .coordinator import _parse_modbus_exception
+from .helper import parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def _handle_select_error(err: Exception, operation: str) -> None:
         operation: Description of the operation being performed
     """
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("Could not get %s for select: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s for select", operation)
@@ -123,7 +123,7 @@ class PlenticoreSelectEntityDescription(SelectEntityDescription):
 
 SELECT_SETTINGS_DATA = [
     PlenticoreSelectEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="battery_charge",
         name="Battery Charging / Usage mode",
         options=[

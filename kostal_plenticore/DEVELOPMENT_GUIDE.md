@@ -414,7 +414,7 @@ if not feature_data:
 try:
     result = await operation()
 except ApiException as err:
-    modbus_err = _parse_modbus_exception(err)
+    modbus_err = parse_modbus_exception(err)
     _LOGGER.error("MODBUS error: %s", modbus_err.message)
     # Handle specific MODBUS exceptions
     if isinstance(modbus_err, ModbusServerDeviceBusyError):
@@ -476,7 +476,7 @@ async def async_setup_entry(...):
 ### Pattern 5: MODBUS Exception Parsing
 
 ```python
-def _parse_modbus_exception(api_exception: ApiException) -> ModbusException:
+def parse_modbus_exception(api_exception: ApiException) -> ModbusException:
     """Parse ApiException into specific MODBUS exceptions."""
     error_msg = str(api_exception).lower()
     

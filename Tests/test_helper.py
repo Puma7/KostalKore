@@ -1,9 +1,12 @@
 """Test Kostal Plenticore helper."""
 
 from collections.abc import Generator
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pykoplenti import ApiClient, ExtendedApiClient, SettingsData
+from aiohttp.client_exceptions import ClientError
+from pykoplenti import ApiClient, ApiException, ExtendedApiClient, SettingsData
 import pytest
 
 from homeassistant.components.kostal_plenticore.const import DOMAIN
@@ -14,6 +17,22 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 from kostal_plenticore import coordinator
+from kostal_plenticore.const import CONF_SERVICE_CODE
+from kostal_plenticore.helper import (
+    ModbusException,
+    ModbusIllegalFunctionError,
+    ModbusIllegalDataAddressError,
+    ModbusIllegalDataValueError,
+    ModbusMemoryParityError,
+    ModbusServerDeviceFailureError,
+    ModbusServerDeviceBusyError,
+    PlenticoreDataFormatter,
+    ensure_installer_access,
+    get_hostname_id,
+    is_battery_control,
+    parse_modbus_exception,
+    requires_installer_service_code,
+)
 
 @pytest.fixture
 def mock_apiclient() -> Generator[ApiClient]:
@@ -133,3 +152,77 @@ async def test_plenticore_async_setup_g2(
         name="scb",
         sw_version="IOC: 01.45 MC: 01.46",
     )
+
+
+def test_helper_battery_control_checks() -> None:
+    assert requires_installer_service_code("Battery:MaxChargePowerG3") is True
+    assert requires_installer_service_code("Battery:MinSocRel") is False
+    assert is_battery_control("Battery:MinSocRel") is True
+    assert is_battery_control("Grid:Power") is False
+
+
+def test_ensure_installer_access() -> None:
+    entry = SimpleNamespace(data={})
+    assert ensure_installer_access(entry, False, "devices:local", "Battery:MinSocRel", "setting") is True
+    assert ensure_installer_access(entry, True, "devices:local", "Battery:MinSocRel", "setting") is False
+    entry_with_code = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"})
+    assert ensure_installer_access(entry_with_code, True, "devices:local", "Battery:MinSocRel", "setting") is True
+
+
+def test_parse_modbus_exception_variants() -> None:
+    assert isinstance(
+        parse_modbus_exception(ApiException("illegal data value")),
+        ModbusIllegalDataValueError,
+    )
+    assert isinstance(
+        parse_modbus_exception(ApiException("illegal function")),
+        ModbusIllegalFunctionError,
+    )
+    assert isinstance(
+        parse_modbus_exception(ApiException("server device failure")),
+        ModbusServerDeviceFailureError,
+    )
+    assert isinstance(
+        parse_modbus_exception(ApiException("server device busy")),
+        ModbusServerDeviceBusyError,
+    )
+    assert isinstance(
+        parse_modbus_exception(ApiException("illegal data address")),
+        ModbusIllegalDataAddressError,
+    )
+    assert isinstance(
+        parse_modbus_exception(ApiException("memory parity")),
+        ModbusMemoryParityError,
+    )
+    assert isinstance(
+        parse_modbus_exception(ApiException("unexpected error")),
+        ModbusException,
+    )
+
+
+def test_format_em_manager_state_passthrough() -> None:
+    assert PlenticoreDataFormatter.format_em_manager_state("unknown") == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_get_hostname_id_timeout() -> None:
+    client = MagicMock(spec=ApiClient)
+    client.get_settings = AsyncMock(side_effect=asyncio.TimeoutError())
+    with pytest.raises(ApiException):
+        await get_hostname_id(client)
+
+
+@pytest.mark.asyncio
+async def test_get_hostname_id_client_error() -> None:
+    client = MagicMock(spec=ApiClient)
+    client.get_settings = AsyncMock(side_effect=ClientError("boom"))
+    with pytest.raises(ApiException):
+        await get_hostname_id(client)
+
+
+@pytest.mark.asyncio
+async def test_get_hostname_id_missing_network_settings() -> None:
+    client = MagicMock(spec=ApiClient)
+    client.get_settings = AsyncMock(return_value={})
+    with pytest.raises(ApiException):
+        await get_hostname_id(client)

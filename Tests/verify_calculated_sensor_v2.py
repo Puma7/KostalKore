@@ -80,7 +80,7 @@ kp_coordinator = mock_module("kostal_plenticore.coordinator")
 kp_coordinator.ProcessDataUpdateCoordinator = MagicMock()
 kp_coordinator.PlenticoreConfigEntry = MagicMock()
 kp_coordinator.Plenticore = MagicMock()
-kp_coordinator._parse_modbus_exception = MagicMock()
+kp_coordinator.parse_modbus_exception = MagicMock()
 
 kp_helper = mock_module("kostal_plenticore.helper")
 

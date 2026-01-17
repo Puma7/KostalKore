@@ -80,7 +80,7 @@ try:
 except (ApiException, ClientError, TimeoutError, Exception) as err:
     error_msg = str(err)
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("Could not get settings data for numbers: %s", modbus_err.message)
     # ... 20+ lines of error handling
 
@@ -88,7 +88,7 @@ except (ApiException, ClientError, TimeoutError, Exception) as err:
 def _handle_number_error(err: Exception, operation: str) -> dict:
     """Centralized error handling for number operations."""
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s", operation)

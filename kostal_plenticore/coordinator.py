@@ -6,7 +6,6 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 import hashlib
-import hmac
 import logging
 from typing import Any, Final, TypeVar, cast
 import asyncio
@@ -35,7 +34,16 @@ from .repairs import (
     create_auth_failed_issue,
     create_inverter_busy_issue,
 )
-from .helper import get_hostname_id
+from .helper import (
+    ModbusIllegalDataAddressError,
+    ModbusIllegalDataValueError,
+    ModbusServerDeviceBusyError,
+    ModbusServerDeviceFailureError,
+    ModbusMemoryParityError,
+    ModbusException,
+    get_hostname_id,
+    parse_modbus_exception,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,23 +101,16 @@ class RequestCache:
     
     def _secure_cache_key(self, data: dict[str, Any]) -> str:
         """
-        Create secure cache key to prevent collision attacks.
-        
+        Create a deterministic cache key for request deduplication.
+
         Args:
             data: Dictionary to create cache key from
-            
+
         Returns:
-            Secure HMAC-based cache key
+            Stable hash-based cache key
         """
-        # Create deterministic string representation
         data_str = str(sorted(data.items()))
-        # Use HMAC with timestamp for additional security
-        timestamp = str(int(datetime.now().timestamp() // 60))  # 1-minute windows
-        return hmac.new(
-            timestamp.encode(), 
-            data_str.encode(), 
-            hashlib.sha256
-        ).hexdigest()[:16]  # First 16 chars for efficiency
+        return hashlib.sha256(data_str.encode()).hexdigest()[:16]
     
     async def get(self, key: str) -> Any | None:
         """
@@ -231,86 +232,6 @@ class RequestCache:
         return self._hits / total if total > 0 else 0.0
 
 
-class ModbusException(Exception):
-    """Base exception for MODBUS communication errors."""
-    
-    def __init__(self, message: str, exception_code: int | None = None) -> None:
-        """Initialize MODBUS exception."""
-        super().__init__(message)
-        self.exception_code = exception_code
-        self.message = message
-
-
-class ModbusIllegalFunctionError(ModbusException):
-    """MODBUS illegal function exception (0x01)."""
-    
-    def __init__(self, function_code: int) -> None:
-        """Initialize illegal function exception."""
-        super().__init__(
-            f"Function code 0x{function_code:02X} not supported by inverter",
-            0x01
-        )
-
-
-class ModbusIllegalDataAddressError(ModbusException):
-    """MODBUS illegal data address exception (0x02)."""
-    
-    def __init__(self) -> None:
-        """Initialize illegal data address exception."""
-        super().__init__("Register address not valid for this inverter model", 0x02)
-
-
-class ModbusIllegalDataValueError(ModbusException):
-    """MODBUS illegal data value exception (0x03)."""
-    
-    def __init__(self) -> None:
-        """Initialize illegal data value exception."""
-        super().__init__("Invalid value provided", 0x03)
-
-
-class ModbusServerDeviceFailureError(ModbusException):
-    """MODBUS server device failure exception (0x04)."""
-    
-    def __init__(self) -> None:
-        """Initialize server device failure exception."""
-        super().__init__("Inverter internal error during operation", 0x04)
-
-
-class ModbusServerDeviceBusyError(ModbusException):
-    """MODBUS server device busy exception (0x06)."""
-    
-    def __init__(self) -> None:
-        """Initialize server device busy exception."""
-        super().__init__("Inverter busy processing long command, retry later", 0x06)
-
-
-class ModbusMemoryParityError(ModbusException):
-    """MODBUS memory parity error exception (0x08)."""
-    
-    def __init__(self) -> None:
-        """Initialize memory parity error exception."""
-        super().__init__("Inverter memory consistency check failed", 0x08)
-
-
-def _parse_modbus_exception(api_exception: ApiException) -> ModbusException:
-    """Parse an ApiException into a specific ModbusException."""
-    error_msg = str(api_exception).lower()
-    
-    if "illegal function" in error_msg:
-        return ModbusIllegalFunctionError(0x01)
-    elif "illegal data address" in error_msg or "address" in error_msg:
-        return ModbusIllegalDataAddressError()
-    elif "illegal data value" in error_msg or "value" in error_msg:
-        return ModbusIllegalDataValueError()
-    elif "server device failure" in error_msg or "failure" in error_msg:
-        return ModbusServerDeviceFailureError()
-    elif "server device busy" in error_msg or "busy" in error_msg:
-        return ModbusServerDeviceBusyError()
-    elif "memory parity" in error_msg or "parity" in error_msg:
-        return ModbusMemoryParityError()
-    else:
-        # Fallback to generic MODBUS exception
-        return ModbusException(f"MODBUS communication error: {api_exception}")
 
 
 # Type alias for config entry with runtime data
@@ -375,7 +296,7 @@ class Plenticore:
             create_api_unreachable_issue(self.hass)
             raise ConfigEntryNotReady from err
         except ApiException as err:
-            modbus_err = _parse_modbus_exception(err)
+            modbus_err = parse_modbus_exception(err)
             _LOGGER.error("API error during login to %s: %s", self.host, modbus_err.message)
             create_api_unreachable_issue(self.hass)
             raise ConfigEntryNotReady from err
@@ -406,7 +327,7 @@ class Plenticore:
             
         except (ApiException, KeyError, ValueError, asyncio.CancelledError) as err:
             if isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("Could not get device metadata: %s", modbus_err.message)
             else:
                 _LOGGER.error("Error processing device metadata: %s", err)
@@ -538,7 +459,7 @@ class DataUpdateCoordinatorMixin:
                  return None
 
             if isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("MODBUS error reading %s:%s - %s", module_id, data_id, modbus_err.message)
             elif "Unknown API response [500]" in error_msg:
                 # Downgrade 500 errors to warning as they often indicate unsupported features
@@ -564,7 +485,7 @@ class DataUpdateCoordinatorMixin:
             # Parse into specific MODBUS exceptions for better error handling
             error_msg = str(err)
             if isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("MODBUS error writing %s:%s - %s", module_id, value, modbus_err.message)
                 
                 # For certain errors, we might want to retry
@@ -731,7 +652,6 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
             
             # Schedule delayed refresh to respect rate limiting
             async def delayed_refresh(event_time: datetime) -> None:
-                await asyncio.sleep(delay)
                 await self.async_request_refresh()
             return async_call_later(self.hass, delay, delayed_refresh)
         
@@ -742,7 +662,7 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         async def force_refresh(event_time: datetime) -> None:
             await self.async_request_refresh()
 
-        return async_call_later(self.hass, 2, force_refresh)
+        return async_call_later(self.hass, 0.5, force_refresh)
 
     def stop_fetch_data(self, module_id: str, data_id: str) -> None:
         """Stop fetching the given data (module-id and data-id)."""
@@ -795,7 +715,7 @@ class ProcessDataUpdateCoordinator(
                  raise UpdateFailed(f"Inverter busy/internal error: {error_msg}") from err
 
             if isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("Error fetching process data for %s: %s", self.name, modbus_err.message)
             elif "Unknown API response [500]" in error_msg:
                 _LOGGER.warning("Inverter API returned 500 error fetching process data for %s - feature likely not supported", self.name)
@@ -908,7 +828,7 @@ class SettingDataUpdateCoordinator(
                  raise UpdateFailed(f"Settings unavailable: {error_msg}") from err
 
             if isinstance(err, ApiException):
-                modbus_err = _parse_modbus_exception(err)
+                modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("Error fetching setting data for %s: %s", self.name, modbus_err.message)
             elif "Unknown API response [500]" in error_msg:
                  # Downgrade 500 to warning

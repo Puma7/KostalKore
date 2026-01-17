@@ -108,7 +108,7 @@ To add a writable setting:
 
 ### C. Safety & Error Handling
 *   **Authentication**: The integration handles login/logout automatically. Do not manually instantiate `ExtendedApiClient` outside of the provided structures.
-*   **Modbus Errors**: The `Plenticore` class wraps errors. When implementing new logic, catch `ApiException` and use `_parse_modbus_exception`.
+*   **Modbus Errors**: The `Plenticore` class wraps errors. When implementing new logic, catch `ApiException` and use `parse_modbus_exception`.
 *   **Service Code**: Some settings (Battery Config) require the "Service Code" (Installer Password). Check `entry.data.get(CONF_SERVICE_CODE)` before attempting these writes.
 
 ## 5. Critical Technical Constraints

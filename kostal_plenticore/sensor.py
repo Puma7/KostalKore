@@ -36,8 +36,9 @@ else:
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .coordinator import PlenticoreConfigEntry, ProcessDataUpdateCoordinator, _parse_modbus_exception
-from .helper import PlenticoreDataFormatter
+from .const_ids import ModuleId
+from .coordinator import PlenticoreConfigEntry, ProcessDataUpdateCoordinator
+from .helper import PlenticoreDataFormatter, parse_modbus_exception
 
 from pykoplenti import ApiException
 
@@ -49,7 +50,7 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 60.0
 DC_STRING_COUNT_TIMEOUT: Final[float] = 30.0
 MAX_EFFICIENCY_PERCENT: Final[float] = 100.0
-MODULE_ID_PREFIX: Final[str] = "devices:local:pv"
+MODULE_ID_PREFIX: Final[str] = f"{ModuleId.DEVICES_LOCAL}:pv"
 PV_MODULE_PREFIX: Final[str] = "pv"
 
 
@@ -110,7 +111,7 @@ def _handle_api_error(err: Exception, operation: str) -> None:
         operation: Description of the operation being performed
     """
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s", operation)
@@ -144,7 +145,7 @@ def generate_dc_sensor_descriptions(dc_string_count: int) -> list[PlenticoreSens
             dc_descriptions.append(
                 PlenticoreSensorEntityDescription(
                     key=metric,  # Use the actual metric (P, U, I) as key
-                    module_id=f"devices:local:pv{dc_num}",
+                    module_id=f"{ModuleId.DEVICES_LOCAL}:pv{dc_num}",
                     name=f"DC{dc_num} {name_suffix}",
                     native_unit_of_measurement=unit,
                     device_class=device_class,
@@ -158,14 +159,14 @@ def generate_dc_sensor_descriptions(dc_string_count: int) -> list[PlenticoreSens
 
 SENSOR_PROCESS_DATA = [
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Inverter:State",
         name="Inverter State",
         icon="mdi:state-machine",
         formatter="format_inverter_state",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Dc_P",
         name="Solar Power",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -175,7 +176,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Grid_P",
         name="Grid Power",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -185,7 +186,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="HomeBat_P",
         name="Home Power from Battery",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -194,7 +195,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="HomeGrid_P",
         name="Home Power from Grid",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -203,7 +204,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="HomeOwn_P",
         name="Home Power from Own",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -212,7 +213,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="HomePv_P",
         name="Home Power from PV",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -221,7 +222,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="Home_P",
         name="Home Power",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -241,7 +242,7 @@ SENSOR_PROCESS_DATA = [
     ),
     # DC sensors will be generated dynamically based on available strings
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="PV2Bat_P",
         name="PV to Battery Power",
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -250,7 +251,7 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
-        module_id="devices:local",
+        module_id=ModuleId.DEVICES_LOCAL,
         key="EM_State",
         name="Energy Manager State",
         icon="mdi:state-machine",

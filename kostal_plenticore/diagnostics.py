@@ -9,12 +9,13 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
+from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
 from pykoplenti import ApiException
 
 # Import MODBUS exception handling from coordinator
-from .coordinator import _parse_modbus_exception
+from .helper import parse_modbus_exception
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -23,9 +24,9 @@ _LOGGER = logging.getLogger(__name__)
 TO_REDACT: Final[set[str]] = {CONF_PASSWORD}
 
 # Diagnostics constants
-DEVICES_LOCAL_MODULE: Final[str] = "devices:local"
-STRING_COUNT_SETTING: Final[str] = "Properties:StringCnt"
-STRING_FEATURE_PATTERN: Final[str] = "Properties:String{index}Features"
+DEVICES_LOCAL_MODULE: Final[str] = ModuleId.DEVICES_LOCAL
+STRING_COUNT_SETTING: Final[str] = SettingId.STRING_COUNT
+STRING_FEATURE_PATTERN: Final[str] = STRING_FEATURE_TEMPLATE
 DIAGNOSTICS_TIMEOUT_SECONDS: Final[float] = 30.0
 
 
@@ -41,7 +42,7 @@ def _handle_diagnostics_error(err: Exception, operation: str) -> Any:
         Appropriate default value for the operation
     """
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.warning("Could not get %s for diagnostics: %s", operation, modbus_err.message)
         if operation == "version" or operation == "me":
             return "Unknown"

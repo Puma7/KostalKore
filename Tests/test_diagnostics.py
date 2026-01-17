@@ -1,5 +1,6 @@
 """Test Kostal Plenticore diagnostics."""
 
+import asyncio
 from unittest.mock import Mock
 
 from homeassistant.components.diagnostics import REDACTED
@@ -9,7 +10,9 @@ from pytest_homeassistant_custom_component.common import ANY, MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 
-from kostal_plenticore.diagnostics import async_get_config_entry_diagnostics
+from pykoplenti import ApiException
+
+from kostal_plenticore.diagnostics import _handle_diagnostics_error, async_get_config_entry_diagnostics
 
 
 async def get_diagnostics_for_config_entry(hass, config_entry):
@@ -74,3 +77,15 @@ async def test_entry_diagnostics_invalid_string_count(
     )
 
     assert diagnostic_data["configuration"] == {}
+
+
+def test_handle_diagnostics_error_branches() -> None:
+    assert _handle_diagnostics_error(ApiException("boom"), "string_count") == 0
+    assert _handle_diagnostics_error(ApiException("boom"), "version") == "Unknown"
+    assert _handle_diagnostics_error(ValueError("bad"), "string_count") == 0
+    assert _handle_diagnostics_error(ValueError("bad"), "settings data") == {}
+    assert _handle_diagnostics_error(asyncio.TimeoutError(), "me") == "Unknown"
+    assert _handle_diagnostics_error(asyncio.TimeoutError(), "process data") == {}
+    assert _handle_diagnostics_error(RuntimeError("boom"), "string_count") == 0
+    assert _handle_diagnostics_error(asyncio.TimeoutError(), "string_count") == 0
+    assert _handle_diagnostics_error(RuntimeError("boom"), "version") == "Unknown"

@@ -7,13 +7,16 @@ import logging
 from collections.abc import Callable
 from typing import Any, Final, cast
 
+from .const import CONF_SERVICE_CODE
+from .const_ids import SettingId
+
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiClient, ApiException
 
 _LOGGER = logging.getLogger(__name__)
 
 # Known hostname identifiers
-_KNOWN_HOSTNAME_IDS: Final[tuple[str, ...]] = ("Network:Hostname", "Hostname")
+_KNOWN_HOSTNAME_IDS: Final[tuple[str, ...]] = (SettingId.HOSTNAME, "Hostname")
 
 # Performance constants
 HOSTNAME_ID_TIMEOUT_SECONDS: Final[float] = 30.0
@@ -313,3 +316,119 @@ async def get_hostname_id(client: ApiClient) -> str:
             return entry.id
     
     raise ApiException("Hostname identifier not found in KNOWN_HOSTNAME_IDS")  # type: ignore[no-untyped-call]
+
+
+class ModbusException(Exception):
+    """Base exception for MODBUS communication errors."""
+
+    def __init__(self, message: str, exception_code: int | None = None) -> None:
+        super().__init__(message)
+        self.exception_code = exception_code
+        self.message = message
+
+
+class ModbusIllegalFunctionError(ModbusException):
+    """MODBUS illegal function exception (0x01)."""
+
+    def __init__(self, function_code: int) -> None:
+        super().__init__(
+            f"Function code 0x{function_code:02X} not supported by inverter",
+            0x01,
+        )
+
+
+class ModbusIllegalDataAddressError(ModbusException):
+    """MODBUS illegal data address exception (0x02)."""
+
+    def __init__(self) -> None:
+        super().__init__("Register address not valid for this inverter model", 0x02)
+
+
+class ModbusIllegalDataValueError(ModbusException):
+    """MODBUS illegal data value exception (0x03)."""
+
+    def __init__(self) -> None:
+        super().__init__("Invalid value provided", 0x03)
+
+
+class ModbusServerDeviceFailureError(ModbusException):
+    """MODBUS server device failure exception (0x04)."""
+
+    def __init__(self) -> None:
+        super().__init__("Inverter internal error during operation", 0x04)
+
+
+class ModbusServerDeviceBusyError(ModbusException):
+    """MODBUS server device busy exception (0x06)."""
+
+    def __init__(self) -> None:
+        super().__init__("Inverter busy processing long command, retry later", 0x06)
+
+
+class ModbusMemoryParityError(ModbusException):
+    """MODBUS memory parity error exception (0x08)."""
+
+    def __init__(self) -> None:
+        super().__init__("Inverter memory consistency check failed", 0x08)
+
+
+def parse_modbus_exception(api_exception: ApiException) -> ModbusException:
+    """Parse an ApiException into a specific ModbusException."""
+    error_msg = str(api_exception).lower()
+
+    if "illegal function" in error_msg:
+        return ModbusIllegalFunctionError(0x01)
+    if "illegal data address" in error_msg or "address" in error_msg:
+        return ModbusIllegalDataAddressError()
+    if "illegal data value" in error_msg or "value" in error_msg:
+        return ModbusIllegalDataValueError()
+    if "server device failure" in error_msg or "failure" in error_msg:
+        return ModbusServerDeviceFailureError()
+    if "server device busy" in error_msg or "busy" in error_msg:
+        return ModbusServerDeviceBusyError()
+    if "memory parity" in error_msg or "parity" in error_msg:
+        return ModbusMemoryParityError()
+
+    return ModbusException(f"MODBUS communication error: {api_exception}")
+
+
+def requires_installer_service_code(data_id: str) -> bool:
+    """Return True if a data ID requires installer/service code."""
+    advanced_controls = (
+        "ChargePower",
+        "ChargeCurrent",
+        "MaxChargePower",
+        "MaxDischargePower",
+        "TimeUntilFallback",
+    )
+    return any(control in data_id for control in advanced_controls)
+
+
+def is_battery_control(data_id: str) -> bool:
+    """Return True if a data ID targets battery control settings."""
+    return data_id.startswith("Battery:")
+
+
+def ensure_installer_access(
+    entry: Any,
+    requires_installer: bool,
+    module_id: str,
+    data_id: str,
+    operation: str,
+    log_level: str = "warning",
+) -> bool:
+    """Return True if installer access is available or not required."""
+    if not requires_installer:
+        return True
+
+    if entry.data.get(CONF_SERVICE_CODE) is None:
+        log_fn = getattr(_LOGGER, log_level, _LOGGER.warning)
+        log_fn(
+            "Installer service code required for %s on %s/%s",
+            operation,
+            module_id,
+            data_id,
+        )
+        return False
+
+    return True

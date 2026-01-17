@@ -28,7 +28,7 @@
    try:
        available_process_data = await plenticore.client.get_process_data()
    except ApiException as err:
-       modbus_err = _parse_modbus_exception(err)
+       modbus_err = parse_modbus_exception(err)
        _LOGGER.warning("Could not get process data for diagnostics: %s", modbus_err.message)
        available_process_data = {}
    ```
@@ -96,7 +96,7 @@
    try:
        available_process_data = await plenticore.client.get_process_data()
    except ApiException as err:
-       modbus_err = _parse_modbus_exception(err)
+       modbus_err = parse_modbus_exception(err)
        _LOGGER.warning("Could not get process data for diagnostics: %s", modbus_err.message)
        available_process_data = {}
    ```
@@ -126,7 +126,7 @@
 def _handle_diagnostics_error(err: Exception, operation: str) -> Any:
     """Centralized error handling for diagnostics operations."""
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.warning("Could not get %s for diagnostics: %s", operation, modbus_err.message)
         return {} if operation != "version" else "Unknown"
     elif isinstance(err, (ValueError, AttributeError)):

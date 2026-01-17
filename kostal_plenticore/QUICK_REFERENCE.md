@@ -116,7 +116,7 @@ except ApiException as err:
         _LOGGER.info("Feature not supported - skipping")
         result = {}  # Fallback
     else:
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("Error: %s", modbus_err.message)
         result = {}
 ```

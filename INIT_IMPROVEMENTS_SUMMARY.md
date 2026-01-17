@@ -61,7 +61,7 @@ except Exception as err:
 def _handle_init_error(err: Exception, operation: str) -> bool:
     """Handle initialization errors with appropriate logging."""
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s", operation)

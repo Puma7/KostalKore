@@ -48,7 +48,8 @@ from pykoplenti import ApiException
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .coordinator import Plenticore, PlenticoreConfigEntry, _parse_modbus_exception
+from .coordinator import Plenticore, PlenticoreConfigEntry
+from .helper import parse_modbus_exception
 from .repairs import clear_issue
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def _handle_init_error(err: Exception, operation: str) -> bool:
         False to indicate failure
     """
     if isinstance(err, ApiException):
-        modbus_err = _parse_modbus_exception(err)
+        modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s: %s", operation, modbus_err.message)
     elif isinstance(err, TimeoutError):
         _LOGGER.warning("Timeout during %s", operation)
