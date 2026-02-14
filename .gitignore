@@ -18,6 +18,7 @@ coverage.xml
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.benchmarks/
 
 # Build artifacts
 build/
@@ -40,9 +41,73 @@ kostal_plenticore_backup_original_ReadOnly/
 kostal_plenticore_old/
 kostal-2026-01-07/
 pykoplenti-master/
+tmp_lib/
+Kostal Inverter HA/
 
-# Local test scripts / outputs
-test_*.py
-test_*.txt
-fix_phase5_*.py
-fix_test_failures.py
+# Dev / maintenance scripts (not part of release)
+fix_*.py
+check_settings.py
+run_platinum_tests.py
+test_pykoplenti_*.py
+test_sensor_validation.py
+test_500_error_fix.py
+test_error_handling.py
+sitecustomize.py
+
+# Debug / test outputs
+test_*_output*.txt
+test_debug_output.txt
+test_output*.txt
+test_helper_output.txt
+
+# Ad-hoc analysis & review docs (info preserved in CHANGELOG)
+*_ANALYSIS.md
+*_SUMMARY.md
+*_FIX*.md
+*_REPORT*.md
+*_GUIDE*.md
+*_QUALITY_ANALYSIS.md
+BLOCKING_CALLS_*.md
+BUGS_FIXED_*.md
+CACHE_THREAD_SAFETY_*.md
+COMPREHENSIVE_*.md
+CONFIG_FLOW_IMPROVEMENTS_*.md
+CONFIG_FLOW_SECURITY_*.md
+CONST_SECURITY_*.md
+COORDINATOR_*.md
+DC_STRING_*.md
+DETECTION_*.md
+DIAGNOSTICS_*.md
+DISCOVERY_*.md
+ENHANCED_*.md
+ERROR_*.md
+FINAL_*.md
+HELPER_*.md
+INIT_*.md
+MANIFEST_*.md
+NUMBER_*.md
+PERFORMANCE_*.md
+PHASE1_*.md
+PRODUCTION_*.md
+PYKOPLENTI_*.md
+PYTHON_*.md
+SELECT_*.md
+SENSOR_*.md
+SHADOW_*.md
+SUCCESS_*.md
+SWITCH_*.md
+TEMPLATE_*.md
+THREAD_SAFE_*.md
+TODO_*.md
+TOTAL_*.md
+URGENT_*.md
+BATTERY_*.md
+CHECK_*.md
+CODE_VERIFICATION_*.md
+AIdocumentation.md
+WindsurfFeedback.md
+CodeReview.md
+CodeXcheck.md
+platinumRoad.md
+Quality Scale HA.md
+BA_KOSTAL_Interface_MODBUS-TCP_SunSpec_with_Control.md
