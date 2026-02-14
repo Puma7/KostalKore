@@ -1,5 +1,14 @@
 # Release Notes
 
+## v2.4.1
+
+Hotfix for calculation accuracy and test coverage.
+
+- **Fixed**: `BatteryDischargeTotal` now uses AC-side values (`HomeBat` + `DischargeGrid`) instead of mixing DC/AC.
+- **Fixed**: `BatteryEfficiency` description is now accurate (hybrid DC/AC metric).
+- **Removed**: Redundant `BatteryEfficiencyPvOnly` and `GridChargeEfficiency` sensors.
+- **Improved**: Test coverage reached 100%.
+
 ## v2.4.0
 
 Major quality and robustness release.
