@@ -9,6 +9,7 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
+from .const import CONF_SERVICE_CODE
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
@@ -21,7 +22,7 @@ import logging
 _LOGGER = logging.getLogger(__name__)
 
 # Data redaction constants
-TO_REDACT: Final[set[str]] = {CONF_PASSWORD}
+TO_REDACT: Final[set[str]] = {CONF_PASSWORD, CONF_SERVICE_CODE}
 
 # Diagnostics constants
 DEVICES_LOCAL_MODULE: Final[str] = ModuleId.DEVICES_LOCAL

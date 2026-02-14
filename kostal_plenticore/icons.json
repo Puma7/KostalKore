@@ -1,0 +1,293 @@
+{
+  "entity": {
+    "sensor": {
+      "inverter_state": {
+        "default": "mdi:state-machine"
+      },
+      "em_state": {
+        "default": "mdi:state-machine"
+      },
+      "battery_cycles": {
+        "default": "mdi:recycle"
+      },
+      "battery_soh": {
+        "default": "mdi:battery-heart"
+      },
+      "battery_fullchargecap_e": {
+        "default": "mdi:battery-high"
+      },
+      "battery_workcapacity": {
+        "default": "mdi:battery-medium"
+      },
+      "battery_batmanufacturer": {
+        "default": "mdi:factory"
+      },
+      "battery_batmodel": {
+        "default": "mdi:identifier"
+      },
+      "battery_batserialno": {
+        "default": "mdi:barcode"
+      },
+      "battery_batversionfw": {
+        "default": "mdi:chip"
+      },
+      "battery_batmodulecnt": {
+        "default": "mdi:counter"
+      },
+      "stat_autarky_day": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_autarky_month": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_autarky_total": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_autarky_year": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_ownconsumptionrate_day": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_ownconsumptionrate_month": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_ownconsumptionrate_total": {
+        "default": "mdi:chart-donut"
+      },
+      "stat_ownconsumptionrate_year": {
+        "default": "mdi:chart-donut"
+      },
+      "event_activeerrorcnt": {
+        "default": "mdi:alert"
+      },
+      "event_activewarningcnt": {
+        "default": "mdi:alert"
+      },
+      "event_activeackcnt": {
+        "default": "mdi:check-circle"
+      },
+      "system_state": {
+        "default": "mdi:state-machine"
+      },
+      "update_status": {
+        "default": "mdi:update"
+      },
+      "update_progress": {
+        "default": "mdi:progress-download"
+      },
+      "update_version": {
+        "default": "mdi:tag"
+      },
+      "ac_cosphi": {
+        "default": "mdi:sine-wave"
+      }
+    },
+    "number": {
+      "battery_min_soc": {
+        "default": "mdi:battery-negative"
+      },
+      "battery_min_home_consumption": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "battery_charge_power_ac_absolute": {
+        "default": "mdi:battery-charging-100"
+      },
+      "battery_charge_current_dc_relative": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_charge_power_ac_relative": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_charge_current_dc_absolute": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_charge_power_dc_absolute": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_charge_power_dc_relative": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_max_charge_power_g3": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_max_discharge_power_g3": {
+        "default": "mdi:battery-discharging"
+      },
+      "battery_max_charge_power_fallback": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_max_discharge_power_fallback": {
+        "default": "mdi:battery-discharging"
+      },
+      "battery_time_until_fallback": {
+        "default": "mdi:timer"
+      },
+      "battery_extern_control_max_charge_power_abs": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_extern_control_max_discharge_power_abs": {
+        "default": "mdi:battery-discharging"
+      },
+      "battery_extern_control_max_soc_rel": {
+        "default": "mdi:battery-positive"
+      },
+      "battery_extern_control_min_soc_rel": {
+        "default": "mdi:battery-negative"
+      },
+      "battery_esb_min_soc": {
+        "default": "mdi:battery-alert"
+      },
+      "battery_esb_start_soc": {
+        "default": "mdi:battery-alert-variant"
+      },
+      "battery_winter_min_soc": {
+        "default": "mdi:snowflake"
+      },
+      "battery_winter_start_month": {
+        "default": "mdi:calendar-month"
+      },
+      "battery_winter_end_month": {
+        "default": "mdi:calendar-month"
+      },
+      "battery_min_grid_feed_in": {
+        "default": "mdi:transmission-tower"
+      },
+      "battery_com_monitor_time": {
+        "default": "mdi:timer"
+      },
+      "energy_mgmt_bat_ctrl_power_offset": {
+        "default": "mdi:battery-charging"
+      },
+      "energy_mgmt_limit_grid_supply": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "energy_mgmt_smart_control_fallback_max_time": {
+        "default": "mdi:timer"
+      },
+      "energy_mgmt_timed_bat_charge_grid_power": {
+        "default": "mdi:battery-charging"
+      },
+      "energy_mgmt_timed_bat_charge_soc": {
+        "default": "mdi:battery"
+      },
+      "energy_mgmt_timed_bat_charge_wd_grid_power": {
+        "default": "mdi:battery-charging"
+      },
+      "energy_mgmt_timed_bat_charge_wd_soc": {
+        "default": "mdi:battery"
+      },
+      "active_power_ext_ctrl_mode_gradient": {
+        "default": "mdi:chart-line"
+      },
+      "active_power_ext_ctrl_mode_gradient_low_priority": {
+        "default": "mdi:chart-line"
+      },
+      "active_power_ext_ctrl_mode_pt1_tau": {
+        "default": "mdi:timer"
+      },
+      "active_power_ext_ctrl_mode_pt1_low_priority_tau": {
+        "default": "mdi:timer"
+      },
+      "active_power_ext_ctrl_ramp_time": {
+        "default": "mdi:timer"
+      },
+      "active_power_ext_ctrl_p_limit_grid_supply": {
+        "default": "mdi:transmission-tower"
+      },
+      "active_power_ext_ctrl_p_p": {
+        "default": "mdi:percent"
+      },
+      "active_power_ext_ctrl_p_p_fine": {
+        "default": "mdi:percent"
+      },
+      "inverter_active_power_limitation": {
+        "default": "mdi:percent"
+      },
+      "inverter_active_power_consum_limitation": {
+        "default": "mdi:percent"
+      },
+      "reactive_power_fix_cos_phi_delta": {
+        "default": "mdi:sine-wave"
+      },
+      "reactive_power_fix_q": {
+        "default": "mdi:sine-wave"
+      },
+      "reactive_power_ext_ctrl_fix_cos_phi_delta": {
+        "default": "mdi:sine-wave"
+      },
+      "reactive_power_ext_ctrl_fix_q": {
+        "default": "mdi:sine-wave"
+      },
+      "reactive_power_ext_ctrl_settling_time": {
+        "default": "mdi:timer"
+      },
+      "reactive_power_power_limit_input_prio_high_mode": {
+        "default": "mdi:percent"
+      },
+      "lvrt_hvrt_k_factor_lvrt": {
+        "default": "mdi:chart-line"
+      },
+      "lvrt_hvrt_k_factor_hvrt": {
+        "default": "mdi:chart-line"
+      },
+      "lvrt_hvrt_threshold_lvrt": {
+        "default": "mdi:percent"
+      },
+      "lvrt_hvrt_threshold_hvrt": {
+        "default": "mdi:percent"
+      },
+      "lvrt_hvrt_lower_voltage_lvrt": {
+        "default": "mdi:percent"
+      },
+      "lvrt_hvrt_upper_voltage_hvrt": {
+        "default": "mdi:percent"
+      },
+      "lvrt_hvrt_gradient_and_time": {
+        "default": "mdi:timer"
+      },
+      "pof_f_nominal_frequency": {
+        "default": "mdi:sine-wave"
+      },
+      "pof_f_reduction_start_frequency": {
+        "default": "mdi:sine-wave"
+      },
+      "pof_f_reduction_end_frequency": {
+        "default": "mdi:sine-wave"
+      },
+      "pof_f_delay_reaction_time": {
+        "default": "mdi:timer"
+      },
+      "pof_u_reduction_start_voltage": {
+        "default": "mdi:lightning-bolt"
+      },
+      "pof_u_reduction_end_voltage": {
+        "default": "mdi:lightning-bolt"
+      },
+      "pof_u_settling_time": {
+        "default": "mdi:timer"
+      },
+      "digital_out1_power_ctl_on_power_threshold": {
+        "default": "mdi:power"
+      },
+      "digital_out1_power_ctl_off_power_threshold": {
+        "default": "mdi:power"
+      },
+      "digital_out1_power_ctl_delay_time": {
+        "default": "mdi:timer"
+      },
+      "digital_out1_power_ctl_stable_time": {
+        "default": "mdi:timer"
+      },
+      "digital_out1_power_ctl_run_time": {
+        "default": "mdi:timer"
+      },
+      "digital_out_bat_discharge_soc": {
+        "default": "mdi:battery"
+      },
+      "digital_out_output_enable_soc": {
+        "default": "mdi:battery"
+      }
+    }
+  }
+}

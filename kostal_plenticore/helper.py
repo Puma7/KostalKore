@@ -375,20 +375,24 @@ class ModbusMemoryParityError(ModbusException):
 
 
 def parse_modbus_exception(api_exception: ApiException) -> ModbusException:
-    """Parse an ApiException into a specific ModbusException."""
+    """Parse an ApiException into a specific ModbusException.
+
+    Uses specific multi-word phrases to avoid false-positive matches
+    on common single words like "value" or "failure".
+    """
     error_msg = str(api_exception).lower()
 
     if "illegal function" in error_msg:
         return ModbusIllegalFunctionError(0x01)
-    if "illegal data address" in error_msg or "address" in error_msg:
+    if "illegal data address" in error_msg:
         return ModbusIllegalDataAddressError()
-    if "illegal data value" in error_msg or "value" in error_msg:
+    if "illegal data value" in error_msg:
         return ModbusIllegalDataValueError()
-    if "server device failure" in error_msg or "failure" in error_msg:
+    if "server device failure" in error_msg:
         return ModbusServerDeviceFailureError()
-    if "server device busy" in error_msg or "busy" in error_msg:
+    if "server device busy" in error_msg:
         return ModbusServerDeviceBusyError()
-    if "memory parity" in error_msg or "parity" in error_msg:
+    if "memory parity" in error_msg:
         return ModbusMemoryParityError()
 
     return ModbusException(f"MODBUS communication error: {api_exception}")

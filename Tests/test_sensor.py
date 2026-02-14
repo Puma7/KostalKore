@@ -114,16 +114,16 @@ async def test_efficiency_calculated_sensors(
     mock_get_process_data["scb:statistic:EnergyFlow"] = [
         "Statistic:EnergyChargePv:Total",
         "Statistic:EnergyChargeGrid:Total",
-        "Statistic:EnergyChargeInvIn:Total",
         "Statistic:EnergyDischarge:Total",
         "Statistic:EnergyDischargeGrid:Total",
+        "Statistic:EnergyHomeBat:Total",
     ]
     mock_get_process_data_values["scb:statistic:EnergyFlow"] = {
         "Statistic:EnergyChargePv:Total": "10",
         "Statistic:EnergyChargeGrid:Total": "5",
-        "Statistic:EnergyChargeInvIn:Total": "6",
         "Statistic:EnergyDischarge:Total": "12",
         "Statistic:EnergyDischargeGrid:Total": "3",
+        "Statistic:EnergyHomeBat:Total": "9",
     }
 
     mock_config_entry.add_to_hass(hass)
@@ -134,7 +134,13 @@ async def test_efficiency_calculated_sensors(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
     await hass.async_block_till_done()
 
+    # BatteryEfficiency: Discharge / (ChargePv + ChargeGrid) = 12/15 = 80%
     assert hass.states.get("sensor.scb_battery_efficiency_total").state == "80"
-    assert hass.states.get("sensor.scb_battery_efficiency_pv_only_total").state == STATE_UNKNOWN
-    assert hass.states.get("sensor.scb_grid_to_battery_efficiency_total").state == "83"
-    assert hass.states.get("sensor.scb_battery_to_grid_efficiency_total").state == "25"
+    # BatteryEfficiencyPvOnly: pv_share=10/15, out=12*10/15=8, 8/10=80%
+    assert hass.states.get("sensor.scb_battery_efficiency_pv_only_total").state == "80"
+    # BatteryNetEfficiency: (HomeBat + DischargeGrid) / (ChargePv + ChargeGrid) = (9+3)/15 = 80%
+    assert hass.states.get("sensor.scb_battery_net_efficiency_total").state == "80"
+    # InverterDischargeEfficiency: (HomeBat + DischargeGrid) / Discharge = (9+3)/12 = 100%
+    assert hass.states.get("sensor.scb_inverter_discharge_efficiency_total").state == "100"
+    # GridChargeEfficiency: grid_share=5/15, ac_out=12*5/15=4, 4/5=80%
+    assert hass.states.get("sensor.scb_grid_charge_efficiency_total").state == "80"

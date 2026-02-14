@@ -13,16 +13,9 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers import entity_registry as er
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:  # pragma: no cover
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
-else:
-    try:
-        from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-    except ImportError:
-        from homeassistant.helpers.entity_platform import AddEntitiesCallback as AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, UpdateFailed
 
+from .const import AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
 from .coordinator import PlenticoreConfigEntry, SelectDataUpdateCoordinator
 
@@ -33,6 +26,8 @@ from aiohttp.client_exceptions import ClientError
 from .helper import parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
 SELECT_UPDATE_INTERVAL_SECONDS: Final[int] = 30
@@ -276,7 +271,14 @@ class PlenticoreDataSelect(
         # Ensure we fetch the initial state once the entity is registered.
         try:
             await self.coordinator.async_request_refresh()
-        except Exception as err:
+        except (
+            ApiException,
+            ClientError,
+            TimeoutError,
+            asyncio.TimeoutError,
+            UpdateFailed,
+            RuntimeError,
+        ) as err:
             _LOGGER.debug("Initial select refresh failed: %s", err)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -286,6 +288,12 @@ class PlenticoreDataSelect(
 
     async def async_select_option(self, option: str) -> None:
         """Update the current selected option."""
+        # CHANGELOG (Codex, 2026-02-05):
+        # Fix review finding #2. Validate service-call input to ensure only
+        # declared options can be written (defense-in-depth).
+        if option not in self.options:
+            raise ValueError(f"Invalid select option for {self.entity_id}: {option}")
+
         for all_option in self.options:
             if all_option != "None":
                 await self.coordinator.async_write_data(

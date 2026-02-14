@@ -200,26 +200,8 @@ def test_handle_config_flow_error_branches() -> None:
     assert errors
 
 
-def test_check_rate_limit_resets_and_limits() -> None:
-    host = "10.0.0.1"
-    config_flow._connection_attempts[host] = [0.0, 1.0, 2.0]
-
-    with patch("kostal_plenticore.config_flow.time.time", return_value=999.0):
-        assert config_flow._check_rate_limit(host) is False
-        assert config_flow._connection_attempts[host] == []
-
-    config_flow._connection_attempts[host] = [10.0, 20.0, 30.0]
-    with patch("kostal_plenticore.config_flow.time.time", return_value=40.0):
-        assert config_flow._check_rate_limit(host) is True
 
 
-@pytest.mark.asyncio
-async def test_test_connection_safe_rate_limit(hass: HomeAssistant) -> None:
-    with patch("kostal_plenticore.config_flow._check_rate_limit", return_value=True):
-        with pytest.raises(TimeoutError):
-            await config_flow.test_connection_safe(
-                hass, {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
-            )
 
 
 @pytest.mark.asyncio

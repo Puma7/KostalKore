@@ -42,3 +42,21 @@ async def test_setup_fails(
     await hass.async_block_till_done()
 
     assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_async_remove_config_entry_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+) -> None:
+    """Test that stale devices can be removed from the registry."""
+    from unittest.mock import MagicMock
+    from kostal_plenticore import async_remove_config_entry_device
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device_entry = MagicMock()
+    result = await async_remove_config_entry_device(hass, mock_config_entry, device_entry)
+    assert result is True

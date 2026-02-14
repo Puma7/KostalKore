@@ -16,9 +16,7 @@ from homeassistant.data_entry_flow import FlowResultType
 @pytest.fixture(autouse=True)
 def clear_rate_limit() -> Generator[None]:
     """Clear config flow rate limiting between tests."""
-    plenticore_config_flow._connection_attempts.clear()
     yield
-    plenticore_config_flow._connection_attempts.clear()
 
 
 @pytest.fixture(autouse=True)

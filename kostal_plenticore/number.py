@@ -25,25 +25,12 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from homeassistant.helpers.entity_platform import (
-        AddEntitiesCallback as AddConfigEntryEntitiesCallback,
-    )
-else:
-    try:
-        from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-    except ImportError:
-        from homeassistant.helpers.entity_platform import (
-            AddEntitiesCallback as AddConfigEntryEntitiesCallback,
-        )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from homeassistant.helpers.event import async_call_later
 
-from .const import CONF_SERVICE_CODE
+from .const import CONF_SERVICE_CODE, AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId, SettingId
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import (
@@ -55,6 +42,8 @@ from .helper import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Legacy setting IDs used by some firmware versions (typos or renamed keys)
 LEGACY_SETTING_ALIASES: Final[dict[str, str]] = {
@@ -1572,33 +1561,6 @@ class PlenticoreDataNumber(
             candidate in self.coordinator.data[self.module_id]
             for candidate in self._iter_data_id_candidates()
         )
-
-        # Debug logging for forced entities
-        if self.data_id in (
-            SettingId.BATTERY_MIN_SOC_REL,
-            SettingId.BATTERY_MIN_HOME_CONSUMPTION,
-            SettingId.BATTERY_MIN_SOC,
-            SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY,
-        ):
-            _LOGGER.debug(
-                "Availability check for %s: base=%s, has_data=%s, has_module=%s, has_value=%s, coordinator_data_keys=%s",
-                self.data_id,
-                base_available,
-                has_data,
-                has_module,
-                has_value,
-                list(self.coordinator.data.keys()) if has_data else "None",
-            )
-            if has_module:
-                _LOGGER.debug(
-                    "Module %s contains: %s",
-                    self.module_id,
-                    (
-                        list(self.coordinator.data[self.module_id].keys())
-                        if has_module
-                        else "None"
-                    ),
-                )
 
         return base_available and has_data and has_module and has_value
 

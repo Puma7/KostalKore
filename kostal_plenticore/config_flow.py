@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from collections import defaultdict
 from typing import Any, Final, TypeAlias, TYPE_CHECKING
 
 from aiohttp.client_exceptions import ClientError
@@ -39,27 +37,6 @@ DATA_SCHEMA: Final[vol.Schema] = vol.Schema(
 NETWORK_MODULE: Final[str] = "scb:network"
 DEFAULT_ERROR_MESSAGE: Final[str] = "unknown"
 CONNECTION_TEST_TIMEOUT_SECONDS: Final[float] = 30.0
-MAX_CONNECTION_ATTEMPTS: Final[int] = 3
-RATE_LIMIT_WINDOW_SECONDS: Final[int] = 60
-
-# Rate limiting for connection tests
-_connection_attempts: defaultdict[str, list[float]] = defaultdict(list)
-
-
-def _check_rate_limit(host: str) -> bool:
-    """Check if host has exceeded rate limit for connection attempts.
-    
-    Args:
-        host: Host to check rate limit for
-        
-    Returns:
-        True if rate limit exceeded, False otherwise
-    """
-    now = time.time()
-    attempts = _connection_attempts[host]
-    # Remove old attempts outside window
-    _connection_attempts[host] = [t for t in attempts if now - t < RATE_LIMIT_WINDOW_SECONDS]
-    return len(_connection_attempts[host]) >= MAX_CONNECTION_ATTEMPTS
 
 
 def _handle_config_flow_error(err: Exception, operation: str) -> dict[str, str]:
@@ -116,14 +93,7 @@ async def test_connection_safe(hass: HomeAssistant, data: dict[str, Any]) -> str
         Exception: For unexpected errors
     """
     host = data[CONF_HOST]
-    
-    # Rate limiting check
-    if _check_rate_limit(host):
-        raise TimeoutError("Too many connection attempts. Please try again later.")
-    
-    # Record attempt for rate limiting
-    _connection_attempts[host].append(time.time())
-    
+
     session = async_get_clientsession(hass)
     try:
         async with ApiClient(session, host) as client:

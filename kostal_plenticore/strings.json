@@ -8,6 +8,7 @@
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "timeout": "[%key:common::config_flow::error::cannot_connect%]",
       "unknown": "[%key:common::config_flow::error::unknown%]",
       "invalid_inverter_model": "Inverter model not supported or incompatible",
       "inverter_error": "Inverter internal error, check device status",
@@ -55,7 +56,443 @@
       "description": "This action requires the installer/service code. Reconfigure the integration with the service code to enable advanced controls."
     }
   },
+  "exceptions": {
+    "write_setting_failed": {
+      "message": "Failed to write setting: {error}"
+    }
+  },
   "entity": {
+    "sensor": {
+      "inverter_state": {
+        "name": "Inverter State"
+      },
+      "dc_p": {
+        "name": "Solar Power"
+      },
+      "grid_p": {
+        "name": "Grid Power"
+      },
+      "homebat_p": {
+        "name": "Home Power from Battery"
+      },
+      "homegrid_p": {
+        "name": "Home Power from Grid"
+      },
+      "homeown_p": {
+        "name": "Home Power from Own"
+      },
+      "homepv_p": {
+        "name": "Home Power from PV"
+      },
+      "home_p": {
+        "name": "Home Power"
+      },
+      "ac_p": {
+        "name": "AC Power"
+      },
+      "pv2bat_p": {
+        "name": "PV to Battery Power"
+      },
+      "em_state": {
+        "name": "Energy Manager State"
+      },
+      "battery_cycles": {
+        "name": "Battery Cycles"
+      },
+      "battery_p": {
+        "name": "Battery Power"
+      },
+      "battery_soc": {
+        "name": "Battery SoC"
+      },
+      "battery_u": {
+        "name": "Battery Voltage"
+      },
+      "battery_i": {
+        "name": "Battery Current"
+      },
+      "battery_soh": {
+        "name": "Battery State of Health"
+      },
+      "battery_fullchargecap_e": {
+        "name": "Battery Full Charge Capacity"
+      },
+      "battery_workcapacity": {
+        "name": "Battery Work Capacity"
+      },
+      "battery_batmanufacturer": {
+        "name": "Battery Manufacturer"
+      },
+      "battery_batmodel": {
+        "name": "Battery Model"
+      },
+      "battery_batserialno": {
+        "name": "Battery Serial Number"
+      },
+      "battery_batversionfw": {
+        "name": "Battery Firmware Version"
+      },
+      "battery_batmodulecnt": {
+        "name": "Battery Module Count"
+      },
+      "stat_autarky_day": {
+        "name": "Autarky Day"
+      },
+      "stat_autarky_month": {
+        "name": "Autarky Month"
+      },
+      "stat_autarky_total": {
+        "name": "Autarky Total"
+      },
+      "stat_autarky_year": {
+        "name": "Autarky Year"
+      },
+      "stat_ownconsumptionrate_day": {
+        "name": "Own Consumption Rate Day"
+      },
+      "stat_ownconsumptionrate_month": {
+        "name": "Own Consumption Rate Month"
+      },
+      "stat_ownconsumptionrate_total": {
+        "name": "Own Consumption Rate Total"
+      },
+      "stat_ownconsumptionrate_year": {
+        "name": "Own Consumption Rate Year"
+      },
+      "stat_energyhome_day": {
+        "name": "Home Consumption Day"
+      },
+      "stat_energyhome_month": {
+        "name": "Home Consumption Month"
+      },
+      "stat_energyhome_year": {
+        "name": "Home Consumption Year"
+      },
+      "stat_energyhome_total": {
+        "name": "Home Consumption Total"
+      },
+      "stat_energyhomebat_day": {
+        "name": "Home Consumption from Battery Day"
+      },
+      "stat_energyhomebat_month": {
+        "name": "Home Consumption from Battery Month"
+      },
+      "stat_energyhomebat_year": {
+        "name": "Home Consumption from Battery Year"
+      },
+      "stat_energyhomebat_total": {
+        "name": "Home Consumption from Battery Total"
+      },
+      "stat_energyhomegrid_day": {
+        "name": "Home Consumption from Grid Day"
+      },
+      "stat_energyhomegrid_month": {
+        "name": "Home Consumption from Grid Month"
+      },
+      "stat_energyhomegrid_year": {
+        "name": "Home Consumption from Grid Year"
+      },
+      "stat_energyhomegrid_total": {
+        "name": "Home Consumption from Grid Total"
+      },
+      "stat_energyhomepv_day": {
+        "name": "Home Consumption from PV Day"
+      },
+      "stat_energyhomepv_month": {
+        "name": "Home Consumption from PV Month"
+      },
+      "stat_energyhomepv_year": {
+        "name": "Home Consumption from PV Year"
+      },
+      "stat_energyhomepv_total": {
+        "name": "Home Consumption from PV Total"
+      },
+      "stat_energypv1_day": {
+        "name": "Energy PV1 Day"
+      },
+      "stat_energypv1_month": {
+        "name": "Energy PV1 Month"
+      },
+      "stat_energypv1_year": {
+        "name": "Energy PV1 Year"
+      },
+      "stat_energypv1_total": {
+        "name": "Energy PV1 Total"
+      },
+      "stat_energypv2_day": {
+        "name": "Energy PV2 Day"
+      },
+      "stat_energypv2_month": {
+        "name": "Energy PV2 Month"
+      },
+      "stat_energypv2_year": {
+        "name": "Energy PV2 Year"
+      },
+      "stat_energypv2_total": {
+        "name": "Energy PV2 Total"
+      },
+      "stat_energypv3_day": {
+        "name": "Energy PV3 Day"
+      },
+      "stat_energypv3_month": {
+        "name": "Energy PV3 Month"
+      },
+      "stat_energypv3_year": {
+        "name": "Energy PV3 Year"
+      },
+      "stat_energypv3_total": {
+        "name": "Energy PV3 Total"
+      },
+      "stat_yield_day": {
+        "name": "Energy Yield Day"
+      },
+      "stat_yield_month": {
+        "name": "Energy Yield Month"
+      },
+      "stat_yield_year": {
+        "name": "Energy Yield Year"
+      },
+      "stat_yield_total": {
+        "name": "Energy Yield Total"
+      },
+      "stat_energychargegrid_day": {
+        "name": "Battery Charge from Grid Day"
+      },
+      "stat_energychargegrid_month": {
+        "name": "Battery Charge from Grid Month"
+      },
+      "stat_energychargegrid_year": {
+        "name": "Battery Charge from Grid Year"
+      },
+      "stat_energychargegrid_total": {
+        "name": "Battery Charge from Grid Total"
+      },
+      "stat_energychargepv_day": {
+        "name": "Battery Charge from PV Day"
+      },
+      "stat_energychargepv_month": {
+        "name": "Battery Charge from PV Month"
+      },
+      "stat_energychargepv_year": {
+        "name": "Battery Charge from PV Year"
+      },
+      "stat_energychargepv_total": {
+        "name": "Battery Charge from PV Total"
+      },
+      "stat_energydischarge_day": {
+        "name": "Battery Discharge Day"
+      },
+      "stat_energydischarge_month": {
+        "name": "Battery Discharge Month"
+      },
+      "stat_energydischarge_year": {
+        "name": "Battery Discharge Year"
+      },
+      "stat_energydischarge_total": {
+        "name": "Battery Discharge Total"
+      },
+      "stat_energydischargegrid_day": {
+        "name": "Energy Discharge to Grid Day"
+      },
+      "stat_energydischargegrid_month": {
+        "name": "Energy Discharge to Grid Month"
+      },
+      "stat_energydischargegrid_year": {
+        "name": "Energy Discharge to Grid Year"
+      },
+      "stat_energydischargegrid_total": {
+        "name": "Energy Discharge to Grid Total"
+      },
+      "calc_totalgridconsumption_day": {
+        "name": "Total Grid Consumption Day"
+      },
+      "calc_totalgridconsumption_month": {
+        "name": "Total Grid Consumption Month"
+      },
+      "calc_totalgridconsumption_year": {
+        "name": "Total Grid Consumption Year"
+      },
+      "calc_totalgridconsumption_total": {
+        "name": "Total Grid Consumption Total"
+      },
+      "calc_batterydischargetotal_day": {
+        "name": "Battery Discharge Total Day"
+      },
+      "calc_batterydischargetotal_month": {
+        "name": "Battery Discharge Total Month"
+      },
+      "calc_batterydischargetotal_year": {
+        "name": "Battery Discharge Total Year"
+      },
+      "calc_batterydischargetotal_total": {
+        "name": "Battery Discharge Total Total"
+      },
+      "calc_batterychargetotal_day": {
+        "name": "Battery Charge Total Day"
+      },
+      "calc_batterychargetotal_month": {
+        "name": "Battery Charge Total Month"
+      },
+      "calc_batterychargetotal_year": {
+        "name": "Battery Charge Total Year"
+      },
+      "calc_batterychargetotal_total": {
+        "name": "Battery Charge Total Total"
+      },
+      "calc_batteryefficiency_day": {
+        "name": "Battery Efficiency Day"
+      },
+      "calc_batteryefficiency_month": {
+        "name": "Battery Efficiency Month"
+      },
+      "calc_batteryefficiency_year": {
+        "name": "Battery Efficiency Year"
+      },
+      "calc_batteryefficiency_total": {
+        "name": "Battery Efficiency Total"
+      },
+      "calc_batteryefficiencypvonly_day": {
+        "name": "Battery Efficiency PV Only Day"
+      },
+      "calc_batteryefficiencypvonly_month": {
+        "name": "Battery Efficiency PV Only Month"
+      },
+      "calc_batteryefficiencypvonly_year": {
+        "name": "Battery Efficiency PV Only Year"
+      },
+      "calc_batteryefficiencypvonly_total": {
+        "name": "Battery Efficiency PV Only Total"
+      },
+      "calc_batterynetefficiency_day": {
+        "name": "Battery Net Efficiency Day"
+      },
+      "calc_batterynetefficiency_month": {
+        "name": "Battery Net Efficiency Month"
+      },
+      "calc_batterynetefficiency_year": {
+        "name": "Battery Net Efficiency Year"
+      },
+      "calc_batterynetefficiency_total": {
+        "name": "Battery Net Efficiency Total"
+      },
+      "calc_inverterdischargeefficiency_day": {
+        "name": "Inverter Discharge Efficiency Day"
+      },
+      "calc_inverterdischargeefficiency_month": {
+        "name": "Inverter Discharge Efficiency Month"
+      },
+      "calc_inverterdischargeefficiency_year": {
+        "name": "Inverter Discharge Efficiency Year"
+      },
+      "calc_inverterdischargeefficiency_total": {
+        "name": "Inverter Discharge Efficiency Total"
+      },
+      "calc_gridchargeefficiency_day": {
+        "name": "Grid Charge Efficiency Day"
+      },
+      "calc_gridchargeefficiency_month": {
+        "name": "Grid Charge Efficiency Month"
+      },
+      "calc_gridchargeefficiency_year": {
+        "name": "Grid Charge Efficiency Year"
+      },
+      "calc_gridchargeefficiency_total": {
+        "name": "Grid Charge Efficiency Total"
+      },
+      "event_activeerrorcnt": {
+        "name": "Active Alarms"
+      },
+      "event_activewarningcnt": {
+        "name": "Active Warning Count"
+      },
+      "event_activeackcnt": {
+        "name": "Active Acknowledgment Count"
+      },
+      "virt_pv_p": {
+        "name": "PV Total Power"
+      },
+      "virt_statistic_energygrid_total": {
+        "name": "Energy to Grid Total"
+      },
+      "virt_statistic_energygrid_year": {
+        "name": "Energy to Grid Year"
+      },
+      "virt_statistic_energygrid_month": {
+        "name": "Energy to Grid Month"
+      },
+      "virt_statistic_energygrid_day": {
+        "name": "Energy to Grid Day"
+      },
+      "ac_l1_p": {
+        "name": "AC L1 Power"
+      },
+      "ac_l2_p": {
+        "name": "AC L2 Power"
+      },
+      "ac_l3_p": {
+        "name": "AC L3 Power"
+      },
+      "ac_l1_u": {
+        "name": "AC L1 Voltage"
+      },
+      "ac_l2_u": {
+        "name": "AC L2 Voltage"
+      },
+      "ac_l3_u": {
+        "name": "AC L3 Voltage"
+      },
+      "ac_l1_i": {
+        "name": "AC L1 Current"
+      },
+      "ac_l2_i": {
+        "name": "AC L2 Current"
+      },
+      "ac_l3_i": {
+        "name": "AC L3 Current"
+      },
+      "ac_frequency": {
+        "name": "AC Frequency"
+      },
+      "ac_cosphi": {
+        "name": "AC Power Factor"
+      },
+      "powermeter_p": {
+        "name": "Power Meter Power"
+      },
+      "powermeter_l1_p": {
+        "name": "Power Meter L1 Power"
+      },
+      "powermeter_l2_p": {
+        "name": "Power Meter L2 Power"
+      },
+      "powermeter_l3_p": {
+        "name": "Power Meter L3 Power"
+      },
+      "powermeter_l1_u": {
+        "name": "Power Meter L1 Voltage"
+      },
+      "powermeter_l2_u": {
+        "name": "Power Meter L2 Voltage"
+      },
+      "powermeter_l3_u": {
+        "name": "Power Meter L3 Voltage"
+      },
+      "powermeter_frequency": {
+        "name": "Power Meter Frequency"
+      },
+      "system_state": {
+        "name": "System State"
+      },
+      "update_status": {
+        "name": "Update Status"
+      },
+      "update_progress": {
+        "name": "Update Progress"
+      },
+      "update_version": {
+        "name": "Update Version"
+      }
+    },
     "number": {
       "battery_min_soc": {
         "name": "Battery min SoC"

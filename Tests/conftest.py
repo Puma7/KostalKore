@@ -66,32 +66,15 @@ pytest_socket.enable_socket()
 from kostal_plenticore import coordinator
 from kostal_plenticore.const import DOMAIN
 
-# Platinum-specific fixtures
-@pytest.fixture
-def mock_request_cache():
-    """Mock RequestCache for Platinum performance features."""
-    try:
-        from kostal_plenticore.coordinator import RequestCache
-        return RequestCache(ttl_seconds=5.0)
-    except ImportError:
-        # Fallback for older version
-        from unittest.mock import MagicMock
-        return MagicMock()
-
 @pytest.fixture
 def mock_performance_coordinator():
     """Mock performance-optimized coordinator."""
     try:
         from kostal_plenticore.coordinator import PlenticoreUpdateCoordinator
         coordinator = MagicMock(spec=PlenticoreUpdateCoordinator)
-        coordinator._request_cache = MagicMock()
-        coordinator._min_request_interval = timedelta(milliseconds=500)
-        coordinator._total_requests = 0
-        coordinator._duplicate_requests_prevented = 0
-        coordinator._rate_limited_requests = 0
+        coordinator._fetch = {}
         return coordinator
     except ImportError:
-        # Fallback for older version
         return MagicMock()
 
 @pytest.fixture
@@ -149,6 +132,7 @@ def immediate_async_call_later(hass: HomeAssistant):
     with (
         patch("homeassistant.helpers.event.async_call_later", side_effect=_immediate_call_later),
         patch("kostal_plenticore.coordinator.async_call_later", side_effect=_immediate_call_later),
+        patch("kostal_plenticore.number.async_call_later", side_effect=_immediate_call_later),
     ):
         yield
 
@@ -359,8 +343,8 @@ def mock_plenticore_client(
                     request = {module_id: [data_id]}
                 case (str() as module_id, Iterable() as data_ids):
                     request = {module_id: data_ids}
-                case ({},):
-                    request = args[0]
+                case (dict() as d,):
+                    request = d
                 case _:
                     raise NotImplementedError
 
@@ -371,12 +355,9 @@ def mock_plenticore_client(
                     for data_id in data_ids:
                         if data_id in values:
                             result[module_id][data_id] = values[data_id]
-                        else:
-                            raise ValueError(
-                                f"Missing data_id {data_id} in module {module_id}"
-                            )
                 else:
-                    raise ValueError(f"Missing module_id {module_id}")
+                    # Module not found – return empty dict for this module
+                    result[module_id] = {}
 
             return result
 

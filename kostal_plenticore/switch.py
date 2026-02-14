@@ -3,35 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 import asyncio
 import logging
 from typing import Any, Final, cast
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from homeassistant.helpers.entity_platform import (
-        AddEntitiesCallback as AddConfigEntryEntitiesCallback,
-    )
-else:
-    try:
-        from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-    except ImportError:
-        from homeassistant.helpers.entity_platform import (
-            AddEntitiesCallback as AddConfigEntryEntitiesCallback,
-        )
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity_registry import RegistryEntryDisabler
-from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 
@@ -42,8 +26,9 @@ from .helper import ensure_installer_access, parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
 
-# Security and performance constants
-SAFETY_CHECK_DELAY_SECONDS: Final[float] = 10.0
+PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
+
+# Performance constants
 SHADOW_MANAGEMENT_MODULE_ID: Final[str] = ModuleId.DEVICES_LOCAL
 SHADOW_MANAGEMENT_DATA_ID: Final[str] = SettingId.SHADOW_MGMT_ENABLE
 UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
@@ -590,7 +575,7 @@ async def async_setup_entry(
     # Fetch fresh settings data
     try:
         available_settings_data = await plenticore.client.get_settings()
-    except (ApiException, ClientError, TimeoutError, Exception) as err:
+    except (ApiException, ClientError, TimeoutError) as err:
         error_msg = str(err)
         if "Unknown API response [500]" in error_msg:
             _LOGGER.error(
@@ -866,153 +851,9 @@ async def async_setup_entry(
             )
         # Ensure we don't crash - basic switches will still be created
 
-    # Security: Disable existing entities BEFORE adding new ones
-    # This handles the case where entities were previously enabled and need to be disabled
-    # We do this BEFORE async_add_entities so we can disable existing entities immediately
-    # New entities will be created with entity_registry_enabled_default=False
-    disabled_count = 0
-    try:
-        entity_registry = er.async_get(hass)
-
-        # Disable existing regular switches that should be hidden
-        for description in SWITCH_SETTINGS_DATA:
-            # Skip Battery:ManualCharge - it should remain enabled
-            if description.key == "Battery:ManualCharge":
-                continue
-
-            # Only disable entities that are marked as hidden by default
-            if (
-                getattr(description, "entity_registry_enabled_default", True)
-                is not False
-            ):
-                continue
-
-            # Check if this setting exists in the API
-            if (
-                description.module_id not in available_settings_data
-                or description.key
-                not in (
-                    setting.id
-                    for setting in available_settings_data[description.module_id]
-                )
-            ):
-                continue
-
-            # Construct the unique_id that Home Assistant uses
-            unique_id = f"{entry.entry_id}_{description.module_id}_{description.key}"
-
-            try:
-                # Check if entity exists in registry and is currently enabled
-                entity_entry = entity_registry.async_get(unique_id)
-                if entity_entry and entity_entry.disabled_by is None:
-                    _LOGGER.info(
-                        "Security: Disabling existing switch entity %s (should be hidden by default)",
-                        description.name,
-                    )
-                    entity_registry.async_update_entity(
-                        unique_id, disabled_by=RegistryEntryDisabler.INTEGRATION
-                    )
-                    disabled_count += 1
-            except Exception as entity_err:
-                # Log but don't crash - entity registry operations should be safe but handle edge cases
-                _LOGGER.debug(
-                    "Could not disable entity %s: %s",
-                    description.name,
-                    entity_err,
-                )
-
-        # Also disable existing shadow management switches if they exist
-        # Shadow management switches use a different unique_id pattern
-        for dc_string in range(3):  # Check up to 3 DC strings
-            try:
-                shadow_unique_id = f"{entry.entry_id}_{PlenticoreShadowMgmtSwitch.MODULE_ID}_{PlenticoreShadowMgmtSwitch.SHADOW_DATA_ID}_{dc_string}"
-                shadow_entity_entry = entity_registry.async_get(shadow_unique_id)
-                if shadow_entity_entry and shadow_entity_entry.disabled_by is None:
-                    _LOGGER.info(
-                        "Security: Disabling existing shadow management switch for DC string %d (should be hidden by default)",
-                        dc_string + 1,
-                    )
-                    entity_registry.async_update_entity(
-                        shadow_unique_id, disabled_by=RegistryEntryDisabler.INTEGRATION
-                    )
-                    disabled_count += 1
-            except Exception as shadow_err:
-                # Log but don't crash - entity registry operations should be safe but handle edge cases
-                _LOGGER.debug(
-                    "Could not disable shadow management switch for DC string %d: %s",
-                    dc_string + 1,
-                    shadow_err,
-                )
-
-        if disabled_count > 0:
-            _LOGGER.info(
-                "Security: Disabled %d existing switch entities that should be hidden by default",
-                disabled_count,
-            )
-    except Exception as registry_err:
-        # Catch-all to ensure entity registry errors don't crash the platform
-        _LOGGER.warning(
-            "Error accessing entity registry for security disabling: %s - continuing without disabling existing entities",
-            registry_err,
-        )
-
-    # Now add entities - new ones will be created with entity_registry_enabled_default=False
-    # Existing ones were just disabled above
+    # New entities are created with entity_registry_enabled_default=False.
+    # Users who deliberately enable entities keep their choice across restarts.
     async_add_entities(entities)
-
-    # Also schedule a delayed check as a safety net in case entities weren't in registry yet
-    # This handles edge cases where entities might be added between our check and async_add_entities
-    async def disable_entities_safety_check(_now: datetime) -> None:
-        """Safety check to disable any entities that might have been missed."""
-        try:
-            entity_registry = er.async_get(hass)
-            additional_disabled = 0
-
-            for description in SWITCH_SETTINGS_DATA:
-                if description.key == "Battery:ManualCharge":
-                    continue
-                if (
-                    getattr(description, "entity_registry_enabled_default", True)
-                    is not False
-                ):
-                    continue
-                if (
-                    description.module_id not in available_settings_data
-                    or description.key
-                    not in (
-                        setting.id
-                        for setting in available_settings_data[description.module_id]
-                    )
-                ):
-                    continue
-
-                unique_id = (
-                    f"{entry.entry_id}_{description.module_id}_{description.key}"
-                )
-                try:
-                    entity_entry = entity_registry.async_get(unique_id)
-                    if entity_entry and entity_entry.disabled_by is None:
-                        _LOGGER.info(
-                            "Security: Disabling switch entity %s (safety check)",
-                            description.name,
-                        )
-                        entity_registry.async_update_entity(
-                            unique_id, disabled_by=RegistryEntryDisabler.INTEGRATION
-                        )
-                        additional_disabled += 1
-                except Exception:
-                    pass
-
-            if additional_disabled > 0:
-                _LOGGER.info(
-                    "Security: Disabled %d additional switch entities in safety check",
-                    additional_disabled,
-                )
-        except Exception:
-            pass  # Silent fail for safety check
-
-    # Schedule safety check after configured delay as a backup
-    async_call_later(hass, SAFETY_CHECK_DELAY_SECONDS, disable_entities_safety_check)
 
 
 class PlenticoreDataSwitch(
@@ -1077,7 +918,6 @@ class PlenticoreDataSwitch(
         if await self.coordinator.async_write_data(
             self.module_id, {self.data_id: self.on_value}
         ):
-            self.coordinator.name = f"{self.platform_name} {self._name} {self.on_label}"
             await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -1085,9 +925,6 @@ class PlenticoreDataSwitch(
         if await self.coordinator.async_write_data(
             self.module_id, {self.data_id: self.off_value}
         ):
-            self.coordinator.name = (
-                f"{self.platform_name} {self._name} {self.off_label}"
-            )
             await self.coordinator.async_request_refresh()
 
     @property
@@ -1097,15 +934,7 @@ class PlenticoreDataSwitch(
             return None  # Return None during startup to show "unknown" state
 
         value = self.coordinator.data[self.module_id][self.data_id]
-        is_on_state = value == self._is_on
-
-        if is_on_state:
-            self.coordinator.name = f"{self.platform_name} {self._name} {self.on_label}"
-        else:
-            self.coordinator.name = (
-                f"{self.platform_name} {self._name} {self.off_label}"
-            )
-        return bool(is_on_state)
+        return bool(value == self._is_on)
 
 
 class PlenticoreShadowMgmtSwitch(
