@@ -966,8 +966,8 @@ async def test_sensor_remaining_branches(hass: HomeAssistant) -> None:
     # calculated branches for exceptions and zero/none paths
     calc_desc = PlenticoreSensorEntityDescription(
         module_id="_calc_",
-        key="GridChargeEfficiency:Total",
-        name="Grid Charge Efficiency",
+        key="BatteryNetEfficiency:Total",
+        name="Battery Net Efficiency",
         formatter="format_round",
     )
     c = MagicMock()
@@ -986,9 +986,9 @@ async def test_sensor_remaining_branches(hass: HomeAssistant) -> None:
         "cov",
         DeviceInfo(identifiers={("kostal_plenticore", "x")}),
     )
-    assert calc.native_value is None  # line 2008 total_charge<=0
+    assert calc.native_value is None  # energy_in <= 0 (-1+1=0)
     c.data["scb:statistic:EnergyFlow"]["Statistic:EnergyChargePv:Total"] = "x"
-    assert calc.native_value is None  # 2019-2022
+    assert calc.native_value is None  # ValueError from float("x")
 
     pv_desc = PlenticoreSensorEntityDescription(
         module_id="_virt_",
