@@ -1,7 +1,7 @@
 {
   "domain": "kostal_plenticore",
   "name": "Kostal Plenticore Solar Inverter",
-  "version": "2.3.3",
+  "version": "2.4.0",
   "codeowners": [
     "@stegm"
   ],
@@ -13,6 +13,6 @@
     "kostal"
   ],
   "requirements": [
-    "pykoplenti==1.5.0rc1"
+    "pykoplenti==1.5.0"
   ]
 }
