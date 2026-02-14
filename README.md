@@ -50,7 +50,7 @@ This integration provides comprehensive monitoring and control capabilities for 
 
 ### Software Requirements
 - Home Assistant 2023.1 or newer
-- Python package: `pykoplenti==1.3.0` (automatically installed)
+- Python package: `pykoplenti==1.5.0` (automatically installed)
 
 ### Network Requirements
 - Inverter must be accessible on your local network
@@ -95,6 +95,30 @@ See `RELEASE_NOTES.md` for the latest release highlights.
 - **Host**: The network address of your Kostal inverter (e.g., `192.168.1.100`)
 - **Password**: Password for accessing the inverter's web interface
 - **Service Code**: Optional service code for accessing advanced settings (typically used by installers)
+
+## Data Update
+
+The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from the inverter at regular intervals:
+
+| Data Type | Update Interval | Description |
+|-----------|----------------|-------------|
+| Process Data (sensors) | 10 seconds | Real-time power, voltage, current measurements |
+| Settings Data (numbers/switches) | 30 seconds | Battery limits, operating modes, switch states |
+| Select Data (selects) | 30 seconds | Charging/usage mode selections |
+
+- All API calls are serialised by the coordinator to avoid overloading the inverter.
+- Settings data implements a last-result fallback for transient 503 errors.
+- Failed API calls are automatically retried on the next coordinator cycle.
+
+## Known Limitations
+
+- **No auto-discovery**: Kostal Plenticore inverters do not broadcast via mDNS/SSDP/DHCP. The inverter IP must be entered manually.
+- **DC string count**: The number of DC inputs (PV strings) is detected automatically on first setup. Changes require re-adding the integration.
+- **Firmware dependency**: Some advanced settings (G3 battery controls, external control registers) are only available on specific firmware versions.
+- **Installer access**: Certain controls require the installer/service code. Without it, these entities remain disabled.
+- **Single inverter per entry**: Each config entry manages exactly one inverter. Multiple inverters require separate config entries.
+- **API rate limits**: The inverter's local API has limited concurrency. The integration serialises all API calls to avoid overloading.
+- **Battery entities**: Battery-related sensors only appear when a compatible battery system is connected and detected by the inverter.
 
 ## Integration Architecture
 
@@ -370,9 +394,10 @@ Contributions are welcome! Please:
 
 ## Version History
 
-- **Current**: Based on pykoplenti v1.3.0
+- **Current**: v2.4.0 — Based on pykoplenti v1.5.0
 - **Compatibility**: Home Assistant 2023.1+
 - **API Support**: Kostal Plenticore local API
+- **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history
 
 ## Support
 

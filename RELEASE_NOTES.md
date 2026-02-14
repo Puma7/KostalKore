@@ -1,6 +1,16 @@
 # Release Notes
 
-## Unreleased
+## v2.4.0
+
+Major quality and robustness release.
+
+- **Repair Issues System**: HA repair notifications for auth failures, API errors, inverter busy, and missing installer code.
+- **Stale Device Removal**: Orphaned devices can now be removed from the device registry.
+- **Auto-Recovery**: `inverter_busy` repair issue auto-clears on successful communication.
+- **UI Feedback**: Failed write operations now show translated error messages in the UI.
+- **Select Fix**: Multiple select entities no longer overwrite each other's state.
+- **Code Simplification**: Removed `RequestCache` and HMAC-based caching in favour of coordinator-native deduplication.
+- **Dependency**: pykoplenti bumped to 1.5.0.
 
 ## v2.3.3
 
