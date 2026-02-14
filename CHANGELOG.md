@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-02-14
+
+### Changed
+- Clarified `BatteryEfficiency` description as a hybrid metric (Discharge DC / Charge DC+AC).
+
+### Fixed
+- Corrected `BatteryDischargeTotal` calculation to use pure AC values (`HomeBat` + `DischargeGrid`) for consistency.
+- Reached 100% test coverage by adding missing test case for `select` validation error.
+
+### Removed
+- Removed redundant `BatteryEfficiencyPvOnly` sensor (mathematically identical to `BatteryEfficiency`).
+- Removed redundant `GridChargeEfficiency` sensor (mathematically identical to `BatteryNetEfficiency`).
+
 ## [2.4.0] - 2026-02-14
 
 ### Added

@@ -1059,42 +1059,7 @@ SENSOR_PROCESS_DATA = [
         state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="BatteryEfficiencyPvOnly:Day",
-        name="Battery Efficiency PV Only Day",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="BatteryEfficiencyPvOnly:Month",
-        name="Battery Efficiency PV Only Month",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="BatteryEfficiencyPvOnly:Year",
-        name="Battery Efficiency PV Only Year",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="BatteryEfficiencyPvOnly:Total",
-        name="Battery Efficiency PV Only Total",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
+
     PlenticoreSensorEntityDescription(
         module_id="_calc_",
         key="BatteryNetEfficiency:Day",
@@ -1167,42 +1132,7 @@ SENSOR_PROCESS_DATA = [
         state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="GridChargeEfficiency:Day",
-        name="Grid Charge Efficiency Day",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="GridChargeEfficiency:Month",
-        name="Grid Charge Efficiency Month",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="GridChargeEfficiency:Year",
-        name="Grid Charge Efficiency Year",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="_calc_",
-        key="GridChargeEfficiency:Total",
-        name="Grid Charge Efficiency Total",
-        native_unit_of_measurement=PERCENTAGE,
-        device_class=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
-    ),
+
     PlenticoreSensorEntityDescription(
         module_id="scb:event",
         key="Event:ActiveErrorCnt",
@@ -1791,19 +1721,15 @@ class PlenticoreCalculatedSensor(
                 return cast(StateType, self._formatter(str(val_home + val_batt)))
             
             elif "BatteryDischargeTotal" in self.data_id:
-                # Battery to Home + Battery to Grid
+                # Total AC-side battery discharge: Battery → Home + Battery → Grid
+                # Uses pure AC measurements for consistency.
                 battery_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeBat:{period}")
-                battery_discharge = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyDischarge:{period}")
+                battery_grid = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyDischargeGrid:{period}")
                 
-                if battery_home is None or battery_discharge is None:
+                if battery_home is None or battery_grid is None:
                     return None
                 
-                val_home = float(battery_home)
-                val_discharge = float(battery_discharge)
-                
-                # Battery to Grid = Total Discharge - Battery to Home
-                battery_to_grid = val_discharge - val_home
-                total_discharge = val_home + max(0, battery_to_grid)
+                total_discharge = float(battery_home) + float(battery_grid)
                 return cast(StateType, self._formatter(str(total_discharge)))
             
             elif "BatteryChargeTotal" in self.data_id:
@@ -1820,48 +1746,11 @@ class PlenticoreCalculatedSensor(
                 total_charge = val_grid + val_pv
                 return cast(StateType, self._formatter(str(total_charge)))
             
-            elif metric == "BatteryEfficiencyPvOnly":
-                # PV-only round-trip efficiency: Discharge / ChargePv.
-                # Only counts PV-sourced charge as input. If grid charging also
-                # occurred, the PV share is isolated by subtracting grid charge
-                # from total discharge to approximate PV-only output.
-                charge_pv = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyChargePv:{period}",
-                )
-                charge_grid = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                )
-                battery_discharge = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyDischarge:{period}",
-                )
-
-                if charge_pv is None or battery_discharge is None:
-                    return None
-
-                energy_in = float(charge_pv)
-                if energy_in <= 0:
-                    return None
-
-                energy_out = float(battery_discharge)
-                # If grid charging occurred, estimate PV-only discharge by
-                # subtracting the grid-charged portion from total discharge.
-                grid_charge = float(charge_grid) if charge_grid is not None else 0.0
-                if grid_charge > 0:
-                    total_charge = energy_in + grid_charge
-                    pv_share = energy_in / total_charge
-                    energy_out = energy_out * pv_share
-
-                efficiency = (energy_out / energy_in) * 100
-                efficiency = min(MAX_EFFICIENCY_PERCENT, efficiency)
-                return cast(StateType, self._formatter(str(efficiency)))
-
             elif metric == "BatteryEfficiency":
-                # DC-side round-trip efficiency: Discharge / (ChargePv + ChargeGrid).
-                # Measures how much energy the battery returns relative to what
-                # was stored. Typical Li-ion values: 85-95%.
+                # Hybrid round-trip efficiency: Discharge(DC) / (ChargePv(DC) + ChargeGrid(AC)).
+                # ChargePv is DC-measured, ChargeGrid is AC-measured (at KSEM).
+                # This mixes measurement points but is the best available
+                # approximation. Typical Li-ion values: 85-95%.
                 charge_pv = self._get_sensor_value(
                     "scb:statistic:EnergyFlow",
                     f"Statistic:EnergyChargePv:{period}",
@@ -1954,68 +1843,7 @@ class PlenticoreCalculatedSensor(
                     return cast(StateType, self._formatter(str(efficiency)))
                 return None
 
-            elif metric == "GridChargeEfficiency":
-                # Grid-to-battery charge efficiency (AC→DC→Battery).
-                # EnergyChargeGrid is measured AC-side by the KSEM at the grid
-                # connection point. The discharge is attributed proportionally
-                # to the grid share of total charge.
-                # Formula: (Discharge × grid_share) / ChargeGrid
-                # where grid_share = ChargeGrid / (ChargePv + ChargeGrid)
-                # Simplifies to: Discharge / (ChargePv + ChargeGrid)
-                # which equals BatteryEfficiency. But we want the grid-only path:
-                # the ratio of grid-charged energy that comes back out.
-                # Since we can't separate DC-side grid charge from PV charge in
-                # the battery, we use the proportional model:
-                # grid_discharge = Discharge × (ChargeGrid / TotalCharge)
-                # efficiency = grid_discharge / ChargeGrid = Discharge / TotalCharge
-                # This equals BatteryEfficiency - which is correct because the
-                # battery doesn't distinguish between PV and grid electrons.
-                # However, the INTERESTING metric is the full AC→DC→AC path:
-                # (HomeBat + DischargeGrid) × grid_share / ChargeGrid
-                # = (HomeBat + DischargeGrid) / TotalCharge = BatteryNetEfficiency
-                #
-                # What's truly unique here: AC→Battery efficiency only (no discharge):
-                # We approximate by: Discharge / (ChargePv + ChargeGrid) gives DC eff.
-                # Grid-specific: since ChargeGrid is AC-measured but ChargePv is DC,
-                # the grid path includes extra inverter AC→DC losses.
-                # Best approximation: compare grid charge to its proportional discharge.
-                charge_pv = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyChargePv:{period}",
-                )
-                charge_grid = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                )
-                home_bat = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyHomeBat:{period}",
-                )
-                discharge_grid = self._get_sensor_value(
-                    "scb:statistic:EnergyFlow",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                )
 
-                if (charge_pv is None or charge_grid is None
-                        or home_bat is None or discharge_grid is None):
-                    return None
-
-                grid_charge = float(charge_grid)
-                if grid_charge <= 0:
-                    return None
-
-                total_charge = float(charge_pv) + grid_charge
-                if total_charge <= 0:
-                    return None
-
-                # Full AC→DC→AC roundtrip for grid-charged energy
-                total_ac_out = float(home_bat) + float(discharge_grid)
-                grid_share = grid_charge / total_charge
-                grid_ac_out = total_ac_out * grid_share
-
-                efficiency = (grid_ac_out / grid_charge) * 100
-                efficiency = min(MAX_EFFICIENCY_PERCENT, efficiency)
-                return cast(StateType, self._formatter(str(efficiency)))
 
         except (ValueError, TypeError, KeyError) as e:
             _LOGGER.debug("Error calculating %s: %s", self.data_id, e)
@@ -2038,22 +1866,14 @@ class PlenticoreCalculatedSensor(
             period = self.data_id.split(":")[1]
             required_ids: list[str] = []
 
-            if "BatteryEfficiencyPvOnly" in self.data_id:
+            if "BatteryDischargeTotal" in self.data_id:
                 required_ids = [
-                    f"Statistic:EnergyChargePv:{period}",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                    f"Statistic:EnergyDischarge:{period}",
+                    f"Statistic:EnergyHomeBat:{period}",
+                    f"Statistic:EnergyDischargeGrid:{period}",
                 ]
             elif "InverterDischargeEfficiency" in self.data_id:
                 required_ids = [
                     f"Statistic:EnergyDischarge:{period}",
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "GridChargeEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyChargePv:{period}",
-                    f"Statistic:EnergyChargeGrid:{period}",
                     f"Statistic:EnergyHomeBat:{period}",
                     f"Statistic:EnergyDischargeGrid:{period}",
                 ]

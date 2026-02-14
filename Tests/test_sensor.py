@@ -136,11 +136,7 @@ async def test_efficiency_calculated_sensors(
 
     # BatteryEfficiency: Discharge / (ChargePv + ChargeGrid) = 12/15 = 80%
     assert hass.states.get("sensor.scb_battery_efficiency_total").state == "80"
-    # BatteryEfficiencyPvOnly: pv_share=10/15, out=12*10/15=8, 8/10=80%
-    assert hass.states.get("sensor.scb_battery_efficiency_pv_only_total").state == "80"
     # BatteryNetEfficiency: (HomeBat + DischargeGrid) / (ChargePv + ChargeGrid) = (9+3)/15 = 80%
     assert hass.states.get("sensor.scb_battery_net_efficiency_total").state == "80"
     # InverterDischargeEfficiency: (HomeBat + DischargeGrid) / Discharge = (9+3)/12 = 100%
     assert hass.states.get("sensor.scb_inverter_discharge_efficiency_total").state == "100"
-    # GridChargeEfficiency: grid_share=5/15, ac_out=12*5/15=4, 4/5=80%
-    assert hass.states.get("sensor.scb_grid_charge_efficiency_total").state == "80"

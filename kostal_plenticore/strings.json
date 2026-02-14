@@ -351,18 +351,6 @@
       "calc_batteryefficiency_total": {
         "name": "Battery Efficiency Total"
       },
-      "calc_batteryefficiencypvonly_day": {
-        "name": "Battery Efficiency PV Only Day"
-      },
-      "calc_batteryefficiencypvonly_month": {
-        "name": "Battery Efficiency PV Only Month"
-      },
-      "calc_batteryefficiencypvonly_year": {
-        "name": "Battery Efficiency PV Only Year"
-      },
-      "calc_batteryefficiencypvonly_total": {
-        "name": "Battery Efficiency PV Only Total"
-      },
       "calc_batterynetefficiency_day": {
         "name": "Battery Net Efficiency Day"
       },
@@ -386,18 +374,6 @@
       },
       "calc_inverterdischargeefficiency_total": {
         "name": "Inverter Discharge Efficiency Total"
-      },
-      "calc_gridchargeefficiency_day": {
-        "name": "Grid Charge Efficiency Day"
-      },
-      "calc_gridchargeefficiency_month": {
-        "name": "Grid Charge Efficiency Month"
-      },
-      "calc_gridchargeefficiency_year": {
-        "name": "Grid Charge Efficiency Year"
-      },
-      "calc_gridchargeefficiency_total": {
-        "name": "Grid Charge Efficiency Total"
       },
       "event_activeerrorcnt": {
         "name": "Active Alarms"

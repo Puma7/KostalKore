@@ -687,6 +687,35 @@ async def test_select_select_option_writes(
 
 
 @pytest.mark.asyncio
+async def test_select_invalid_option_raises(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test that selecting an invalid option raises ValueError."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _empty_settings(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _empty_settings):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.hass = hass
+
+    with pytest.raises(ValueError, match="Invalid select option"):
+        await select_entity.async_select_option("InvalidOption")
+
+
+
+@pytest.mark.asyncio
 async def test_select_registry_migration_error_branch(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
