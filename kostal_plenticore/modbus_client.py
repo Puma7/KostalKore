@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import struct
 from typing import Any, Final
 
@@ -288,6 +289,15 @@ class KostalModbusClient:
 
     def _encode(self, value: Any, register: ModbusRegister) -> bytes:
         """Encode a value to raw bytes according to register data type."""
+        try:
+            return self._encode_inner(value, register)
+        except (ValueError, OverflowError, struct.error) as err:
+            raise ModbusWriteError(
+                f"Cannot encode value {value!r} for register {register.name}: {err}"
+            ) from err
+
+    def _encode_inner(self, value: Any, register: ModbusRegister) -> bytes:
+        """Inner encoding logic, may raise struct/value errors."""
         dt = register.data_type
 
         if dt == DataType.UINT16:
@@ -300,12 +310,16 @@ class KostalModbusClient:
             v = int(value)
             if self._endianness == "big":
                 return struct.pack(">I", v)
-            hi = v & 0xFFFF
-            lo = (v >> 16) & 0xFFFF
-            return struct.pack(">HH", hi, lo)
+            lo_word = v & 0xFFFF
+            hi_word = (v >> 16) & 0xFFFF
+            return struct.pack(">HH", lo_word, hi_word)
 
         if dt == DataType.FLOAT32:
             fv = float(value)
+            if math.isnan(fv) or math.isinf(fv):
+                raise ModbusWriteError(
+                    f"Refusing to write NaN/Infinity to register {register.name}"
+                )
             if self._endianness == "big":
                 return struct.pack(">f", fv)
             packed = struct.pack(">f", fv)

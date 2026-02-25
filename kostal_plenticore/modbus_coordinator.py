@@ -7,6 +7,7 @@ and provides the data to HA entities and the optional MQTT bridge.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
 from typing import Any, Final
 
@@ -101,6 +102,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._client.connected:
             try:
                 await self._client.connect()
+                await self._client.detect_endianness()
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
@@ -145,9 +147,15 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_write_register(
         self, register: ModbusRegister, value: Any
     ) -> None:
-        """Write a value to a control register."""
+        """Write a value to a control register with safety validation."""
         if register.access != Access.RW:
             raise ValueError(f"Register {register.name} is read-only")
+
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            raise ValueError(
+                f"Refusing to write NaN/Infinity to register {register.name}"
+            )
+
         try:
             await self._client.write_register(register, value)
             _LOGGER.info(

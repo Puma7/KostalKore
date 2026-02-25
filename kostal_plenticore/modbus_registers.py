@@ -216,7 +216,7 @@ REG_IO_OUTPUT_4 = ModbusRegister(611, "io_output_4", "I/O-Board, Switched Output
 # ---------------------------------------------------------------------------
 # External battery management registers (read/write) – Section 3.4
 # ---------------------------------------------------------------------------
-REG_BAT_CHARGE_AC_SETPOINT = ModbusRegister(1024, "bat_charge_ac_setpoint", "Battery charge power (AC) setpoint", DataType.SINT16, 1, Access.RW, RegisterGroup.BATTERY_MGMT, "W")
+REG_BAT_CHARGE_AC_SETPOINT = ModbusRegister(1024, "bat_charge_ac_setpoint", "Battery charge power (AC) setpoint", DataType.SINT16, 1, Access.RO, RegisterGroup.BATTERY_MGMT, "W")
 REG_BAT_CHARGE_AC_SCALE = ModbusRegister(1025, "bat_charge_ac_scale", "Power Scale Factor", DataType.SINT16, 1, Access.RO, RegisterGroup.BATTERY_MGMT)
 REG_BAT_CHARGE_AC_ABS = ModbusRegister(1026, "bat_charge_ac_abs", "Battery charge power (AC) absolute", DataType.FLOAT32, 2, Access.RW, RegisterGroup.BATTERY_MGMT, "W")
 REG_BAT_CHARGE_DC_REL = ModbusRegister(1028, "bat_charge_dc_rel", "Battery charge current (DC) relative", DataType.FLOAT32, 2, Access.RW, RegisterGroup.BATTERY_MGMT, "%")

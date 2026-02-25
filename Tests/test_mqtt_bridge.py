@@ -11,6 +11,7 @@ import pytest
 
 from kostal_plenticore.mqtt_bridge import (
     KostalMqttBridge,
+    SAFE_WRITABLE_REGISTERS,
     TOPIC_PREFIX,
     _has_mqtt,
 )
@@ -122,7 +123,7 @@ class TestBridgeStartWithMqtt:
             subscribe_calls = mock_mqtt.async_subscribe.call_args_list
             subscribed_topics = {call.args[1] for call in subscribe_calls}
 
-            for reg in WRITABLE_REGISTERS:
+            for reg in SAFE_WRITABLE_REGISTERS:
                 expected_topic = f"{TOPIC_PREFIX}/INV123/modbus/command/{reg.name}"
                 assert expected_topic in subscribed_topics, (
                     f"Missing subscription for {reg.name}"

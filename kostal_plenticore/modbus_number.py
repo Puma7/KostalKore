@@ -90,7 +90,7 @@ MODBUS_NUMBER_DESCRIPTIONS: Final = [
         "register": REG_ACTIVE_POWER_SETPOINT,
         "name": "Active Power Setpoint (Modbus)",
         "icon": "mdi:flash",
-        "min_value": 0,
+        "min_value": 1,
         "max_value": 100,
         "step": 1,
         "unit": "%",
@@ -207,6 +207,27 @@ class ModbusNumberEntity(
             return None
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write a new value to the Modbus register."""
+        """Write a new value to the Modbus register with safety validation."""
+        import math
+
+        if math.isnan(value) or math.isinf(value):
+            _LOGGER.error(
+                "Refusing to write NaN/Infinity to %s", self._register.name
+            )
+            return
+        if not (self._attr_native_min_value <= value <= self._attr_native_max_value):
+            _LOGGER.error(
+                "Value %s out of range [%s, %s] for %s",
+                value,
+                self._attr_native_min_value,
+                self._attr_native_max_value,
+                self._register.name,
+            )
+            return
+
+        _LOGGER.info(
+            "Writing %s = %s via Modbus (register %d)",
+            self._register.name, value, self._register.address,
+        )
         await self.coordinator.async_write_register(self._register, value)
         await self.coordinator.async_request_refresh()

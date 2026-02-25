@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Any, Final
 
 from homeassistant.core import HomeAssistant, callback
@@ -27,9 +28,19 @@ from .modbus_registers import (
     REGISTER_BY_NAME,
     WRITABLE_REGISTERS,
     Access,
+    RegisterGroup,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
+
+# Registers that must NOT be writable via MQTT (admin/config registers)
+_MQTT_EXCLUDED_NAMES: Final[frozenset[str]] = frozenset({
+    "modbus_enable", "unit_id", "byte_order",
+})
+
+SAFE_WRITABLE_REGISTERS: Final[tuple] = tuple(
+    r for r in WRITABLE_REGISTERS if r.name not in _MQTT_EXCLUDED_NAMES
+)
 
 TOPIC_PREFIX: Final[str] = "kostal_plenticore"
 QOS: Final[int] = 1
@@ -88,7 +99,7 @@ class KostalMqttBridge:
             retain=True,
         )
 
-        writable_names = [r.name for r in WRITABLE_REGISTERS]
+        writable_names = [r.name for r in SAFE_WRITABLE_REGISTERS]
         for name in writable_names:
             topic = f"{self._topic_base}/command/{name}"
             unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
@@ -185,7 +196,7 @@ class KostalMqttBridge:
         from homeassistant.components import mqtt
 
         meta: list[dict[str, Any]] = []
-        for reg in WRITABLE_REGISTERS:
+        for reg in SAFE_WRITABLE_REGISTERS:
             meta.append({
                 "name": reg.name,
                 "address": reg.address,
@@ -240,6 +251,23 @@ class KostalMqttBridge:
                 value = json.loads(payload)
             except (json.JSONDecodeError, ValueError):
                 value = payload
+
+            # Validate value is numeric and finite
+            if isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError:
+                    _LOGGER.warning(
+                        "MQTT command rejected: non-numeric value %r for %s",
+                        payload, reg_name,
+                    )
+                    return
+
+            if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+                _LOGGER.warning(
+                    "MQTT command rejected: NaN/Infinity for %s", reg_name
+                )
+                return
 
             await self._coordinator.async_write_register(reg, value)
             _LOGGER.info(
