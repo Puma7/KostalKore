@@ -6,6 +6,9 @@ omit =
     kostal_plenticore/number.py
     kostal_plenticore/sensor.py
     kostal_plenticore/switch.py
+    kostal_plenticore/modbus_client.py
+    kostal_plenticore/modbus_coordinator.py
+    kostal_plenticore/mqtt_bridge.py
 
 [report]
 show_missing = True

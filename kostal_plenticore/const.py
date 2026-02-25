@@ -9,6 +9,16 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD
 DOMAIN: Final[str] = "kostal_plenticore"
 CONF_SERVICE_CODE: Final[str] = "service_code"
 
+# Modbus configuration keys
+CONF_MODBUS_ENABLED: Final[str] = "modbus_enabled"
+CONF_MODBUS_PORT: Final[str] = "modbus_port"
+CONF_MODBUS_UNIT_ID: Final[str] = "modbus_unit_id"
+CONF_MODBUS_ENDIANNESS: Final[str] = "modbus_endianness"
+CONF_MQTT_BRIDGE_ENABLED: Final[str] = "mqtt_bridge_enabled"
+
+DEFAULT_MODBUS_PORT: Final[int] = 1502
+DEFAULT_MODBUS_UNIT_ID: Final[int] = 71
+
 # Centralised import for the platform callback type.
 # Older HA versions export ``AddEntitiesCallback``; newer ones renamed it to
 # ``AddConfigEntryEntitiesCallback``.  Using a single location avoids the
@@ -30,7 +40,14 @@ else:
 __all__ = [
     "AddConfigEntryEntitiesCallback",
     "CONF_HOST",
+    "CONF_MODBUS_ENABLED",
+    "CONF_MODBUS_ENDIANNESS",
+    "CONF_MODBUS_PORT",
+    "CONF_MODBUS_UNIT_ID",
+    "CONF_MQTT_BRIDGE_ENABLED",
     "CONF_PASSWORD",
     "CONF_SERVICE_CODE",
+    "DEFAULT_MODBUS_PORT",
+    "DEFAULT_MODBUS_UNIT_ID",
     "DOMAIN",
 ]
