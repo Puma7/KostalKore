@@ -10,7 +10,7 @@ from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiClient, AuthenticationException, ApiException
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, OptionsFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.config_entries import ConfigFlowResult
 else:
@@ -132,7 +132,9 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> KostalPlenticoreOptionsFlow:
         """Return the options flow handler."""
         return KostalPlenticoreOptionsFlow(config_entry)
 
@@ -211,11 +213,13 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 class KostalPlenticoreOptionsFlow(OptionsFlow):
     """Handle Kostal Plenticore options (Modbus & MQTT bridge settings)."""
 
-    def __init__(self, config_entry):
+    def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
 
-    async def async_step_init(self, user_input=None):
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Manage the Modbus/MQTT options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)

@@ -133,18 +133,19 @@ def create_modbus_number_entities(
     """
     entities: list[ModbusNumberEntity] = []
     for desc in MODBUS_NUMBER_DESCRIPTIONS:
+        register: ModbusRegister = desc["register"]  # type: ignore[assignment]
         entities.append(
             ModbusNumberEntity(
                 coordinator=coordinator,
-                register=desc["register"],
-                name=desc["name"],
-                icon=desc["icon"],
-                min_value=desc["min_value"],
-                max_value=desc["max_value"],
-                step=desc["step"],
-                unit=desc["unit"],
-                device_class=desc.get("device_class"),
-                entity_category=desc.get("entity_category"),
+                register=register,
+                name=str(desc["name"]),
+                icon=str(desc["icon"]),
+                min_value=float(desc["min_value"]),  # type: ignore[arg-type]
+                max_value=float(desc["max_value"]),  # type: ignore[arg-type]
+                step=float(desc["step"]),  # type: ignore[arg-type]
+                unit=str(desc["unit"]),
+                device_class=desc.get("device_class"),  # type: ignore[arg-type]
+                entity_category=desc.get("entity_category"),  # type: ignore[arg-type]
                 entry_id=entry_id,
                 device_info=device_info,
             )
