@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
+    ModbusRegister,
     REGISTER_BY_NAME,
     WRITABLE_REGISTERS,
     Access,
@@ -38,7 +39,7 @@ _MQTT_EXCLUDED_NAMES: Final[frozenset[str]] = frozenset({
     "modbus_enable", "unit_id", "byte_order",
 })
 
-SAFE_WRITABLE_REGISTERS: Final[tuple] = tuple(
+SAFE_WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
     r for r in WRITABLE_REGISTERS if r.name not in _MQTT_EXCLUDED_NAMES
 )
 
