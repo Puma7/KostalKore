@@ -8,7 +8,13 @@ omit =
     kostal_plenticore/switch.py
     kostal_plenticore/modbus_client.py
     kostal_plenticore/modbus_coordinator.py
+    kostal_plenticore/modbus_number.py
     kostal_plenticore/mqtt_bridge.py
 
 [report]
 show_missing = True
+exclude_lines =
+    if isinstance\(device_id, tuple\)
+    pragma: no cover
+    if TYPE_CHECKING
+    except ImportError

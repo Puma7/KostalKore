@@ -152,7 +152,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             if endianness == "auto":
                 await modbus_client.detect_endianness()
             _LOGGER.info("Modbus TCP connected to %s:%s", host, port)
-        except ModbusClientError as err:
+        except Exception as err:
             _LOGGER.warning(
                 "Modbus TCP setup failed: %s (REST API still active)", err
             )

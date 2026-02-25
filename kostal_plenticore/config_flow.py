@@ -136,7 +136,7 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> KostalPlenticoreOptionsFlow:
         """Return the options flow handler."""
-        return KostalPlenticoreOptionsFlow(config_entry)
+        return KostalPlenticoreOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -212,10 +212,6 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class KostalPlenticoreOptionsFlow(OptionsFlow):
     """Handle Kostal Plenticore options (Modbus & MQTT bridge settings)."""
-
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
