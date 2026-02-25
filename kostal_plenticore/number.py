@@ -30,7 +30,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from homeassistant.helpers.event import async_call_later
 
-from .const import CONF_SERVICE_CODE, AddConfigEntryEntitiesCallback
+from .const import CONF_SERVICE_CODE, DOMAIN, AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId, SettingId
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import (
@@ -1473,6 +1473,19 @@ async def async_setup_entry(
     # Ensure coordinator fetches critical values even if entity is disabled initially.
     for module_id, data_id in forced_fetch_pairs:
         settings_data_update_coordinator.start_fetch_data(module_id, data_id)
+
+    # Add Modbus-backed number entities if Modbus is enabled
+    modbus_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    modbus_coordinator = modbus_data.get("modbus_coordinator") if modbus_data else None
+    if modbus_coordinator is not None:
+        from .modbus_number import create_modbus_number_entities
+
+        modbus_entities = create_modbus_number_entities(
+            modbus_coordinator, entry.entry_id, plenticore.device_info
+        )
+        if modbus_entities:
+            async_add_entities(modbus_entities)
+            _LOGGER.info("Added %d Modbus number entities", len(modbus_entities))
 
 
 class PlenticoreDataNumber(

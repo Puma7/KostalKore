@@ -22,12 +22,25 @@ from typing import Final
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException
 
-from homeassistant.const import Platform
+from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
+from .const import (
+    CONF_MODBUS_ENABLED,
+    CONF_MODBUS_ENDIANNESS,
+    CONF_MODBUS_PORT,
+    CONF_MODBUS_UNIT_ID,
+    CONF_MQTT_BRIDGE_ENABLED,
+    DEFAULT_MODBUS_PORT,
+    DEFAULT_MODBUS_UNIT_ID,
+    DOMAIN,
+)
 from .coordinator import Plenticore, PlenticoreConfigEntry
 from .helper import parse_modbus_exception
+from .modbus_client import KostalModbusClient, ModbusClientError
+from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue
 
 _LOGGER = logging.getLogger(__name__)
@@ -116,6 +129,51 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     entry.runtime_data = plenticore
 
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    # Optional Modbus TCP setup
+    modbus_coordinator = None
+    mqtt_bridge = None
+    if entry.options.get(CONF_MODBUS_ENABLED, False):
+        host = entry.data[CONF_HOST]
+        port = entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)
+        unit_id = entry.options.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID)
+        endianness = entry.options.get(CONF_MODBUS_ENDIANNESS, "auto")
+
+        modbus_client = KostalModbusClient(
+            host=host,
+            port=port,
+            unit_id=unit_id,
+            endianness="little" if endianness == "auto" else endianness,
+        )
+        modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client)
+        try:
+            await modbus_coordinator.async_setup()
+            if endianness == "auto":
+                await modbus_client.detect_endianness()
+            _LOGGER.info("Modbus TCP connected to %s:%s", host, port)
+        except ModbusClientError as err:
+            _LOGGER.warning(
+                "Modbus TCP setup failed: %s (REST API still active)", err
+            )
+            modbus_coordinator = None
+
+        if modbus_coordinator and entry.options.get(
+            CONF_MQTT_BRIDGE_ENABLED, False
+        ):
+            device_id = plenticore.device_info.get("serial_number", entry.entry_id)
+            if isinstance(device_id, tuple):
+                device_id = str(entry.entry_id)
+            mqtt_bridge = KostalMqttBridge(
+                hass, modbus_coordinator, str(device_id)
+            )
+            await mqtt_bridge.async_start()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "modbus_coordinator": modbus_coordinator,
+        "mqtt_bridge": mqtt_bridge,
+    }
+
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception as err:
@@ -127,6 +185,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     return True
 
 
+async def _async_options_updated(
+    hass: HomeAssistant, entry: PlenticoreConfigEntry
+) -> None:
+    """Reload integration when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -> bool:
     """
     Unload the Kostal Plenticore integration with graceful cleanup.
@@ -136,10 +201,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     connection is properly terminated.
 
     Unload Process:
-    1. Unload all platforms (sensors, switches, numbers, selects)
-    2. Logout from inverter with timeout protection
-    3. Clean up resources and connections
-    4. Monitor cleanup performance
+    1. Clean up Modbus + MQTT bridge
+    2. Unload all platforms (sensors, switches, numbers, selects)
+    3. Logout from inverter with timeout protection
+    4. Clean up resources and connections
+    5. Monitor cleanup performance
 
     Performance Features:
     - Concurrent platform unloading
@@ -147,6 +213,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     - Resource cleanup monitoring
     """
     start_time = time.time()
+
+    # Clean up Modbus + MQTT bridge
+    entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    mqtt_bridge = entry_data.get("mqtt_bridge")
+    if mqtt_bridge:
+        await mqtt_bridge.async_stop()
+    modbus_coordinator = entry_data.get("modbus_coordinator")
+    if modbus_coordinator:
+        await modbus_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

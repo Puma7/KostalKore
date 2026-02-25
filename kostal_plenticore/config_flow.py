@@ -10,16 +10,26 @@ from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiClient, AuthenticationException, ApiException
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import ConfigFlow, OptionsFlow
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.config_entries import ConfigFlowResult
 else:
     ConfigFlowResult: TypeAlias = dict[str, Any]
 from homeassistant.const import CONF_BASE, CONF_HOST, CONF_PASSWORD
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_SERVICE_CODE, DOMAIN
+from .const import (
+    CONF_MODBUS_ENABLED,
+    CONF_MODBUS_ENDIANNESS,
+    CONF_MODBUS_PORT,
+    CONF_MODBUS_UNIT_ID,
+    CONF_MQTT_BRIDGE_ENABLED,
+    CONF_SERVICE_CODE,
+    DEFAULT_MODBUS_PORT,
+    DEFAULT_MODBUS_UNIT_ID,
+    DOMAIN,
+)
 from .helper import get_hostname_id
 
 _LOGGER = logging.getLogger(__name__)
@@ -120,6 +130,12 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Return the options flow handler."""
+        return KostalPlenticoreOptionsFlow(config_entry)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -190,3 +206,43 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm", data_schema=DATA_SCHEMA, errors=errors
         )
+
+
+class KostalPlenticoreOptionsFlow(OptionsFlow):
+    """Handle Kostal Plenticore options (Modbus & MQTT bridge settings)."""
+
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Manage the Modbus/MQTT options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self.config_entry.options
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MODBUS_ENABLED,
+                    default=options.get(CONF_MODBUS_ENABLED, False),
+                ): bool,
+                vol.Optional(
+                    CONF_MODBUS_PORT,
+                    default=options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT),
+                ): int,
+                vol.Optional(
+                    CONF_MODBUS_UNIT_ID,
+                    default=options.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID),
+                ): int,
+                vol.Optional(
+                    CONF_MODBUS_ENDIANNESS,
+                    default=options.get(CONF_MODBUS_ENDIANNESS, "auto"),
+                ): vol.In(["auto", "little", "big"]),
+                vol.Optional(
+                    CONF_MQTT_BRIDGE_ENABLED,
+                    default=options.get(CONF_MQTT_BRIDGE_ENABLED, False),
+                ): bool,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

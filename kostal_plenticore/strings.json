@@ -1,4 +1,19 @@
 {
+  "options": {
+    "step": {
+      "init": {
+        "title": "Modbus & MQTT Bridge Settings",
+        "description": "Enable direct Modbus TCP access to the inverter. This allows battery charge/discharge control and shares data via MQTT with external systems (evcc, iobroker).",
+        "data": {
+          "modbus_enabled": "Enable Modbus TCP",
+          "modbus_port": "Modbus TCP Port",
+          "modbus_unit_id": "Modbus Unit ID",
+          "modbus_endianness": "Byte Order (Endianness)",
+          "mqtt_bridge_enabled": "Enable MQTT Bridge"
+        }
+      }
+    }
+  },
   "config": {
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
