@@ -26,11 +26,13 @@ from .modbus_registers import (
     ModbusRegister,
     RegisterGroup,
     REG_INVERTER_STATE,
+    REG_INVERTER_MAX_POWER,
     REG_SERIAL_NUMBER,
     REG_PRODUCT_NAME,
     REG_SW_VERSION,
     REG_NUM_PV_STRINGS,
     REG_BATTERY_TYPE,
+    REG_BATTERY_MGMT_MODE,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -137,6 +139,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         info_regs = [
             REG_SERIAL_NUMBER, REG_PRODUCT_NAME, REG_SW_VERSION,
             REG_NUM_PV_STRINGS, REG_INVERTER_STATE, REG_BATTERY_TYPE,
+            REG_INVERTER_MAX_POWER, REG_BATTERY_MGMT_MODE,
         ]
         for reg in info_regs:
             try:
