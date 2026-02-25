@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
@@ -1471,7 +1471,7 @@ async def async_setup_entry(
     def create_entities_batch(
         process_data_update_coordinator: ProcessDataUpdateCoordinator,
         descriptions: list[PlenticoreSensorEntityDescription],
-        available_process_data: dict[str, Any],
+        available_process_data: Mapping[str, Any],
         entry: PlenticoreConfigEntry,
         plenticore: Any,
         dc_string_count: int,  # Add string count for smart filtering
@@ -1660,8 +1660,6 @@ class PlenticoreCalculatedSensor(
 ):
     """Representation of a calculated Plenticore Sensor."""
 
-    entity_description: PlenticoreSensorEntityDescription
-
     def __init__(
         self,
         coordinator: ProcessDataUpdateCoordinator,
@@ -1692,12 +1690,12 @@ class PlenticoreCalculatedSensor(
             self._attr_translation_key = tk
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
         return super().available and self.coordinator.data is not None
 
     @property
-    def native_value(self) -> StateType:
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
@@ -1900,8 +1898,6 @@ class CalculatedPvSumSensor(
 ):
     """Representation of a calculated PV sum power Sensor."""
 
-    entity_description: PlenticoreSensorEntityDescription
-
     def __init__(
         self,
         coordinator: ProcessDataUpdateCoordinator,
@@ -1934,7 +1930,7 @@ class CalculatedPvSumSensor(
             self._attr_translation_key = tk
 
     @property
-    def native_value(self) -> Any:
+    def native_value(self) -> Any:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the calculated sum of PV powers from all available DC strings."""
         if self.coordinator.data is None:
             return None
@@ -1961,7 +1957,7 @@ class CalculatedPvSumSensor(
         return cast(StateType, self._formatter(str(total_power)))
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return True if the sensor is available."""
         base_available = super().available
         coordinator_data = self.coordinator.data is not None
@@ -2001,8 +1997,6 @@ class PlenticoreDataSensor(
 ):
     """Representation of a Plenticore data Sensor."""
 
-    entity_description: PlenticoreSensorEntityDescription
-
     def __init__(
         self,
         coordinator: ProcessDataUpdateCoordinator,
@@ -2033,7 +2027,7 @@ class PlenticoreDataSensor(
             self._attr_translation_key = tk
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
         return (
             super().available
@@ -2054,7 +2048,7 @@ class PlenticoreDataSensor(
         await super().async_will_remove_from_hass()
 
     @property
-    def native_value(self) -> StateType:
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the state of the sensor."""
         if (
             not super().available

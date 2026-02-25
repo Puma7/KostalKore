@@ -862,7 +862,6 @@ class PlenticoreDataSwitch(
     """Representation of a Plenticore Switch."""
 
     _attr_entity_category = EntityCategory.CONFIG
-    entity_description: PlenticoreSwitchEntityDescription
 
     def __init__(
         self,
@@ -892,7 +891,7 @@ class PlenticoreDataSwitch(
         self._attr_device_info = device_info
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
         return (
             super().available
@@ -928,7 +927,7 @@ class PlenticoreDataSwitch(
             await self.coordinator.async_request_refresh()
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool | None:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return true if device is on."""
         if not self.available or self.coordinator.data is None:
             return None  # Return None during startup to show "unknown" state
@@ -950,7 +949,6 @@ class PlenticoreShadowMgmtSwitch(
     """
 
     _attr_entity_category = EntityCategory.CONFIG
-    entity_description: SwitchEntityDescription
 
     MODULE_ID: Final = ModuleId.DEVICES_LOCAL
 
@@ -999,7 +997,7 @@ class PlenticoreShadowMgmtSwitch(
         self._attr_device_info = device_info
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
         return (
             super().available
@@ -1038,7 +1036,7 @@ class PlenticoreShadowMgmtSwitch(
             await self.coordinator.async_request_refresh()
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool | None:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return true if shadow management is on."""
         if not self.available or self.coordinator.data is None:
             return None  # Return None during startup to show "unknown" state

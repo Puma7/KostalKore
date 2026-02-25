@@ -227,7 +227,6 @@ class PlenticoreDataSelect(
     """Representation of a Plenticore Select."""
 
     _attr_entity_category = EntityCategory.CONFIG
-    entity_description: PlenticoreSelectEntityDescription
 
     def __init__(
         self,
@@ -252,7 +251,7 @@ class PlenticoreDataSelect(
         self._attr_translation_key = _normalize_translation_key(description.key)
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
         return (
             super().available
@@ -304,7 +303,7 @@ class PlenticoreDataSelect(
         self.async_write_ha_state()
 
     @property
-    def current_option(self) -> str | None:
+    def current_option(self) -> str | None:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the selected entity option to represent the entity state."""
         if self.available:
             return self.coordinator.data[self.module_id].get(

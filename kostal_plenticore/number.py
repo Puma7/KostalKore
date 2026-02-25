@@ -1480,8 +1480,6 @@ class PlenticoreDataNumber(
 ):
     """Representation of a Kostal Plenticore Number entity."""
 
-    entity_description: PlenticoreNumberEntityDescription
-
     def __init__(
         self,
         coordinator: SettingDataUpdateCoordinator,
@@ -1501,6 +1499,8 @@ class PlenticoreDataNumber(
             super().__init__(coordinator)
 
             self.entity_description = description
+            self._module_id = description.module_id
+            self._data_id = description.data_id
             self.entry_id = entry_id
 
             self._attr_device_info = device_info
@@ -1544,15 +1544,15 @@ class PlenticoreDataNumber(
     @property
     def module_id(self) -> str:
         """Return the plenticore module id of this entity."""
-        return self.entity_description.module_id
+        return self._module_id
 
     @property
     def data_id(self) -> str:
         """Return the plenticore data id for this entity."""
-        return self.entity_description.data_id
+        return self._data_id
 
     @property
-    def available(self) -> bool:
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
         base_available = super().available
         has_data = self.coordinator.data is not None
@@ -1669,7 +1669,7 @@ class PlenticoreDataNumber(
         await super().async_will_remove_from_hass()
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the current value."""
         if self.available:
             data_id = self._resolve_data_id_for_read()
