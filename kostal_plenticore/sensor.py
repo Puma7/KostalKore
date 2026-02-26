@@ -22,6 +22,7 @@ from homeassistant.const import (
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfPower,
+    UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -341,6 +342,15 @@ SENSOR_PROCESS_DATA = [
         name="Battery Current",
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        formatter="format_round",
+    ),
+    PlenticoreSensorEntityDescription(
+        module_id="devices:local:battery",
+        key="Temp",
+        name="Battery Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
