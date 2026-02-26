@@ -11,8 +11,13 @@ from kostal_plenticore.modbus_client import (
     KostalModbusClient,
     ModbusClientError,
     ModbusConnectionError,
+    ModbusPermanentError,
     ModbusReadError,
+    ModbusTransientError,
     ModbusWriteError,
+    _classify_exception_response,
+    EXCEPTION_MESSAGES,
+    ModbusExceptionCode,
 )
 from kostal_plenticore.modbus_registers import (
     Access,
@@ -227,19 +232,22 @@ class TestConnectionLifecycle:
     @pytest.mark.asyncio
     async def test_read_when_disconnected_raises(self) -> None:
         c = KostalModbusClient("192.168.1.100")
-        with pytest.raises(ModbusConnectionError, match="Not connected"):
-            await c.read_register(REG_TOTAL_DC_POWER)
+        with patch.object(c, "reconnect", new_callable=AsyncMock, side_effect=ModbusConnectionError("refused")):
+            with pytest.raises((ModbusConnectionError, ModbusReadError)):
+                await c.read_register(REG_TOTAL_DC_POWER)
 
     @pytest.mark.asyncio
-    async def test_read_error_response(self) -> None:
+    async def test_read_error_response_permanent(self) -> None:
         c = KostalModbusClient("192.168.1.100")
         mock_client = AsyncMock()
         mock_client.connected = True
-        mock_client.read_holding_registers = AsyncMock(
-            return_value=_make_response([], is_error=True)
-        )
+        err_resp = MagicMock()
+        err_resp.isError.return_value = True
+        err_resp.exception_code = 0x02
+        err_resp.function_code = 0x83
+        mock_client.read_holding_registers = AsyncMock(return_value=err_resp)
         c._client = mock_client
-        with pytest.raises(ModbusReadError):
+        with pytest.raises(ModbusPermanentError):
             await c.read_register(REG_TOTAL_DC_POWER)
 
 
@@ -275,3 +283,68 @@ class TestNameAndAddressLookup:
         assert c.host == "10.0.0.1"
         assert c.port == 1502
         assert c.connected is False
+
+
+class TestExceptionClassification:
+    """Test Modbus exception code classification."""
+
+    def test_illegal_data_address_is_permanent(self) -> None:
+        resp = MagicMock()
+        resp.exception_code = ModbusExceptionCode.ILLEGAL_DATA_ADDRESS
+        resp.function_code = 0x83
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusPermanentError)
+        assert "not available" in str(err)
+
+    def test_server_busy_is_transient(self) -> None:
+        resp = MagicMock()
+        resp.exception_code = ModbusExceptionCode.SERVER_DEVICE_BUSY
+        resp.function_code = 0x83
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusTransientError)
+        assert "busy" in str(err).lower()
+
+    def test_server_failure_is_transient(self) -> None:
+        resp = MagicMock()
+        resp.exception_code = ModbusExceptionCode.SERVER_DEVICE_FAILURE
+        resp.function_code = 0x83
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusTransientError)
+
+    def test_illegal_function_is_permanent(self) -> None:
+        resp = MagicMock()
+        resp.exception_code = ModbusExceptionCode.ILLEGAL_FUNCTION
+        resp.function_code = 0x81
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusPermanentError)
+
+    def test_illegal_data_value_is_permanent(self) -> None:
+        resp = MagicMock()
+        resp.exception_code = ModbusExceptionCode.ILLEGAL_DATA_VALUE
+        resp.function_code = 0x90
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusPermanentError)
+
+    def test_unknown_code_is_generic(self) -> None:
+        resp = MagicMock()
+        resp.exception_code = 0xFF
+        resp.function_code = 0x83
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusReadError)
+
+    def test_no_exception_code_is_generic(self) -> None:
+        resp = MagicMock(spec=[])
+        err = _classify_exception_response(resp)
+        assert isinstance(err, ModbusReadError)
+
+    def test_all_messages_defined(self) -> None:
+        for code in ModbusExceptionCode:
+            assert code.value in EXCEPTION_MESSAGES
+
+
+class TestUnavailableRegisterTracking:
+    """Test that ILLEGAL_DATA_ADDRESS registers are permanently skipped."""
+
+    def test_unavailable_registers_initially_empty(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        assert len(c.unavailable_registers) == 0

@@ -1,7 +1,16 @@
 """Async Modbus TCP client for Kostal Plenticore inverters.
 
 Wraps pymodbus ``AsyncModbusTcpClient`` with Kostal-specific encoding,
-endianness handling, and error translation.
+endianness handling, error classification, and automatic retry for
+transient faults (inverter busy, timeouts).
+
+Error handling strategy:
+- ILLEGAL FUNCTION (01): register not writable → permanent, no retry
+- ILLEGAL DATA ADDRESS (02): register not on this model → permanent, skip
+- ILLEGAL DATA VALUE (03): bad value sent → permanent, no retry
+- SERVER DEVICE FAILURE (04): inverter internal error → retry once
+- SERVER DEVICE BUSY (06): inverter busy → retry with backoff
+- Connection lost / timeout → reconnect + retry
 """
 
 from __future__ import annotations
@@ -10,10 +19,14 @@ import asyncio
 import logging
 import math
 import struct
+from enum import IntEnum
 from typing import Any, Final
 
 from pymodbus.client import AsyncModbusTcpClient
-from pymodbus.exceptions import ModbusException as PyModbusException
+from pymodbus.exceptions import (
+    ConnectionException as PyConnectionException,
+    ModbusException as PyModbusException,
+)
 
 from .modbus_registers import (
     Access,
@@ -31,6 +44,48 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT: Final[float] = 10.0
 READ_TIMEOUT: Final[float] = 5.0
+RETRY_DELAY_BUSY: Final[float] = 1.0
+RETRY_DELAY_FAILURE: Final[float] = 0.5
+MAX_RETRIES: Final[int] = 2
+
+
+class ModbusExceptionCode(IntEnum):
+    """Modbus standard exception codes (from Kostal docs Section 2.1.7)."""
+
+    ILLEGAL_FUNCTION = 0x01
+    ILLEGAL_DATA_ADDRESS = 0x02
+    ILLEGAL_DATA_VALUE = 0x03
+    SERVER_DEVICE_FAILURE = 0x04
+    ACKNOWLEDGE = 0x05
+    SERVER_DEVICE_BUSY = 0x06
+    MEMORY_PARITY_ERROR = 0x08
+    GATEWAY_PATH_UNAVAILABLE = 0x0A
+    GATEWAY_TARGET_FAILED = 0x0B
+
+
+EXCEPTION_MESSAGES: Final[dict[int, str]] = {
+    0x01: "Illegal function – register does not support this operation",
+    0x02: "Illegal data address – register not available on this inverter model",
+    0x03: "Illegal data value – value rejected by inverter",
+    0x04: "Server device failure – inverter internal error",
+    0x05: "Acknowledge – request received, processing",
+    0x06: "Server device busy – inverter is processing another request, retry later",
+    0x08: "Memory parity error – inverter memory fault",
+    0x0A: "Gateway path unavailable",
+    0x0B: "Gateway target device failed to respond",
+}
+
+TRANSIENT_CODES: Final[frozenset[int]] = frozenset({
+    ModbusExceptionCode.SERVER_DEVICE_FAILURE,
+    ModbusExceptionCode.SERVER_DEVICE_BUSY,
+    ModbusExceptionCode.ACKNOWLEDGE,
+})
+
+PERMANENT_CODES: Final[frozenset[int]] = frozenset({
+    ModbusExceptionCode.ILLEGAL_FUNCTION,
+    ModbusExceptionCode.ILLEGAL_DATA_ADDRESS,
+    ModbusExceptionCode.ILLEGAL_DATA_VALUE,
+})
 
 
 class ModbusClientError(Exception):
@@ -49,11 +104,41 @@ class ModbusWriteError(ModbusClientError):
     """Raised when a register write fails."""
 
 
+class ModbusTransientError(ModbusClientError):
+    """Raised on transient faults that should be retried (busy, timeout)."""
+
+
+class ModbusPermanentError(ModbusClientError):
+    """Raised on permanent faults that should NOT be retried (illegal address)."""
+
+
+def _classify_exception_response(resp: Any) -> ModbusClientError:
+    """Classify a Modbus exception response into the right error type."""
+    exc_code = getattr(resp, "exception_code", None)
+    if exc_code is None:
+        return ModbusReadError(f"Unknown Modbus error: {resp}")
+
+    message = EXCEPTION_MESSAGES.get(exc_code, f"Unknown exception code 0x{exc_code:02X}")
+    func_code = getattr(resp, "function_code", 0)
+
+    if exc_code in TRANSIENT_CODES:
+        return ModbusTransientError(
+            f"Modbus transient error (func=0x{func_code:02X}, exc=0x{exc_code:02X}): {message}"
+        )
+    if exc_code in PERMANENT_CODES:
+        return ModbusPermanentError(
+            f"Modbus permanent error (func=0x{func_code:02X}, exc=0x{exc_code:02X}): {message}"
+        )
+    return ModbusReadError(
+        f"Modbus error (func=0x{func_code:02X}, exc=0x{exc_code:02X}): {message}"
+    )
+
+
 class KostalModbusClient:
     """Async Modbus TCP client for Kostal Plenticore inverters.
 
-    Handles connection management, register encoding/decoding, and
-    endianness detection. Thread-safe via asyncio lock.
+    Handles connection management, register encoding/decoding, endianness
+    detection, and automatic retry for transient faults.
     """
 
     def __init__(
@@ -69,6 +154,7 @@ class KostalModbusClient:
         self._endianness = endianness
         self._client: AsyncModbusTcpClient | None = None
         self._lock = asyncio.Lock()
+        self._unavailable_registers: set[int] = set()
 
     @property
     def host(self) -> str:
@@ -81,6 +167,11 @@ class KostalModbusClient:
     @property
     def connected(self) -> bool:
         return self._client is not None and self._client.connected
+
+    @property
+    def unavailable_registers(self) -> frozenset[int]:
+        """Registers that returned ILLEGAL_DATA_ADDRESS (not on this model)."""
+        return frozenset(self._unavailable_registers)
 
     async def connect(self) -> bool:
         """Establish TCP connection to the inverter."""
@@ -117,6 +208,11 @@ class KostalModbusClient:
                 self._client = None
                 _LOGGER.debug("Modbus TCP disconnected from %s", self._host)
 
+    async def reconnect(self) -> bool:
+        """Force-close and re-establish the connection."""
+        await self.disconnect()
+        return await self.connect()
+
     async def detect_endianness(self) -> str:
         """Read the byte order register and return 'little' or 'big'."""
         raw = await self._raw_read(REG_BYTE_ORDER.address, 1)
@@ -127,20 +223,96 @@ class KostalModbusClient:
         return detected
 
     # ------------------------------------------------------------------
-    # Public read/write API
+    # Public read/write API with retry
     # ------------------------------------------------------------------
 
     async def read_register(self, register: ModbusRegister) -> Any:
-        """Read and decode a single register or register block."""
-        raw = await self._raw_read(register.address, register.count)
-        return self._decode(raw, register)
+        """Read and decode a register with retry on transient errors."""
+        if register.address in self._unavailable_registers:
+            raise ModbusPermanentError(
+                f"Register {register.name} (addr {register.address}) "
+                f"is not available on this inverter model"
+            )
+
+        for attempt in range(1 + MAX_RETRIES):
+            try:
+                raw = await self._raw_read(register.address, register.count)
+                return self._decode(raw, register)
+            except ModbusPermanentError:
+                if getattr(self, "_last_exc_code", None) == ModbusExceptionCode.ILLEGAL_DATA_ADDRESS:
+                    self._unavailable_registers.add(register.address)
+                    _LOGGER.info(
+                        "Register %s (addr %d) not available on this model – skipping permanently",
+                        register.name, register.address,
+                    )
+                raise
+            except ModbusTransientError as err:
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAY_BUSY if "busy" in str(err).lower() else RETRY_DELAY_FAILURE
+                    _LOGGER.debug(
+                        "Transient error reading %s, retry %d/%d in %.1fs: %s",
+                        register.name, attempt + 1, MAX_RETRIES, delay, err,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise ModbusReadError(
+                        f"Read failed after {MAX_RETRIES} retries for {register.name}: {err}"
+                    ) from err
+            except (ModbusConnectionError, PyConnectionException) as err:
+                if attempt < MAX_RETRIES:
+                    _LOGGER.warning(
+                        "Connection lost reading %s, reconnecting (attempt %d/%d)",
+                        register.name, attempt + 1, MAX_RETRIES,
+                    )
+                    try:
+                        await self.reconnect()
+                        await self.detect_endianness()
+                    except ModbusConnectionError:
+                        pass
+                else:
+                    raise
+
+        raise ModbusReadError(f"Read failed for {register.name} after all retries")
 
     async def write_register(self, register: ModbusRegister, value: Any) -> None:
-        """Encode and write a value to a register or register block."""
+        """Encode and write a value with retry on transient errors."""
         if register.access != Access.RW:
             raise ModbusWriteError(f"Register {register.name} is read-only")
         encoded = self._encode(value, register)
-        await self._raw_write(register.address, encoded, register.count)
+
+        for attempt in range(1 + MAX_RETRIES):
+            try:
+                await self._raw_write(register.address, encoded, register.count)
+                return
+            except ModbusPermanentError:
+                raise
+            except ModbusTransientError as err:
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAY_BUSY if "busy" in str(err).lower() else RETRY_DELAY_FAILURE
+                    _LOGGER.debug(
+                        "Transient error writing %s, retry %d/%d in %.1fs: %s",
+                        register.name, attempt + 1, MAX_RETRIES, delay, err,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise ModbusWriteError(
+                        f"Write failed after {MAX_RETRIES} retries for {register.name}: {err}"
+                    ) from err
+            except (ModbusConnectionError, PyConnectionException) as err:
+                if attempt < MAX_RETRIES:
+                    _LOGGER.warning(
+                        "Connection lost writing %s, reconnecting (attempt %d/%d)",
+                        register.name, attempt + 1, MAX_RETRIES,
+                    )
+                    try:
+                        await self.reconnect()
+                        await self.detect_endianness()
+                    except ModbusConnectionError:
+                        pass
+                else:
+                    raise
+
+        raise ModbusWriteError(f"Write failed for {register.name} after all retries")
 
     async def read_by_name(self, name: str) -> Any:
         """Read a register by its symbolic name."""
@@ -171,11 +343,13 @@ class KostalModbusClient:
         await self.write_register(reg, value)
 
     async def read_monitoring(self) -> dict[str, Any]:
-        """Read all monitoring registers and return name→value dict."""
+        """Read all monitoring registers and return name->value dict."""
         result: dict[str, Any] = {}
         for reg in MONITORING_REGISTERS:
             try:
                 result[reg.name] = await self.read_register(reg)
+            except ModbusPermanentError:
+                pass
             except ModbusReadError:
                 _LOGGER.debug("Skipping unavailable register %s", reg.name)
         return result
@@ -191,17 +365,29 @@ class KostalModbusClient:
                 raise ModbusConnectionError("Not connected")
             assert self._client is not None
             try:
-                resp = await self._client.read_holding_registers(
-                    address=address, count=count, device_id=self._unit_id,
+                resp = await asyncio.wait_for(
+                    self._client.read_holding_registers(
+                        address=address, count=count, device_id=self._unit_id,
+                    ),
+                    timeout=READ_TIMEOUT,
                 )
                 if resp.isError():
-                    raise ModbusReadError(
-                        f"Error reading register {address}: {resp}"
-                    )
+                    exc_code = getattr(resp, "exception_code", None)
+                    self._last_exc_code = exc_code
+                    raise _classify_exception_response(resp)
                 raw = b""
                 for reg_val in resp.registers:
                     raw += struct.pack(">H", reg_val)
                 return raw
+            except asyncio.TimeoutError as err:
+                raise ModbusTransientError(
+                    f"Timeout reading register {address} (>{READ_TIMEOUT}s)"
+                ) from err
+            except (PyConnectionException, OSError) as err:
+                self._client = None
+                raise ModbusConnectionError(
+                    f"Connection lost reading register {address}: {err}"
+                ) from err
             except PyModbusException as err:
                 raise ModbusReadError(
                     f"Read failed at address {address}: {err}"
@@ -221,21 +407,29 @@ class KostalModbusClient:
                     for i in range(0, len(data), 2)
                 ]
                 if count == 1:
-                    resp = await self._client.write_register(
+                    coro = self._client.write_register(
                         address=address,
                         value=registers[0],
                         device_id=self._unit_id,
                     )
                 else:
-                    resp = await self._client.write_registers(
+                    coro = self._client.write_registers(
                         address=address,
                         values=registers,
                         device_id=self._unit_id,
                     )
+                resp = await asyncio.wait_for(coro, timeout=READ_TIMEOUT)
                 if resp.isError():
-                    raise ModbusWriteError(
-                        f"Error writing register {address}: {resp}"
-                    )
+                    raise _classify_exception_response(resp)
+            except asyncio.TimeoutError as err:
+                raise ModbusTransientError(
+                    f"Timeout writing register {address} (>{READ_TIMEOUT}s)"
+                ) from err
+            except (PyConnectionException, OSError) as err:
+                self._client = None
+                raise ModbusConnectionError(
+                    f"Connection lost writing register {address}: {err}"
+                ) from err
             except PyModbusException as err:
                 raise ModbusWriteError(
                     f"Write failed at address {address}: {err}"

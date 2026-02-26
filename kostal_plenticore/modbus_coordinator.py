@@ -18,6 +18,8 @@ from .modbus_client import (
     KostalModbusClient,
     ModbusClientError,
     ModbusConnectionError,
+    ModbusPermanentError,
+    ModbusTransientError,
 )
 from .modbus_registers import (
     ALL_REGISTERS,
@@ -100,32 +102,56 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._client.disconnect()
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Poll monitoring registers."""
+        """Poll monitoring registers with per-register error handling.
+
+        - Connection lost → reconnect + re-detect endianness
+        - Transient errors (busy/timeout) → already retried in client
+        - Permanent errors (illegal address) → register skipped permanently
+        - If ALL fast-poll registers fail → raise UpdateFailed
+        """
         if not self._client.connected:
             try:
                 await self._client.connect()
                 await self._client.detect_endianness()
+                _LOGGER.info("Modbus reconnected to %s", self._client.host)
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
         data: dict[str, Any] = {}
+        fast_errors = 0
+        fast_total = 0
 
-        try:
-            for reg in MONITORING_REGISTERS:
-                if reg.group in FAST_GROUPS:
-                    data[reg.name] = await self._client.read_register(reg)
-        except ModbusClientError as err:
-            raise UpdateFailed(f"Modbus read error: {err}") from err
+        for reg in MONITORING_REGISTERS:
+            if reg.group not in FAST_GROUPS:
+                continue
+            fast_total += 1
+            try:
+                data[reg.name] = await self._client.read_register(reg)
+            except ModbusPermanentError:
+                pass
+            except ModbusConnectionError as err:
+                raise UpdateFailed(f"Modbus connection lost: {err}") from err
+            except ModbusClientError as err:
+                fast_errors += 1
+                _LOGGER.debug("Fast-poll read failed for %s: %s", reg.name, err)
+
+        if fast_total > 0 and fast_errors >= fast_total:
+            raise UpdateFailed(
+                f"All {fast_total} fast-poll registers failed – inverter may be unreachable"
+            )
 
         self._slow_tick += 1
         if self._slow_tick >= 6:
             self._slow_tick = 0
-            try:
-                for reg in MONITORING_REGISTERS:
-                    if reg.group in SLOW_GROUPS:
-                        data[reg.name] = await self._client.read_register(reg)
-            except ModbusClientError as err:
-                _LOGGER.warning("Slow-poll registers failed: %s", err)
+            for reg in MONITORING_REGISTERS:
+                if reg.group not in SLOW_GROUPS:
+                    continue
+                try:
+                    data[reg.name] = await self._client.read_register(reg)
+                except ModbusPermanentError:
+                    pass
+                except ModbusClientError as err:
+                    _LOGGER.debug("Slow-poll read failed for %s: %s", reg.name, err)
 
         self._device_info_tick += 1
         if self._device_info_tick >= 60:
