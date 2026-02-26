@@ -133,9 +133,6 @@
       "battery_i": {
         "name": "Battery Current"
       },
-      "battery_temp": {
-        "name": "Battery Temperature"
-      },
       "battery_soh": {
         "name": "Battery State of Health"
       },

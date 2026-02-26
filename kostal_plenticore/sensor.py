@@ -348,16 +348,9 @@ SENSOR_PROCESS_DATA = [
         state_class=SensorStateClass.MEASUREMENT,
         formatter="format_float",
     ),
-    PlenticoreSensorEntityDescription(
-        module_id="devices:local:battery",
-        key="Temp",
-        name="Battery Temperature",
-        suggested_display_precision=1,
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_float",
-    ),
+    # Battery Temperature: NOT available via REST API on most models.
+    # Use the Modbus-based sensor "Battery Temperature (Modbus)" instead,
+    # which reads register 214 directly and is always available.
     PlenticoreSensorEntityDescription(
         module_id="devices:local:battery",
         key="SoH",
