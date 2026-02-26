@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-02-25
+
+### Added
+- **Inverter Health Monitoring System** — tracks 21 parameters with 3-level thresholds (INFO → WARNING → CRITICAL) for long-term health assessment.
+- **Health Score** sensor (0-100%) — overall system health derived from all monitored parameters.
+- **Parameter tracking** — isolation resistance, controller/battery temperature, battery SoH/cycles/voltage/capacity, grid frequency, phase voltages (1-3), DC string voltages/powers (1-3), cos φ, EVU power limit, active error/warning counts.
+- **Trend detection** — rising/stable/falling trend for every parameter based on historical samples. Enables early degradation detection.
+- **DC String Imbalance** sensor — detects shading, soiling, or defective panels by comparing string powers (>30% deviation = alert).
+- **Phase Voltage Imbalance** sensor — detects grid-side problems from voltage differences between L1/L2/L3.
+- **Inverter State Change Counter** — frequent state changes indicate instability.
+- **11 Binary Warning Sensors** — isolation, controller overheat, battery health, battery temperature, grid frequency, phase 1/2/3 voltage, DC imbalance, error rate, active errors. All usable as HA automation triggers.
+- **PV Fire Safety Early Warning System** — software-based hazard detection (NOT a replacement for AFCI/smoke detectors).
+  - **Isolation fault detection** — rapid or gradual drop in isolation resistance (cable damage, water ingress, rodent/bird damage). <50kΩ = EMERGENCY, <100kΩ = HIGH.
+  - **DC arc fault indicators** — sudden string power drop or fluctuation while others are normal (loose MC4, damaged cable).
+  - **Battery thermal runaway precursors** — temperature >60°C = EMERGENCY, rapid rise >2°C/5min = ELEVATED, voltage anomaly during high temp = cell imbalance warning.
+  - **Controller overheating** — PCB >85°C = HIGH, rapid rise >3°C/5min = ELEVATED.
+  - **Grid emergency** — frequency ±1.5Hz or voltage >270V/<180V = HIGH.
+  - **5 risk levels**: SAFE → MONITOR → ELEVATED → HIGH → EMERGENCY.
+  - **Fire safety entities**: Fire Risk Level sensor, Active Safety Alerts counter, PV System Safety (BinarySensor SAFETY class), Isolation Fault Danger, Battery Fire Risk, DC Cable Danger.
+
+### Changed
+- **Health thresholds adjusted** — Controller: 55°C info / 70°C warning / 80°C critical. Battery: 35°C info / 45°C warning / 55°C critical. Isolation in kΩ display.
+- **Version** bumped from 2.5.0 to 2.6.0.
+
+### Note
+The fire safety system is a **software monitoring aid**, NOT a certified fire protection system. It does NOT replace physical safety devices (AFCI, smoke detectors, RCD/GFCI, thermal fuses).
+
 ## [2.5.0] - 2026-02-25
 
 ### Added
