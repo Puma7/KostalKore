@@ -42,12 +42,14 @@ if sys.platform == "win32":
 # Pre-load local kostal_plenticore (Platinum version)
 try:
     import kostal_plenticore
+    import kostal_plenticore.button
     import kostal_plenticore.config_flow
     import kostal_plenticore.const
     import kostal_plenticore.coordinator
     
     # Patch sys.modules to point 'homeassistant.components.kostal_plenticore' to local version
     sys.modules["homeassistant.components.kostal_plenticore"] = kostal_plenticore
+    sys.modules["homeassistant.components.kostal_plenticore.button"] = kostal_plenticore.button
     sys.modules["homeassistant.components.kostal_plenticore.config_flow"] = kostal_plenticore.config_flow
     sys.modules["homeassistant.components.kostal_plenticore.const"] = kostal_plenticore.const
     sys.modules["homeassistant.components.kostal_plenticore.coordinator"] = kostal_plenticore.coordinator

@@ -795,6 +795,11 @@
       "battery_charge": {
         "name": "Battery Charging / Usage mode"
       }
+    },
+    "button": {
+      "reset_modbus_registers": {
+        "name": "Reset Modbus Registers"
+      }
     }
   }
 }

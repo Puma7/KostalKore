@@ -53,6 +53,10 @@ PLATFORMS: Final[list[Platform]] = [
     Platform.SWITCH,
 ]
 
+MODBUS_PLATFORMS: Final[list[Platform]] = [
+    Platform.BUTTON,
+]
+
 # Performance constants
 SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
 UNLOAD_TIMEOUT_SECONDS: Final[float] = 5.0
@@ -176,6 +180,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        if modbus_coordinator is not None:
+            await hass.config_entries.async_forward_entry_setups(entry, MODBUS_PLATFORMS)
     except Exception as err:
         _handle_init_error(err, "platform setup")
         _log_setup_metrics(start_time, False)
@@ -221,6 +227,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await mqtt_bridge.async_stop()
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
+        await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
         await modbus_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
