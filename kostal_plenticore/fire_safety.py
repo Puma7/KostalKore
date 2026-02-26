@@ -181,8 +181,8 @@ class FireSafetyMonitor:
         for alert in new_alerts:
             self._alerts.append(alert)
             _LOGGER.warning(
-                "FIRE SAFETY [%s] %s: %s – %s",
-                alert.risk_level.upper(), alert.category, alert.title, alert.action,
+                "FIRE SAFETY [%s] %s: %s (values: %s)",
+                alert.risk_level.upper(), alert.category, alert.title, alert.register_values,
             )
 
         return new_alerts

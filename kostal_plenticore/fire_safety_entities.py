@@ -101,7 +101,17 @@ class FireSafetyOkBinarySensor(BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
-        return self._monitor.current_risk_level in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR)
+        level = self._monitor.current_risk_level
+        if level not in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR):
+            active = self._monitor.active_alerts
+            if active:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "PV System Safety is UNSAFE: risk=%s, alerts=%s",
+                    level,
+                    [(a.category, a.risk_level, a.title) for a in active[:3]],
+                )
+        return level in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR)
 
     @property
     def icon(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
