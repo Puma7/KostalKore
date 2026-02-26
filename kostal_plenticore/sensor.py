@@ -1722,6 +1722,16 @@ async def async_setup_entry(
         if diag_entities:
             async_add_entities(diag_entities)
             _LOGGER.info("Added %d diagnostic sensors", len(diag_entities))
+    degradation = entry_store.get("degradation_tracker") if entry_store else None
+    if degradation is not None:
+        from .degradation_entities import create_degradation_sensors
+        degrad_entities = create_degradation_sensors(
+            degradation, entry.entry_id, plenticore.device_info
+        )
+        if degrad_entities:
+            async_add_entities(degrad_entities)
+            _LOGGER.info("Added %d degradation tracking sensors", len(degrad_entities))
+
     longevity = entry_store.get("longevity_advisor") if entry_store else None
     if longevity is not None:
         from .longevity_entities import create_longevity_sensors

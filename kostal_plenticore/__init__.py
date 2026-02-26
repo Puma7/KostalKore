@@ -39,6 +39,7 @@ from .const import (
 from .coordinator import Plenticore, PlenticoreConfigEntry
 from .helper import parse_modbus_exception
 from .battery_chemistry import detect_chemistry
+from .degradation_tracker import DegradationTracker
 from .diagnostics_engine import DiagnosticsEngine
 from .fire_safety import FireSafetyMonitor
 from .health_monitor import InverterHealthMonitor
@@ -179,18 +180,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             )
             await mqtt_bridge.async_start()
 
-    # Health + Fire Safety monitors (track long-term trends from Modbus data)
+    # Health + Fire Safety + Degradation monitors
     health_monitor = None
     fire_safety = None
+    degradation_tracker = None
     if modbus_coordinator is not None:
         health_monitor = InverterHealthMonitor()
         fire_safety = FireSafetyMonitor()
+        degradation_tracker = DegradationTracker()
 
         @callback
         def _feed_health_data() -> None:  # pragma: no cover
             data = modbus_coordinator.data
             if data:
                 health_monitor.update_from_modbus(data)
+                degradation_tracker.update_from_modbus(data)
                 new_alerts = fire_safety.analyze(data)
                 if new_alerts:
                     from .notifications import notify_safety_alert, notify_safety_clear
@@ -228,6 +232,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "mqtt_bridge": mqtt_bridge,
         "health_monitor": health_monitor,
         "fire_safety": fire_safety,
+        "degradation_tracker": degradation_tracker,
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
     }
