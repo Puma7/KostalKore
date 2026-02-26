@@ -211,13 +211,25 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class KostalPlenticoreOptionsFlow(OptionsFlow):
-    """Handle Kostal Plenticore options (Modbus & MQTT bridge settings)."""
+    """Handle Kostal Plenticore options (Modbus & MQTT bridge settings).
+
+    Two-step flow:
+    1. init: Configure Modbus settings (port, unit-id, endianness, MQTT)
+    2. modbus_test: Test connection before saving (only if Modbus enabled)
+    """
+
+    def __init__(self) -> None:
+        """Initialize options flow."""
+        self._user_input: dict[str, Any] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the Modbus/MQTT options."""
+        """Step 1: Configure Modbus settings."""
         if user_input is not None:
+            if user_input.get(CONF_MODBUS_ENABLED, False):
+                self._user_input = user_input
+                return await self.async_step_modbus_test()
             return self.async_create_entry(title="", data=user_input)
 
         options = self.config_entry.options
@@ -246,3 +258,100 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
+
+    async def async_step_modbus_test(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 2: Test Modbus connection before saving."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=self._user_input)
+
+        host = self.config_entry.data.get(CONF_HOST, "")
+        port = self._user_input.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)
+        unit_id = self._user_input.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID)
+        endianness_setting = self._user_input.get(CONF_MODBUS_ENDIANNESS, "auto")
+
+        test_log: list[str] = []
+        test_passed = True
+
+        try:
+            from .modbus_client import KostalModbusClient
+            from .modbus_registers import (
+                REG_SERIAL_NUMBER,
+                REG_PRODUCT_NAME,
+                REG_INVERTER_STATE,
+                REG_INVERTER_MAX_POWER,
+                REG_BATTERY_MGMT_MODE,
+                REG_TOTAL_DC_POWER,
+                INVERTER_STATES,
+                BATTERY_MGMT_MODES,
+            )
+
+            client = KostalModbusClient(
+                host=str(host),
+                port=int(port),
+                unit_id=int(unit_id),
+                endianness="little" if endianness_setting == "auto" else endianness_setting,
+            )
+
+            test_log.append(f"Connecting to {host}:{port} (Unit-ID {unit_id})...")
+            await client.connect()
+            test_log.append("TCP connection: OK")
+
+            endianness = await client.detect_endianness()
+            test_log.append(f"Byte order: {endianness} ({'CDAB' if endianness == 'little' else 'ABCD'})")
+
+            test_regs = [
+                (REG_PRODUCT_NAME, "Product"),
+                (REG_SERIAL_NUMBER, "Serial"),
+                (REG_INVERTER_MAX_POWER, "Max Power"),
+                (REG_INVERTER_STATE, "State"),
+                (REG_TOTAL_DC_POWER, "DC Power"),
+                (REG_BATTERY_MGMT_MODE, "Battery Mgmt"),
+            ]
+
+            for reg, label in test_regs:
+                try:
+                    val = await client.read_register(reg)
+                    if reg == REG_INVERTER_STATE:
+                        val = INVERTER_STATES.get(int(val), str(val))
+                    elif reg == REG_BATTERY_MGMT_MODE:
+                        val = BATTERY_MGMT_MODES.get(int(val), str(val))
+                        if "MODBUS" not in str(val).upper():  # pragma: no cover
+                            test_log.append(
+                                f"{label}: {val} (WARNUNG: Externe Batteriesteuerung via Modbus ist nicht aktiviert!)"
+                            )
+                            continue
+                    elif reg == REG_INVERTER_MAX_POWER:
+                        val = f"{val} W"
+                    test_log.append(f"{label}: {val}")
+                except Exception as reg_err:
+                    test_log.append(f"{label}: FEHLER - {reg_err}")
+
+            await client.disconnect()
+            test_log.append("")
+            test_log.append("Modbus-Test ERFOLGREICH. Klicke 'Absenden' um die Einstellungen zu speichern.")
+
+        except Exception as err:
+            test_passed = False
+            test_log.append(f"FEHLER: {err}")
+            test_log.append("")
+            test_log.append(
+                "Modbus-Test FEHLGESCHLAGEN. "
+                "Bitte prüfe die Einstellungen und die Netzwerkverbindung zum Inverter. "
+                "Fehlerbericht für Entwickler:"
+            )
+            test_log.append(f"  Host: {host}:{port}")
+            test_log.append(f"  Unit-ID: {unit_id}")
+            test_log.append(f"  Endianness: {endianness_setting}")
+            test_log.append(f"  Error: {type(err).__name__}: {err}")
+            _LOGGER.error("Modbus connection test failed: %s", err)
+
+        description = "\n".join(test_log)
+
+        return self.async_show_form(
+            step_id="modbus_test",
+            data_schema=vol.Schema({}),
+            description_placeholders={"test_result": description},
+            errors={"base": "modbus_test_failed"} if not test_passed else {},
+        )

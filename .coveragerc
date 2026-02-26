@@ -10,6 +10,7 @@ omit =
     kostal_plenticore/modbus_coordinator.py
     kostal_plenticore/modbus_button.py
     kostal_plenticore/modbus_number.py
+    kostal_plenticore/modbus_test.py
     kostal_plenticore/mqtt_bridge.py
     kostal_plenticore/button.py
 
@@ -20,3 +21,4 @@ exclude_lines =
     pragma: no cover
     if TYPE_CHECKING
     except ImportError
+    WARNUNG: Externe Batteriesteuerung

@@ -28,12 +28,12 @@ async def test_options_flow_shows_form(
     assert result["step_id"] == "init"
 
 
-async def test_options_flow_configure_returns_entry(
+async def test_options_flow_modbus_disabled_saves_directly(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_plenticore_client,
 ) -> None:
-    """Test configuring options flow returns create_entry."""
+    """Disabling Modbus saves directly without test step."""
     mock_config_entry.add_to_hass(hass)
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -43,10 +43,9 @@ async def test_options_flow_configure_returns_entry(
     flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
     flow.handler = mock_config_entry.entry_id
-    flow._common_data = {}
 
     result = await flow.async_step_init(user_input={
-        "modbus_enabled": True,
+        "modbus_enabled": False,
         "modbus_port": 1502,
         "modbus_unit_id": 71,
         "modbus_endianness": "auto",
@@ -54,8 +53,113 @@ async def test_options_flow_configure_returns_entry(
     })
 
     assert result["type"] == "create_entry"
+    assert result["data"]["modbus_enabled"] is False
+
+
+async def test_options_flow_modbus_enabled_goes_to_test_step(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+) -> None:
+    """Enabling Modbus triggers the connection test step."""
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    assert result["type"] == "form"
+
+    with patch(
+        "kostal_plenticore.modbus_client.KostalModbusClient",
+    ) as MockClient:
+        instance = AsyncMock()
+        instance.connect = AsyncMock()
+        instance.detect_endianness = AsyncMock(return_value="little")
+        instance.read_register = AsyncMock(return_value="PLENTICORE")
+        instance.disconnect = AsyncMock()
+        MockClient.return_value = instance
+
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "modbus_enabled": True,
+                "modbus_port": 1502,
+                "modbus_unit_id": 71,
+                "modbus_endianness": "auto",
+                "mqtt_bridge_enabled": False,
+            },
+        )
+
+    assert result2["type"] == "form"
+    assert result2["step_id"] == "modbus_test"
+    placeholders = result2.get("description_placeholders", {})
+    assert "ERFOLGREICH" in placeholders.get("test_result", "")
+
+
+async def test_options_flow_modbus_test_failure_shows_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+) -> None:
+    """Connection test failure shows error details."""
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    with patch(
+        "kostal_plenticore.modbus_client.KostalModbusClient",
+    ) as MockClient:
+        instance = AsyncMock()
+        instance.connect = AsyncMock(side_effect=ConnectionError("Connection refused"))
+        MockClient.return_value = instance
+
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "modbus_enabled": True,
+                "modbus_port": 1502,
+                "modbus_unit_id": 71,
+                "modbus_endianness": "auto",
+                "mqtt_bridge_enabled": False,
+            },
+        )
+
+    assert result2["type"] == "form"
+    assert result2["step_id"] == "modbus_test"
+    assert "modbus_test_failed" in result2.get("errors", {}).get("base", "")
+    placeholders = result2.get("description_placeholders", {})
+    assert "FEHLGESCHLAGEN" in placeholders.get("test_result", "")
+
+
+async def test_options_flow_modbus_test_confirm_saves(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+) -> None:
+    """Confirming the test step saves the options."""
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    from kostal_plenticore.config_flow import KostalPlenticoreOptionsFlow
+
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = mock_config_entry.entry_id
+    flow._user_input = {
+        "modbus_enabled": True,
+        "modbus_port": 1502,
+        "modbus_unit_id": 71,
+        "modbus_endianness": "auto",
+        "mqtt_bridge_enabled": False,
+    }
+
+    result = await flow.async_step_modbus_test(user_input={})
+
+    assert result["type"] == "create_entry"
     assert result["data"]["modbus_enabled"] is True
-    assert result["data"]["modbus_port"] == 1502
 
 
 async def test_setup_entry_modbus_disabled(

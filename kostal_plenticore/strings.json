@@ -11,7 +11,14 @@
           "modbus_endianness": "Byte Order (Endianness)",
           "mqtt_bridge_enabled": "Enable MQTT Bridge"
         }
+      },
+      "modbus_test": {
+        "title": "Modbus Connection Test",
+        "description": "Connection test result:\n\n{test_result}\n"
       }
+    },
+    "error": {
+      "modbus_test_failed": "Modbus connection test failed – check settings and network"
     }
   },
   "config": {
