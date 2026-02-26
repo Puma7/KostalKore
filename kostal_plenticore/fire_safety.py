@@ -132,6 +132,17 @@ class FireSafetyMonitor:
 
         self._record_history(data, now)
 
+        # Skip safety checks when inverter is off/standby (no valid measurements)
+        inverter_state = data.get("inverter_state")
+        if inverter_state is not None:
+            try:
+                state_int = int(inverter_state)
+                # 0=Off, 1=Init, 10=Standby, 15=Shutdown
+                if state_int in (0, 1, 10, 15):
+                    return []
+            except (TypeError, ValueError):
+                pass
+
         new_alerts: list[SafetyAlert] = []
         new_alerts.extend(self._check_isolation(data, now))
         new_alerts.extend(self._check_dc_string_anomaly(data, now))
@@ -165,6 +176,19 @@ class FireSafetyMonitor:
         iso = _float(data.get("isolation_resistance"))
         if iso is None:
             return alerts
+
+        # Inverter returns 0 or near-0 when in standby/off (no DC voltage = no measurement)
+        inverter_state = data.get("inverter_state")
+        total_dc = _float(data.get("total_dc_power"))
+        if iso < 1000 and (total_dc is None or total_dc < 50):
+            return alerts  # no PV power → measurement not valid
+        if inverter_state is not None:
+            try:
+                state_int = int(inverter_state)
+                if state_int in (0, 1, 10, 15) and iso < 1000:
+                    return alerts  # Off/Init/Standby/Shutdown → measurement not valid
+            except (TypeError, ValueError):
+                pass
 
         vals = {"isolation_resistance_ohm": iso}
 

@@ -19,7 +19,7 @@ class TestFireSafetyMonitor:
 
     def test_isolation_emergency(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"isolation_resistance": 30000.0})
+        alerts = m.analyze({"isolation_resistance": 30000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         assert len(alerts) == 1
         assert alerts[0].risk_level == FireRiskLevel.EMERGENCY
         assert alerts[0].category == "isolation"
@@ -27,42 +27,69 @@ class TestFireSafetyMonitor:
 
     def test_isolation_high(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"isolation_resistance": 80000.0})
+        alerts = m.analyze({"isolation_resistance": 80000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         assert any(a.risk_level == FireRiskLevel.HIGH for a in alerts)
 
     def test_isolation_safe(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"isolation_resistance": 2000000.0})
+        alerts = m.analyze({"isolation_resistance": 2000000.0, "inverter_state": 6})
+        assert len(alerts) == 0
+
+    def test_isolation_ignored_at_night_standby(self) -> None:
+        """Isolation = 0 at night/standby is NOT a fire risk."""
+        m = FireSafetyMonitor()
+        alerts = m.analyze({"isolation_resistance": 0.0, "inverter_state": 10, "total_dc_power": 0.0})
+        assert len(alerts) == 0
+        assert m.current_risk_level == FireRiskLevel.SAFE
+
+    def test_isolation_ignored_when_off(self) -> None:
+        m = FireSafetyMonitor()
+        alerts = m.analyze({"isolation_resistance": 0.0, "inverter_state": 0})
+        assert len(alerts) == 0
+
+    def test_isolation_ignored_low_dc_no_state(self) -> None:
+        m = FireSafetyMonitor()
+        alerts = m.analyze({"isolation_resistance": 500.0, "total_dc_power": 10.0})
+        iso_alerts = [a for a in alerts if a.category == "isolation"]
+        assert len(iso_alerts) == 0
+
+    def test_all_checks_skipped_in_standby(self) -> None:
+        m = FireSafetyMonitor()
+        alerts = m.analyze({
+            "isolation_resistance": 0.0,
+            "battery_temperature": 0.0,
+            "controller_temp": 0.0,
+            "inverter_state": 10,
+        })
         assert len(alerts) == 0
 
     def test_battery_emergency_temp(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"battery_temperature": 65.0})
+        alerts = m.analyze({"battery_temperature": 65.0, "inverter_state": 6})
         assert any(a.risk_level == FireRiskLevel.EMERGENCY for a in alerts)
         assert any("thermal runaway" in a.detail.lower() for a in alerts)
 
     def test_battery_high_temp(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"battery_temperature": 52.0})
+        alerts = m.analyze({"battery_temperature": 52.0, "inverter_state": 6})
         assert any(a.risk_level == FireRiskLevel.HIGH for a in alerts)
 
     def test_battery_safe_temp(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"battery_temperature": 25.0})
+        alerts = m.analyze({"battery_temperature": 25.0, "inverter_state": 6})
         bat_alerts = [a for a in alerts if "battery" in a.category]
         assert len(bat_alerts) == 0
 
     def test_controller_high_temp(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"controller_temp": 88.0})
+        alerts = m.analyze({"controller_temp": 88.0, "inverter_state": 6})
         assert any(a.category == "controller_thermal" for a in alerts)
 
     def test_dc_string_imbalance_alert(self) -> None:
         m = FireSafetyMonitor()
         alerts = m.analyze({
-            "dc1_power": 5000.0,
-            "dc2_power": 5000.0,
-            "dc3_power": 500.0,
+            "dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 500.0,
+            "inverter_state": 6,
         })
         dc_alerts = [a for a in alerts if "dc" in a.category]
         assert len(dc_alerts) >= 1
@@ -70,21 +97,20 @@ class TestFireSafetyMonitor:
     def test_dc_strings_balanced_no_alert(self) -> None:
         m = FireSafetyMonitor()
         alerts = m.analyze({
-            "dc1_power": 5000.0,
-            "dc2_power": 4800.0,
-            "dc3_power": 5100.0,
+            "dc1_power": 5000.0, "dc2_power": 4800.0, "dc3_power": 5100.0,
+            "inverter_state": 6,
         })
         dc_alerts = [a for a in alerts if "dc" in a.category]
         assert len(dc_alerts) == 0
 
     def test_grid_frequency_emergency(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"grid_frequency": 47.0})
+        alerts = m.analyze({"grid_frequency": 47.0, "inverter_state": 6})
         assert any(a.category == "grid_emergency" for a in alerts)
 
     def test_phase_voltage_extreme(self) -> None:
         m = FireSafetyMonitor()
-        alerts = m.analyze({"phase1_voltage": 280.0})
+        alerts = m.analyze({"phase1_voltage": 280.0, "inverter_state": 6})
         assert any(a.category == "voltage_extreme" for a in alerts)
 
     def test_multiple_hazards(self) -> None:
@@ -93,6 +119,8 @@ class TestFireSafetyMonitor:
             "isolation_resistance": 40000.0,
             "battery_temperature": 62.0,
             "controller_temp": 90.0,
+            "total_dc_power": 5000.0,
+            "inverter_state": 6,
         })
         assert len(alerts) >= 3
         assert m.current_risk_level == FireRiskLevel.EMERGENCY
