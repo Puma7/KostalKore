@@ -32,7 +32,7 @@ class TestDCDiagnostics:
     def test_dc_warnung_on_arc_indicator(self) -> None:
         e = _make_engine()
         e._safety._check_interval = 0.0
-        e._safety.analyze({"dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 500.0})
+        e._safety.analyze({"dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 500.0, "total_dc_power": 10500.0, "inverter_state": 6})
         d = e.diagnose_dc_solar()
         assert d.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH, DiagStatus.HINWEIS)
 
@@ -154,7 +154,7 @@ class TestSafetyDiagnostics:
         e = _make_engine()
         e._health.update_from_modbus({"isolation_resistance": 80000.0})
         e._safety._check_interval = 0.0
-        e._safety.analyze({"isolation_resistance": 80000.0})
+        e._safety.analyze({"isolation_resistance": 80000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         d = e.diagnose_safety()
         assert d.status == DiagStatus.KRITISCH
 

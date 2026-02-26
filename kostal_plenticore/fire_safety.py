@@ -103,6 +103,23 @@ class FireSafetyMonitor:
         now = time.monotonic()
         return [a for a in self._alerts if now - a.timestamp < 3600]
 
+    def clear_stale_alerts(self, pv_active: bool) -> None:
+        """Clear non-thermal alerts faster when PV is not producing."""
+        if pv_active:
+            return
+        now = time.monotonic()
+        kept: list[SafetyAlert] = []
+        for a in self._alerts:
+            age = now - a.timestamp
+            if a.category in ("battery_thermal", "battery_voltage_anomaly", "controller_thermal"):
+                if age < 3600:
+                    kept.append(a)
+            else:
+                if age < 300:
+                    kept.append(a)
+        self._alerts.clear()
+        self._alerts.extend(kept)
+
     @property
     def current_risk_level(self) -> str:
         active = self.active_alerts
@@ -132,20 +149,29 @@ class FireSafetyMonitor:
 
         self._record_history(data, now)
 
-        # Skip safety checks when inverter is off/standby (no valid measurements)
+        # Determine if PV is producing (DC power > 50W)
+        total_dc = _float(data.get("total_dc_power"))
+        pv_active = total_dc is not None and total_dc > 50
+
+        # Skip ALL checks when inverter is off/standby
         inverter_state = data.get("inverter_state")
         if inverter_state is not None:
             try:
                 state_int = int(inverter_state)
-                # 0=Off, 1=Init, 10=Standby, 15=Shutdown
                 if state_int in (0, 1, 10, 15):
                     return []
             except (TypeError, ValueError):
                 pass
 
         new_alerts: list[SafetyAlert] = []
-        new_alerts.extend(self._check_isolation(data, now))
-        new_alerts.extend(self._check_dc_string_anomaly(data, now))
+
+        # Clear stale isolation/DC alerts when PV is off (night)
+        self.clear_stale_alerts(pv_active)
+
+        # Isolation + DC checks ONLY when PV is active (need DC voltage for measurement)
+        if pv_active:
+            new_alerts.extend(self._check_isolation(data, now))
+            new_alerts.extend(self._check_dc_string_anomaly(data, now))
         new_alerts.extend(self._check_battery_thermal(data, now))
         new_alerts.extend(self._check_controller_thermal(data, now))
         new_alerts.extend(self._check_grid_emergency(data, now))

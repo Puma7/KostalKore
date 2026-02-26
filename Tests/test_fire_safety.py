@@ -63,6 +63,46 @@ class TestFireSafetyMonitor:
         })
         assert len(alerts) == 0
 
+    def test_isolation_skipped_when_no_pv_feedin_from_battery(self) -> None:
+        """FeedIn state but no PV (battery discharge only) → skip isolation check."""
+        m = FireSafetyMonitor()
+        alerts = m.analyze({
+            "isolation_resistance": 0.0,
+            "total_dc_power": -0.09,
+            "inverter_state": 6,
+            "battery_temperature": 25.0,
+        })
+        iso_alerts = [a for a in alerts if a.category == "isolation"]
+        assert len(iso_alerts) == 0
+
+    def test_stale_alerts_cleared_at_night(self) -> None:
+        """Non-thermal alerts expire after 5min when PV is off."""
+        import time as _time
+        m = FireSafetyMonitor()
+        m._check_interval = 0
+        m.analyze({
+            "isolation_resistance": 30000.0,
+            "total_dc_power": 5000.0,
+            "inverter_state": 6,
+        })
+        assert m.alert_count > 0
+        for a in m._alerts:
+            object.__setattr__(a, "timestamp", _time.monotonic() - 400)
+        m.clear_stale_alerts(pv_active=False)
+        assert m.alert_count == 0
+
+    def test_thermal_alerts_kept_at_night(self) -> None:
+        """Battery thermal alerts are kept even at night."""
+        import time as _time
+        m = FireSafetyMonitor()
+        m._check_interval = 0
+        m.analyze({"battery_temperature": 65.0, "total_dc_power": 0, "inverter_state": 6})
+        assert m.alert_count > 0
+        for a in m._alerts:
+            object.__setattr__(a, "timestamp", _time.monotonic() - 400)
+        m.clear_stale_alerts(pv_active=False)
+        assert m.alert_count > 0
+
     def test_battery_emergency_temp(self) -> None:
         m = FireSafetyMonitor()
         alerts = m.analyze({"battery_temperature": 65.0, "inverter_state": 6})
@@ -89,7 +129,7 @@ class TestFireSafetyMonitor:
         m = FireSafetyMonitor()
         alerts = m.analyze({
             "dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 500.0,
-            "inverter_state": 6,
+            "total_dc_power": 10500.0, "inverter_state": 6,
         })
         dc_alerts = [a for a in alerts if "dc" in a.category]
         assert len(dc_alerts) >= 1
@@ -134,16 +174,17 @@ class TestFireSafetyMonitor:
     def test_rate_limiting(self) -> None:
         m = FireSafetyMonitor()
         m._check_interval = 0.0
-        a1 = m.analyze({"isolation_resistance": 30000.0})
+        a1 = m.analyze({"isolation_resistance": 30000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         m._check_interval = 9999.0
-        a2 = m.analyze({"isolation_resistance": 30000.0})
+        a2 = m.analyze({"isolation_resistance": 30000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         assert len(a1) > 0
         assert len(a2) == 0
 
     def test_active_alerts_expire(self) -> None:
         import time
         m = FireSafetyMonitor()
-        m.analyze({"isolation_resistance": 30000.0})
+        m._check_interval = 0.0
+        m.analyze({"isolation_resistance": 30000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         assert m.alert_count > 0
         for a in m._alerts:
             object.__setattr__(a, "timestamp", time.monotonic() - 7200)
