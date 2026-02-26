@@ -97,7 +97,7 @@ class Plenticore:
         if self._request_scheduler is not None:
             from .scheduled_session import ScheduledSession
             session = ScheduledSession(session, self._request_scheduler)  # type: ignore[assignment]
-        self._client = ExtendedApiClient(session, host=self.host)  # type: ignore[arg-type]
+        self._client = ExtendedApiClient(session, host=self.host)  # pyright: ignore[reportArgumentType]
         
         try:
             await self._client.login(

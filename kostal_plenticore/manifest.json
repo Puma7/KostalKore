@@ -1,7 +1,7 @@
 {
   "domain": "kostal_plenticore",
   "name": "Kostal Plenticore Solar Inverter",
-  "version": "2.14.0",
+  "version": "2.14.1",
   "codeowners": [
     "@stegm"
   ],
