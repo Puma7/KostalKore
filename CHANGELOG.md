@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-02-25
+
+### Added
+- **Modbus TCP Client** — direct Modbus-TCP connection to the inverter (port 1502) with async I/O, configurable endianness (auto/little/big), and automatic retry for transient faults.
+- **Complete Modbus Register Map** — 90+ registers from official Kostal MODBUS-TCP/SunSpec documentation covering device info, power monitoring, phases, DC strings, battery management, G3 limitation, I/O board, and energy totals.
+- **MQTT Proxy Bridge** — publishes all Modbus register values to MQTT so external systems (evcc, iobroker, Node-RED) can read inverter data without their own Modbus connection. Accepts write commands via MQTT command topics.
+- **Simplified Proxy Topics** for evcc/iobroker: `proxy/pv_power`, `proxy/grid_power`, `proxy/battery_power`, `proxy/battery_soc`, `proxy/home_power`, `proxy/inverter_state` with corresponding `proxy/command/*` write topics.
+- **Battery Charge Power Control** — number entity for register 1034 (DC charge power setpoint, -20kW to +20kW). Negative = charge, positive = discharge. Power limits read dynamically from inverter register 531.
+- **Battery Management Entities** — Max Charge/Discharge Limits, Min/Max SoC, Active Power Setpoint, G3 Max Charge/Discharge Power.
+- **G3 Cyclic Keepalive** — registers 1280/1282 are automatically re-written at `fallback_time/2` intervals to prevent fallback activation, matching the Kostal requirement for cyclic writes.
+- **Modbus Connection Test** — two-step options flow: configure settings → automatic connection test (reads product name, serial, state, max power, battery mgmt mode) before saving. Shows clear error report on failure.
+- **Reset Modbus Registers Button** — button entity in the HA UI to clear suppressed registers after firmware updates or inverter replacement.
+- **Options Flow (GUI)** — configure Modbus TCP (enable, port, unit-id, endianness) and MQTT bridge directly in HA UI under integration settings.
+- **`pymodbus>=3.6`** added as dependency for Modbus-TCP communication.
+- **`PROXY_SETUP.md`** — documentation with evcc and iobroker MQTT configuration examples.
+
+### Changed
+- **pyright compliance** — resolved all 28 pyright errors for full Platinum standard compliance (mypy + pyright both zero errors).
+- **Version** bumped from 2.4.1 to 2.5.0.
+
+### Security
+- **Defense-in-depth write validation** — NaN/Infinity blocked at 3 layers (entity, coordinator, client). Value range checked before every Modbus write. Integer overflow caught and translated to meaningful errors.
+- **Active Power Setpoint** min changed from 0 to 1 (per Kostal docs range 1..100; writing 0 could disable inverter output).
+- **Min SoC floor** raised from 0% to 5% to prevent deep battery discharge.
+- **MQTT admin register protection** — `modbus_enable`, `unit_id`, `byte_order` excluded from MQTT command topics to prevent remote lockout.
+- **MQTT rate limiting** — max 1 write per register per second, command serialization via asyncio lock, source tracking on every write.
+- **Read-back verification** — registers are read back after write; mismatches logged as warnings.
+- **Battery management mode check** — register 1080 is read at setup; warning logged if external Modbus control is not enabled on the inverter.
+- **Register 1024** access corrected from R/W to R/O per Kostal documentation.
+
+### Robustness
+- **Classified Modbus exceptions** — ILLEGAL_FUNCTION (01), ILLEGAL_DATA_ADDRESS (02), ILLEGAL_DATA_VALUE (03) are permanent errors (no retry). SERVER_DEVICE_FAILURE (04), SERVER_DEVICE_BUSY (06) are transient (retry with backoff up to 5 times).
+- **Strike system for unavailable registers** — registers returning ILLEGAL_DATA_ADDRESS are not permanently deleted but suppressed after 3 strikes with auto-expiring cooldown. Handles firmware updates adding new registers.
+- **Auto-reconnect** — TCP connection loss triggers reconnect + endianness re-detection + retry.
+- **Per-operation timeout** (5s) prevents hanging on unresponsive inverters.
+- **Per-register error handling** — coordinator only marks integration as failed if ALL fast-poll registers fail, not on individual errors.
+
 ## [2.4.1] - 2026-02-14
 
 ### Changed
