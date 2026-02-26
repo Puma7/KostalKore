@@ -1443,23 +1443,41 @@ async def async_setup_entry(
         _handle_api_error(err, "process data fetch")
         available_process_data = {}
     
-    # Discover DC string count dynamically - works for all inverter models
+    # Discover DC string count -- try Modbus first (faster, no auth needed),
+    # fall back to REST API if Modbus is not available
     dc_string_count = 1  # Minimum fallback
-    try:
-        # Try to get actual string count from inverter settings
-        string_count_setting = await asyncio.wait_for(
-            plenticore.client.get_setting_values("devices:local", "Properties:StringCnt"),
-            timeout=DC_STRING_COUNT_TIMEOUT  # Use constant instead of magic number
-        )
-        dc_string_count = int(
-            string_count_setting.get("devices:local", {})
-            .get("Properties:StringCnt", 1)
-        )
-        _LOGGER.info("Discovered %d DC strings on inverter", dc_string_count)
-    except asyncio.TimeoutError:
-        _LOGGER.warning("Timeout fetching DC string count - using default")
-    except (ApiException, ClientError, TimeoutError) as err:
-        _handle_api_error(err, "DC string count fetch")
+
+    from .const import DOMAIN as _DOMAIN
+    _entry_store = hass.data.get(_DOMAIN, {}).get(entry.entry_id, {})
+    _modbus_coord = _entry_store.get("modbus_coordinator") if _entry_store else None
+    if _modbus_coord is not None:
+        _modbus_strings = _modbus_coord.device_info_data.get("num_pv_strings")
+        if _modbus_strings is not None:
+            try:
+                dc_string_count = int(_modbus_strings)
+                _LOGGER.info("Discovered %d DC strings via Modbus register 34", dc_string_count)
+            except (TypeError, ValueError):
+                pass
+
+    if dc_string_count <= 1:
+        try:
+            string_count_setting = await asyncio.wait_for(
+                plenticore.client.get_setting_values("devices:local", "Properties:StringCnt"),
+                timeout=DC_STRING_COUNT_TIMEOUT,
+            )
+            dc_string_count = int(
+                string_count_setting.get("devices:local", {})
+                .get("Properties:StringCnt", 1)
+            )
+            _LOGGER.info("Discovered %d DC strings via REST API", dc_string_count)
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Timeout fetching DC string count via REST API")
+        except (ApiException, ClientError, TimeoutError) as err:
+            _handle_api_error(err, "DC string count fetch")
+
+    if dc_string_count < 1:
+        dc_string_count = 2
+        _LOGGER.warning("DC string count invalid, using safe default of 2")
 
     # Generate DC sensor descriptions dynamically
     dc_descriptions = generate_dc_sensor_descriptions(dc_string_count)
