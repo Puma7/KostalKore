@@ -177,13 +177,23 @@ def create_modbus_number_entities(
             _LOGGER.warning("Invalid max power value %r, using fallback %d W", raw_max, FALLBACK_MAX_POWER)
 
     bat_mgmt_mode = device_data.get(REG_BATTERY_MGMT_MODE.name)
-    if bat_mgmt_mode is not None and int(bat_mgmt_mode) != 0x02:
-        _LOGGER.warning(
-            "Battery management mode is %s (expected 0x02=MODBUS). "
-            "External battery control via Modbus may not work. "
-            "Enable it in the inverter web UI: Service > Battery settings.",
-            bat_mgmt_mode,
-        )
+    if bat_mgmt_mode is not None:
+        mode_int = int(bat_mgmt_mode)
+        if mode_int == 0x02:
+            _LOGGER.info("Battery management mode: External via MODBUS (active)")
+        elif mode_int == 0x00:
+            _LOGGER.info(
+                "Battery management mode register is 0 (normal when no external "
+                "command has been sent yet). If 'Extern über Protokoll (Modbus TCP)' "
+                "is enabled in the inverter web UI, Modbus writes should work."
+            )
+        else:
+            _LOGGER.warning(
+                "Battery management mode is %s (expected 0x00 or 0x02). "
+                "If Modbus battery control does not work, check inverter web UI: "
+                "Service > Battery settings > Extern über Protokoll (Modbus TCP).",
+                bat_mgmt_mode,
+            )
 
     descriptions = _build_descriptions(max_power)
     entities: list[ModbusNumberEntity] = []

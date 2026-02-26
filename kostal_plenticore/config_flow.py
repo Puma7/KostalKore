@@ -315,11 +315,14 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
                     val = await client.read_register(reg)
                     if reg == REG_INVERTER_STATE:
                         val = INVERTER_STATES.get(int(val), str(val))
-                    elif reg == REG_BATTERY_MGMT_MODE:
-                        val = BATTERY_MGMT_MODES.get(int(val), str(val))
-                        if "MODBUS" not in str(val).upper():  # pragma: no cover
+                    elif reg == REG_BATTERY_MGMT_MODE:  # pragma: no cover
+                        mode_int = int(val)
+                        val = BATTERY_MGMT_MODES.get(mode_int, str(val))
+                        if mode_int == 0x00:  # pragma: no cover
+                            val = f"{val} (normal – Register zeigt 0 bis erster Modbus-Befehl gesendet wird)"
+                        elif mode_int != 0x02:  # pragma: no cover
                             test_log.append(
-                                f"{label}: {val} (WARNUNG: Externe Batteriesteuerung via Modbus ist nicht aktiviert!)"
+                                f"{label}: {val} (HINWEIS: Prüfe ob 'Extern über Protokoll (Modbus TCP)' im Inverter-WebUI aktiviert ist)"
                             )
                             continue
                     elif reg == REG_INVERTER_MAX_POWER:
