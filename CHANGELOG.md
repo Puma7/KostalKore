@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-02-25
+
+### Added
+- **Smart Diagnostics Engine** — per-area diagnosis with human-readable status and actionable recommendations for each subsystem.
+- **5 Diagnostic Area Sensors** — one per subsystem, each showing status (ok/hinweis/warnung/kritisch) with `title`, `detail`, `action` attributes:
+  - **Diagnose: DC Solaranlage** — MC4 stecker, string imbalance, cable damage, shading/soiling detection with specific recommendations.
+  - **Diagnose: AC Netzanbindung** — phase voltage, frequency, power factor with grid operator contact advice.
+  - **Diagnose: Batterie** — temperature, SoH degradation, thermal runaway precursors with evacuation instructions for emergencies.
+  - **Diagnose: Wechselrichter** — controller temperature, active errors, communication quality with ventilation/service advice.
+  - **Diagnose: Sicherheit** — isolation resistance, fire risk, cable damage with inspection recommendations.
+
+### Changed
+- **Reduced INFO spam** — INFO thresholds raised to reduce unnecessary notifications:
+  - Controller temperature INFO: 55°C → 62°C (normal summer operation)
+  - Battery temperature INFO: 35°C → 38°C (normal during charging)
+  - Grid frequency INFO: ±0.2Hz → ±0.3Hz (normal grid variation)
+  - Phase voltage INFO: 210-250V → 207-253V (matches EN 50160 standard)
+- **Version** bumped from 2.6.0 to 2.7.0.
+
 ## [2.6.0] - 2026-02-25
 
 ### Added

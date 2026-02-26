@@ -149,11 +149,11 @@ class InverterHealthMonitor:
         # --- Thermal ---
         self.controller_temp = ParameterTracker(
             name="Controller Temperature", unit="°C",
-            info_high=55.0, warning_high=70.0, critical_high=80.0,
+            info_high=62.0, warning_high=70.0, critical_high=80.0,
         )
         self.battery_temp = ParameterTracker(
             name="Battery Temperature", unit="°C",
-            info_high=35.0, warning_high=45.0, critical_high=55.0,
+            info_high=38.0, warning_high=45.0, critical_high=55.0,
         )
 
         # --- Battery Health ---
@@ -175,25 +175,25 @@ class InverterHealthMonitor:
         # --- Grid Quality ---
         self.grid_frequency = ParameterTracker(
             name="Grid Frequency", unit="Hz",
-            info_low=49.8, info_high=50.2,
+            info_low=49.7, info_high=50.3,
             warning_low=49.5, warning_high=50.5,
             critical_low=49.0, critical_high=51.0,
         )
         self.phase1_voltage = ParameterTracker(
             name="Phase 1 Voltage", unit="V",
-            info_low=210.0, info_high=250.0,
+            info_low=207.0, info_high=253.0,
             warning_low=195.0, warning_high=255.0,
             critical_low=185.0, critical_high=265.0,
         )
         self.phase2_voltage = ParameterTracker(
             name="Phase 2 Voltage", unit="V",
-            info_low=210.0, info_high=250.0,
+            info_low=207.0, info_high=253.0,
             warning_low=195.0, warning_high=255.0,
             critical_low=185.0, critical_high=265.0,
         )
         self.phase3_voltage = ParameterTracker(
             name="Phase 3 Voltage", unit="V",
-            info_low=210.0, info_high=250.0,
+            info_low=207.0, info_high=253.0,
             warning_low=195.0, warning_high=255.0,
             critical_low=185.0, critical_high=265.0,
         )

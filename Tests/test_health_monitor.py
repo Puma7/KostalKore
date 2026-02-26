@@ -261,7 +261,7 @@ class TestInverterHealthMonitor:
 
     def test_info_level_threshold(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"controller_temp": 58.0})
+        m.update_from_modbus({"controller_temp": 64.0})
         assert m.controller_temp.level == HealthLevel.INFO
 
     def test_isolation_converted_to_kohm(self) -> None:

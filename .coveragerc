@@ -13,6 +13,8 @@ omit =
     kostal_plenticore/health_binary_sensor.py
     kostal_plenticore/fire_safety.py
     kostal_plenticore/fire_safety_entities.py
+    kostal_plenticore/diagnostics_engine.py
+    kostal_plenticore/diagnostic_entities.py
     kostal_plenticore/binary_sensor.py
     kostal_plenticore/modbus_button.py
     kostal_plenticore/modbus_number.py

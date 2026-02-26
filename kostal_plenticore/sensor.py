@@ -1671,6 +1671,15 @@ async def async_setup_entry(
         if fire_entities:
             async_add_entities(fire_entities)
             _LOGGER.info("Added %d fire safety sensors", len(fire_entities))
+    diag_engine = entry_store.get("diagnostics_engine") if entry_store else None
+    if diag_engine is not None:
+        from .diagnostic_entities import create_diagnostic_sensors
+        diag_entities = create_diagnostic_sensors(
+            diag_engine, entry.entry_id, plenticore.device_info
+        )
+        if diag_entities:
+            async_add_entities(diag_entities)
+            _LOGGER.info("Added %d diagnostic sensors", len(diag_entities))
 
 
 class PlenticoreCalculatedSensor(

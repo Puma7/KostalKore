@@ -38,6 +38,7 @@ from .const import (
 )
 from .coordinator import Plenticore, PlenticoreConfigEntry
 from .helper import parse_modbus_exception
+from .diagnostics_engine import DiagnosticsEngine
 from .fire_safety import FireSafetyMonitor
 from .health_monitor import InverterHealthMonitor
 from .modbus_client import KostalModbusClient, ModbusClientError
@@ -192,11 +193,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
         modbus_coordinator.async_add_listener(_feed_health_data)
 
+    diagnostics_engine = None
+    if health_monitor is not None and fire_safety is not None:
+        diagnostics_engine = DiagnosticsEngine(health_monitor, fire_safety)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,
         "mqtt_bridge": mqtt_bridge,
         "health_monitor": health_monitor,
         "fire_safety": fire_safety,
+        "diagnostics_engine": diagnostics_engine,
     }
 
     try:
