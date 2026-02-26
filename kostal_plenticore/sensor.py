@@ -431,6 +431,7 @@ SENSOR_PROCESS_DATA = [
         name="Autarky Day",
         native_unit_of_measurement=PERCENTAGE,
         icon="mdi:chart-donut",
+        state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
@@ -439,6 +440,7 @@ SENSOR_PROCESS_DATA = [
         name="Autarky Month",
         native_unit_of_measurement=PERCENTAGE,
         icon="mdi:chart-donut",
+        state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
@@ -456,6 +458,7 @@ SENSOR_PROCESS_DATA = [
         name="Autarky Year",
         native_unit_of_measurement=PERCENTAGE,
         icon="mdi:chart-donut",
+        state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
@@ -464,6 +467,7 @@ SENSOR_PROCESS_DATA = [
         name="Own Consumption Rate Day",
         native_unit_of_measurement=PERCENTAGE,
         icon="mdi:chart-donut",
+        state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
@@ -472,6 +476,7 @@ SENSOR_PROCESS_DATA = [
         name="Own Consumption Rate Month",
         native_unit_of_measurement=PERCENTAGE,
         icon="mdi:chart-donut",
+        state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
@@ -489,6 +494,7 @@ SENSOR_PROCESS_DATA = [
         name="Own Consumption Rate Year",
         native_unit_of_measurement=PERCENTAGE,
         icon="mdi:chart-donut",
+        state_class=SensorStateClass.MEASUREMENT,
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
