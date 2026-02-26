@@ -44,9 +44,12 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT: Final[float] = 10.0
 READ_TIMEOUT: Final[float] = 5.0
-RETRY_DELAY_BUSY: Final[float] = 1.0
-RETRY_DELAY_FAILURE: Final[float] = 0.5
-MAX_RETRIES: Final[int] = 2
+RETRY_DELAY_BUSY: Final[float] = 2.0
+RETRY_DELAY_FAILURE: Final[float] = 1.0
+MAX_RETRIES: Final[int] = 5
+
+UNAVAILABLE_STRIKES_THRESHOLD: Final[int] = 3
+UNAVAILABLE_RESET_INTERVAL: Final[int] = 120
 
 
 class ModbusExceptionCode(IntEnum):
@@ -154,7 +157,9 @@ class KostalModbusClient:
         self._endianness = endianness
         self._client: AsyncModbusTcpClient | None = None
         self._lock = asyncio.Lock()
-        self._unavailable_registers: set[int] = set()
+        self._unavailable_strikes: dict[int, int] = {}
+        self._unavailable_suppressed: dict[int, float] = {}
+        self._last_exc_code: int | None = None
 
     @property
     def host(self) -> str:
@@ -170,8 +175,54 @@ class KostalModbusClient:
 
     @property
     def unavailable_registers(self) -> frozenset[int]:
-        """Registers that returned ILLEGAL_DATA_ADDRESS (not on this model)."""
-        return frozenset(self._unavailable_registers)
+        """Registers currently suppressed due to repeated ILLEGAL_DATA_ADDRESS."""
+        return frozenset(self._unavailable_suppressed.keys())
+
+    def reset_unavailable(self) -> None:
+        """Reset all suppressed registers so they are retried on next poll.
+
+        Call this after a firmware update or inverter swap.
+        """
+        count = len(self._unavailable_suppressed)
+        self._unavailable_strikes.clear()
+        self._unavailable_suppressed.clear()
+        if count > 0:
+            _LOGGER.info(
+                "Reset %d suppressed registers – they will be retried on next poll",
+                count,
+            )
+
+    def _is_suppressed(self, address: int) -> bool:
+        """Check if a register is temporarily suppressed."""
+        suppressed_at = self._unavailable_suppressed.get(address)
+        if suppressed_at is None:
+            return False
+        import time
+        if time.monotonic() - suppressed_at > UNAVAILABLE_RESET_INTERVAL * self._unavailable_strikes.get(address, 1):
+            del self._unavailable_suppressed[address]
+            _LOGGER.debug("Register %d suppression expired, will retry", address)
+            return False
+        return True
+
+    def _record_unavailable_strike(self, address: int, name: str) -> None:
+        """Record one ILLEGAL_DATA_ADDRESS strike for a register."""
+        import time
+        strikes = self._unavailable_strikes.get(address, 0) + 1
+        self._unavailable_strikes[address] = strikes
+        if strikes >= UNAVAILABLE_STRIKES_THRESHOLD:
+            self._unavailable_suppressed[address] = time.monotonic()
+            _LOGGER.info(
+                "Register %s (addr %d) returned ILLEGAL_DATA_ADDRESS %d times "
+                "– suppressing for %d poll cycles (auto-resets after %ds)",
+                name, address, strikes,
+                UNAVAILABLE_STRIKES_THRESHOLD,
+                UNAVAILABLE_RESET_INTERVAL * strikes,
+            )
+        else:
+            _LOGGER.debug(
+                "Register %s (addr %d) ILLEGAL_DATA_ADDRESS strike %d/%d",
+                name, address, strikes, UNAVAILABLE_STRIKES_THRESHOLD,
+            )
 
     async def connect(self) -> bool:
         """Establish TCP connection to the inverter."""
@@ -227,24 +278,33 @@ class KostalModbusClient:
     # ------------------------------------------------------------------
 
     async def read_register(self, register: ModbusRegister) -> Any:
-        """Read and decode a register with retry on transient errors."""
-        if register.address in self._unavailable_registers:
+        """Read and decode a register with retry on transient errors.
+
+        Strike system for ILLEGAL_DATA_ADDRESS:
+        - 1st/2nd occurrence: logged as debug, register still polled next cycle
+        - 3rd occurrence: register suppressed for increasing cooldown periods
+        - Suppression auto-expires so firmware updates are picked up
+        - Manual reset via reset_unavailable() after inverter swap
+        """
+        if self._is_suppressed(register.address):
             raise ModbusPermanentError(
                 f"Register {register.name} (addr {register.address}) "
-                f"is not available on this inverter model"
+                f"is temporarily suppressed ({self._unavailable_strikes.get(register.address, 0)} strikes)"
             )
 
         for attempt in range(1 + MAX_RETRIES):
             try:
                 raw = await self._raw_read(register.address, register.count)
-                return self._decode(raw, register)
-            except ModbusPermanentError:
-                if getattr(self, "_last_exc_code", None) == ModbusExceptionCode.ILLEGAL_DATA_ADDRESS:
-                    self._unavailable_registers.add(register.address)
+                if register.address in self._unavailable_strikes:
+                    self._unavailable_strikes.pop(register.address, None)
                     _LOGGER.info(
-                        "Register %s (addr %d) not available on this model – skipping permanently",
+                        "Register %s (addr %d) is available again after previous failures",
                         register.name, register.address,
                     )
+                return self._decode(raw, register)
+            except ModbusPermanentError:
+                if self._last_exc_code == ModbusExceptionCode.ILLEGAL_DATA_ADDRESS:
+                    self._record_unavailable_strike(register.address, register.name)
                 raise
             except ModbusTransientError as err:
                 if attempt < MAX_RETRIES:

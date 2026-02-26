@@ -343,8 +343,44 @@ class TestExceptionClassification:
 
 
 class TestUnavailableRegisterTracking:
-    """Test that ILLEGAL_DATA_ADDRESS registers are permanently skipped."""
+    """Test the strike-based register suppression system."""
 
     def test_unavailable_registers_initially_empty(self) -> None:
         c = KostalModbusClient("127.0.0.1")
         assert len(c.unavailable_registers) == 0
+
+    def test_single_strike_does_not_suppress(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        c._record_unavailable_strike(100, "test_reg")
+        assert 100 not in c.unavailable_registers
+        assert c._unavailable_strikes[100] == 1
+
+    def test_threshold_strikes_suppress(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        for _ in range(3):
+            c._record_unavailable_strike(100, "test_reg")
+        assert 100 in c.unavailable_registers
+        assert c._is_suppressed(100) is True
+
+    def test_reset_clears_all(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        for _ in range(3):
+            c._record_unavailable_strike(100, "test_reg")
+        assert 100 in c.unavailable_registers
+        c.reset_unavailable()
+        assert len(c.unavailable_registers) == 0
+        assert c._is_suppressed(100) is False
+
+    def test_suppression_auto_expires(self) -> None:
+        import time
+        c = KostalModbusClient("127.0.0.1")
+        for _ in range(3):
+            c._record_unavailable_strike(100, "test_reg")
+        c._unavailable_suppressed[100] = time.monotonic() - 99999
+        assert c._is_suppressed(100) is False
+
+    def test_successful_read_clears_strikes(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        c._unavailable_strikes[100] = 2
+        c._unavailable_strikes.pop(100, None)
+        assert 100 not in c._unavailable_strikes
