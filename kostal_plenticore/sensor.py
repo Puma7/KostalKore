@@ -1482,8 +1482,14 @@ async def async_setup_entry(
     # Generate DC sensor descriptions dynamically
     dc_descriptions = generate_dc_sensor_descriptions(dc_string_count)
     
+    # Slow down REST polling when Modbus is active (Modbus handles fast data)
+    _rest_poll_interval = 10
+    if _modbus_coord is not None:
+        _rest_poll_interval = 60
+        _LOGGER.info("Modbus active: REST process data polling slowed to %ds", _rest_poll_interval)
+
     process_data_update_coordinator = ProcessDataUpdateCoordinator(
-        hass, entry, _LOGGER, "Process Data", timedelta(seconds=10), plenticore
+        hass, entry, _LOGGER, "Process Data", timedelta(seconds=_rest_poll_interval), plenticore
     )
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(

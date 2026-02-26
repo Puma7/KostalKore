@@ -142,8 +142,12 @@ async def async_setup_entry(
     available_settings_data = await _get_settings_data_safe(plenticore, "settings data")
     available_settings_data = available_settings_data or {}
     
+    from .const import CONF_MODBUS_ENABLED
+    _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
+    _select_interval = 90 if _modbus_active else SELECT_UPDATE_INTERVAL_SECONDS
+
     select_data_update_coordinator = SelectDataUpdateCoordinator(
-        hass, entry, _LOGGER, "Settings Data", timedelta(seconds=SELECT_UPDATE_INTERVAL_SECONDS), plenticore
+        hass, entry, _LOGGER, "Settings Data", timedelta(seconds=_select_interval), plenticore
     )
 
     # Some select entities are safe to create even if settings data is temporarily

@@ -590,8 +590,12 @@ async def async_setup_entry(
         return
     available_settings_data = available_settings_data or {}
 
+    from .const import CONF_MODBUS_ENABLED
+    _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
+    _settings_interval = 90 if _modbus_active else 30
+
     settings_data_update_coordinator = SettingDataUpdateCoordinator(
-        hass, entry, _LOGGER, "Settings Data", timedelta(seconds=30), plenticore
+        hass, entry, _LOGGER, "Settings Data", timedelta(seconds=_settings_interval), plenticore
     )
     for description in SWITCH_SETTINGS_DATA:
         # Check if the module even exists before trying to access its settings

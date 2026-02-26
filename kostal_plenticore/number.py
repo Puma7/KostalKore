@@ -1170,8 +1170,12 @@ async def async_setup_entry(
         )
     available_settings_data = available_settings_data or {}
 
+    from .const import CONF_MODBUS_ENABLED, DOMAIN as _DOMAIN
+    _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
+    _settings_interval = 90 if _modbus_active else 30
+
     settings_data_update_coordinator = SettingDataUpdateCoordinator(
-        hass, entry, _LOGGER, "Settings Data", timedelta(seconds=30), plenticore
+        hass, entry, _LOGGER, "Settings Data", timedelta(seconds=_settings_interval), plenticore
     )
 
     # Track battery-related settings for better logging
