@@ -29,11 +29,19 @@ async def async_setup_entry(
         return
 
     plenticore = entry.runtime_data
-    from .health_binary_sensor import create_health_binary_sensors
 
+    from .health_binary_sensor import create_health_binary_sensors
     entities = create_health_binary_sensors(
         health_monitor, entry.entry_id, plenticore.device_info
     )
+
+    fire_safety = entry_data.get("fire_safety")
+    if fire_safety is not None:
+        from .fire_safety_entities import create_fire_safety_binary_sensors
+        entities.extend(create_fire_safety_binary_sensors(
+            fire_safety, entry.entry_id, plenticore.device_info
+        ))
+
     if entities:
         async_add_entities(entities)
-        _LOGGER.debug("Added %d health binary sensor entities", len(entities))
+        _LOGGER.debug("Added %d health + safety binary sensor entities", len(entities))

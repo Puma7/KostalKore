@@ -1650,10 +1650,11 @@ async def async_setup_entry(
     
     async_add_entities(calc_entities)
 
-    # Health monitoring sensors (only when Modbus is active)
+    # Health + Fire Safety monitoring sensors (only when Modbus is active)
     from .const import DOMAIN
-    health_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    health_monitor = health_data.get("health_monitor") if health_data else None
+    entry_store = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    health_monitor = entry_store.get("health_monitor") if entry_store else None
+    fire_safety = entry_store.get("fire_safety") if entry_store else None
     if health_monitor is not None:
         from .health_sensor import create_health_sensors
         health_entities = create_health_sensors(
@@ -1662,6 +1663,14 @@ async def async_setup_entry(
         if health_entities:
             async_add_entities(health_entities)
             _LOGGER.info("Added %d health monitoring sensors", len(health_entities))
+    if fire_safety is not None:
+        from .fire_safety_entities import create_fire_safety_sensors
+        fire_entities = create_fire_safety_sensors(
+            fire_safety, entry.entry_id, plenticore.device_info
+        )
+        if fire_entities:
+            async_add_entities(fire_entities)
+            _LOGGER.info("Added %d fire safety sensors", len(fire_entities))
 
 
 class PlenticoreCalculatedSensor(
