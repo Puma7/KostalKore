@@ -1649,10 +1649,19 @@ async def async_setup_entry(
     ]
     
     async_add_entities(calc_entities)
-    
-    # Note: Historical backfill is handled by Home Assistant's statistics system
-    # The calculated sensors will automatically build statistics from current values
-    # For true historical backfill, manual database operations would be required
+
+    # Health monitoring sensors (only when Modbus is active)
+    from .const import DOMAIN
+    health_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    health_monitor = health_data.get("health_monitor") if health_data else None
+    if health_monitor is not None:
+        from .health_sensor import create_health_sensors
+        health_entities = create_health_sensors(
+            health_monitor, entry.entry_id, plenticore.device_info
+        )
+        if health_entities:
+            async_add_entities(health_entities)
+            _LOGGER.info("Added %d health monitoring sensors", len(health_entities))
 
 
 class PlenticoreCalculatedSensor(

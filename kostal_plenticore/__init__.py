@@ -23,7 +23,7 @@ from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException
 
 from homeassistant.const import CONF_HOST, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -38,6 +38,7 @@ from .const import (
 )
 from .coordinator import Plenticore, PlenticoreConfigEntry
 from .helper import parse_modbus_exception
+from .health_monitor import InverterHealthMonitor
 from .modbus_client import KostalModbusClient, ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .mqtt_bridge import KostalMqttBridge
@@ -54,6 +55,7 @@ PLATFORMS: Final[list[Platform]] = [
 ]
 
 MODBUS_PLATFORMS: Final[list[Platform]] = [
+    Platform.BINARY_SENSOR,
     Platform.BUTTON,
 ]
 
@@ -173,15 +175,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             )
             await mqtt_bridge.async_start()
 
+    # Health monitor (tracks long-term trends from Modbus data)
+    health_monitor = None
+    if modbus_coordinator is not None:
+        health_monitor = InverterHealthMonitor()
+
+        @callback
+        def _feed_health_data() -> None:
+            data = modbus_coordinator.data
+            if data:
+                health_monitor.update_from_modbus(data)
+
+        modbus_coordinator.async_add_listener(_feed_health_data)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,
         "mqtt_bridge": mqtt_bridge,
+        "health_monitor": health_monitor,
     }
 
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         if modbus_coordinator is not None:
-            await hass.config_entries.async_forward_entry_setups(entry, MODBUS_PLATFORMS)
+            try:
+                await hass.config_entries.async_forward_entry_setups(entry, MODBUS_PLATFORMS)
+            except Exception as modbus_err:  # pragma: no cover
+                _LOGGER.warning("Modbus platform setup incomplete: %s", modbus_err)
     except Exception as err:
         _handle_init_error(err, "platform setup")
         _log_setup_metrics(start_time, False)
@@ -227,7 +246,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await mqtt_bridge.async_stop()
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
-        await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
+        try:
+            await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
+        except Exception:  # pragma: no cover
+            _LOGGER.debug("Modbus platform unload incomplete (non-fatal)")
         await modbus_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

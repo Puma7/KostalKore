@@ -42,17 +42,23 @@ if sys.platform == "win32":
 # Pre-load local kostal_plenticore (Platinum version)
 try:
     import kostal_plenticore
+    import kostal_plenticore.binary_sensor
     import kostal_plenticore.button
     import kostal_plenticore.config_flow
     import kostal_plenticore.const
     import kostal_plenticore.coordinator
+    import kostal_plenticore.health_monitor
+    import kostal_plenticore.health_sensor
+    import kostal_plenticore.health_binary_sensor
     
     # Patch sys.modules to point 'homeassistant.components.kostal_plenticore' to local version
-    sys.modules["homeassistant.components.kostal_plenticore"] = kostal_plenticore
-    sys.modules["homeassistant.components.kostal_plenticore.button"] = kostal_plenticore.button
-    sys.modules["homeassistant.components.kostal_plenticore.config_flow"] = kostal_plenticore.config_flow
-    sys.modules["homeassistant.components.kostal_plenticore.const"] = kostal_plenticore.const
-    sys.modules["homeassistant.components.kostal_plenticore.coordinator"] = kostal_plenticore.coordinator
+    _ha_prefix = "homeassistant.components.kostal_plenticore"
+    sys.modules[_ha_prefix] = kostal_plenticore
+    for _sub in (
+        "binary_sensor", "button", "config_flow", "const", "coordinator",
+        "health_monitor", "health_sensor", "health_binary_sensor",
+    ):
+        sys.modules[f"{_ha_prefix}.{_sub}"] = getattr(kostal_plenticore, _sub)
     
 except ImportError as e:
     print(f"Warning: Could not import Platinum version: {e}")
@@ -144,7 +150,10 @@ async def unload_entries_after_test(hass: HomeAssistant):
     """Unload config entries after each test to avoid lingering timers."""
     yield
     for entry in list(hass.config_entries.async_entries(DOMAIN)):
-        await hass.config_entries.async_unload(entry.entry_id)
+        try:
+            await hass.config_entries.async_unload(entry.entry_id)
+        except Exception:
+            pass
     await hass.async_block_till_done()
 
 

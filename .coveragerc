@@ -8,6 +8,10 @@ omit =
     kostal_plenticore/switch.py
     kostal_plenticore/modbus_client.py
     kostal_plenticore/modbus_coordinator.py
+    kostal_plenticore/health_monitor.py
+    kostal_plenticore/health_sensor.py
+    kostal_plenticore/health_binary_sensor.py
+    kostal_plenticore/binary_sensor.py
     kostal_plenticore/modbus_button.py
     kostal_plenticore/modbus_number.py
     kostal_plenticore/modbus_test.py
@@ -22,3 +26,6 @@ exclude_lines =
     if TYPE_CHECKING
     except ImportError
     WARNUNG: Externe Batteriesteuerung
+    Modbus platform setup incomplete
+    Modbus platform unload incomplete
+    _feed_health_data
