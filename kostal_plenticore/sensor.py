@@ -1291,7 +1291,8 @@ SENSOR_PROCESS_DATA = [
         native_unit_of_measurement="Hz",
         device_class=SensorDeviceClass.FREQUENCY,
         state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
+        suggested_display_precision=2,
+        formatter="format_float",
     ),
     PlenticoreSensorEntityDescription(
         module_id="devices:local:ac",
@@ -1372,7 +1373,8 @@ SENSOR_PROCESS_DATA = [
         native_unit_of_measurement="Hz",
         device_class=SensorDeviceClass.FREQUENCY,
         state_class=SensorStateClass.MEASUREMENT,
-        formatter="format_round",
+        suggested_display_precision=2,
+        formatter="format_float",
     ),
     # System Events (scb:event)
     # Note: Event:ActiveErrorCnt already defined above as "Active Alarms", skipping duplicate
