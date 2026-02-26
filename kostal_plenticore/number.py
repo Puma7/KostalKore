@@ -1484,7 +1484,7 @@ async def async_setup_entry(
     if modbus_coordinator is not None:
         from .modbus_number import create_modbus_number_entities
 
-        modbus_entities = create_modbus_number_entities(
+        modbus_entities = await create_modbus_number_entities(
             modbus_coordinator, entry.entry_id, plenticore.device_info
         )
         if modbus_entities:

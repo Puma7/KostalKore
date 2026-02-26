@@ -58,6 +58,33 @@ G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
 })
 
 
+async def _probe_modbus_write(coordinator: ModbusDataUpdateCoordinator) -> bool:
+    """Probe if Modbus write is accepted by writing Min SoC back to itself.
+
+    Reads the current Min SoC value, writes the exact same value back, then
+    re-reads register 1080 to check if it switched to 0x02 (External MODBUS).
+    This is a harmless no-op for the inverter but proves write access works.
+    """
+    try:
+        current_soc = await coordinator.client.read_register(REG_BAT_MIN_SOC)
+        soc_value = float(current_soc)
+        _LOGGER.debug("Probe: current Min SoC = %s, writing same value back", soc_value)
+
+        await coordinator.client.write_register(REG_BAT_MIN_SOC, soc_value)
+
+        import asyncio
+        await asyncio.sleep(0.5)
+
+        new_mode = await coordinator.client.read_register(REG_BATTERY_MGMT_MODE)
+        mode_int = int(new_mode)
+        _LOGGER.debug("Probe: battery_mgmt_mode after write = %s", mode_int)
+
+        return mode_int == 0x02
+    except Exception as err:
+        _LOGGER.debug("Probe write failed (external control likely not enabled): %s", err)
+        return False
+
+
 def _build_descriptions(
     max_power: int,
 ) -> list[dict[str, Any]]:
@@ -154,7 +181,7 @@ def _build_descriptions(
     ]
 
 
-def create_modbus_number_entities(
+async def create_modbus_number_entities(
     coordinator: ModbusDataUpdateCoordinator,
     entry_id: str,
     device_info: DeviceInfo,
@@ -180,18 +207,24 @@ def create_modbus_number_entities(
     if bat_mgmt_mode is not None:
         mode_int = int(bat_mgmt_mode)
         if mode_int == 0x02:
-            _LOGGER.info("Battery management mode: External via MODBUS (active)")
+            _LOGGER.info("Battery management mode: External via MODBUS (confirmed active)")
         elif mode_int == 0x00:
-            _LOGGER.info(
-                "Battery management mode register is 0 (normal when no external "
-                "command has been sent yet). If 'Extern über Protokoll (Modbus TCP)' "
-                "is enabled in the inverter web UI, Modbus writes should work."
-            )
+            _LOGGER.info("Battery management mode is 0 – probing with harmless write test...")
+            modbus_write_ok = await _probe_modbus_write(coordinator)
+            if modbus_write_ok:
+                _LOGGER.info(
+                    "Modbus write probe SUCCESSFUL – external battery control via Modbus is active"
+                )
+            else:
+                _LOGGER.warning(
+                    "Modbus write probe FAILED – external battery control via Modbus is NOT enabled. "
+                    "Enable it in the inverter web UI: Service > Battery settings > "
+                    "Extern über Protokoll (Modbus TCP)."
+                )
         else:
             _LOGGER.warning(
-                "Battery management mode is %s (expected 0x00 or 0x02). "
-                "If Modbus battery control does not work, check inverter web UI: "
-                "Service > Battery settings > Extern über Protokoll (Modbus TCP).",
+                "Battery management mode is %s (unexpected). "
+                "Check inverter web UI: Service > Battery settings.",
                 bat_mgmt_mode,
             )
 
