@@ -288,3 +288,89 @@ class TestDataPublishing:
 
         bridge._on_coordinator_update()
         hass.async_create_task.assert_not_called()
+
+
+class TestRateLimiting:
+    """Test rate limiting on MQTT write commands."""
+
+    def test_rate_limit_allows_first_write(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        assert bridge._check_rate_limit("test_reg") is True
+
+    def test_rate_limit_blocks_rapid_repeat(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge._check_rate_limit("test_reg")
+        assert bridge._check_rate_limit("test_reg") is False
+
+    def test_rate_limit_independent_per_register(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge._check_rate_limit("reg_a")
+        assert bridge._check_rate_limit("reg_b") is True
+
+
+class TestProxyCommands:
+    """Test simplified proxy command handling."""
+
+    @pytest.mark.asyncio
+    async def test_proxy_battery_charge_command(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge._started = True
+
+        msg = MagicMock()
+        msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/battery_charge"
+        msg.payload = "-5000"
+
+        await bridge._handle_proxy_command(msg)
+        coord.async_write_register.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_proxy_unknown_command_rejected(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge._started = True
+
+        msg = MagicMock()
+        msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/nonexistent"
+        msg.payload = "42"
+
+        await bridge._handle_proxy_command(msg)
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_write_rejects_nan(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        await bridge._execute_write(REG_BAT_MIN_SOC, "NaN", source="test")
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_write_serialized(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        await bridge._execute_write(REG_BAT_MIN_SOC, "50", source="test")
+        coord.async_write_register.assert_called_once()
+
+
+class TestProxyTopicBase:
+    """Test proxy topic structure."""
+
+    def test_proxy_base_topic(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        assert bridge._proxy_base == f"{TOPIC_PREFIX}/INV123/proxy"

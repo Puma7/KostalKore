@@ -1,40 +1,65 @@
-"""MQTT bridge for Kostal Plenticore Modbus data.
+"""MQTT proxy bridge for Kostal Plenticore Modbus data.
 
-Publishes all Modbus register values to MQTT topics so that external
-systems (evcc, iobroker, Node-RED, etc.) can consume inverter data
-without needing their own Modbus connection.  Also subscribes to
-command topics so external systems can write to inverter registers
-through this bridge.
+Acts as the SINGLE Modbus-TCP gateway to the inverter. External systems
+(evcc, iobroker, Node-RED, etc.) consume inverter data and send control
+commands exclusively through MQTT -- they never touch Modbus directly.
+
+Architecture:
+    Inverter <--Modbus TCP (exclusive)--> This Bridge <--MQTT--> evcc
+                                                              iobroker
+                                                              Node-RED
+                                                              any MQTT client
+
+Traffic flow control:
+    - Rate limiting: max 1 write command per register per second
+    - Command queue: serialized writes prevent concurrent Modbus access
+    - Source tracking: every command is logged with source identification
+    - Admin protection: modbus_enable, unit_id, byte_order are read-only via MQTT
 
 Topic structure:
-    kostal_plenticore/{device_id}/modbus/state          → full JSON snapshot
-    kostal_plenticore/{device_id}/modbus/register/{name} → individual value
-    kostal_plenticore/{device_id}/modbus/command/{name}  → write (inbound)
-    kostal_plenticore/{device_id}/modbus/available       → online/offline
+    {prefix}/{id}/modbus/state                    → full JSON snapshot (5s)
+    {prefix}/{id}/modbus/register/{name}          → individual register value
+    {prefix}/{id}/modbus/command/{name}            → write command (inbound)
+    {prefix}/{id}/modbus/available                 → online/offline (LWT)
+    {prefix}/{id}/modbus/config                    → register metadata (retained)
+
+    Simplified proxy topics for evcc/iobroker:
+    {prefix}/{id}/proxy/pv_power                   → total PV power (W)
+    {prefix}/{id}/proxy/grid_power                 → grid power (W, +import/-export)
+    {prefix}/{id}/proxy/battery_power              → battery power (W, +discharge/-charge)
+    {prefix}/{id}/proxy/battery_soc                → battery SoC (%)
+    {prefix}/{id}/proxy/home_power                 → total home consumption (W)
+    {prefix}/{id}/proxy/inverter_state             → inverter state (text)
+    {prefix}/{id}/proxy/command/battery_charge     → set battery charge power (W)
+    {prefix}/{id}/proxy/command/battery_min_soc    → set min SoC (%)
+    {prefix}/{id}/proxy/command/battery_max_soc    → set max SoC (%)
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
+import time
 from typing import Any, Final
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
+    INVERTER_STATES,
     ModbusRegister,
     REGISTER_BY_NAME,
     WRITABLE_REGISTERS,
     Access,
-    RegisterGroup,
+    REG_BAT_CHARGE_DC_ABS_POWER,
+    REG_BAT_MIN_SOC,
+    REG_BAT_MAX_SOC,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-# Registers that must NOT be writable via MQTT (admin/config registers)
 _MQTT_EXCLUDED_NAMES: Final[frozenset[str]] = frozenset({
     "modbus_enable", "unit_id", "byte_order",
 })
@@ -46,6 +71,14 @@ SAFE_WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
 TOPIC_PREFIX: Final[str] = "kostal_plenticore"
 QOS: Final[int] = 1
 
+RATE_LIMIT_SECONDS: Final[float] = 1.0
+
+PROXY_COMMAND_MAP: Final[dict[str, ModbusRegister]] = {
+    "battery_charge": REG_BAT_CHARGE_DC_ABS_POWER,
+    "battery_min_soc": REG_BAT_MIN_SOC,
+    "battery_max_soc": REG_BAT_MAX_SOC,
+}
+
 
 def _has_mqtt(hass: HomeAssistant) -> bool:
     """Check whether the MQTT integration is loaded."""
@@ -53,11 +86,10 @@ def _has_mqtt(hass: HomeAssistant) -> bool:
 
 
 class KostalMqttBridge:
-    """Bridge between the Modbus coordinator and an MQTT broker.
+    """MQTT proxy bridge -- the single gateway between inverter and external systems.
 
-    Uses Home Assistant's built-in MQTT integration for publishing and
-    subscribing – no extra MQTT dependency required.  If MQTT is not
-    configured in HA the bridge silently does nothing.
+    Provides traffic flow control via rate limiting and command serialization.
+    Publishes simplified proxy topics for easy evcc/iobroker integration.
     """
 
     def __init__(
@@ -70,8 +102,11 @@ class KostalMqttBridge:
         self._coordinator = coordinator
         self._device_id = device_id
         self._topic_base = f"{TOPIC_PREFIX}/{device_id}/modbus"
+        self._proxy_base = f"{TOPIC_PREFIX}/{device_id}/proxy"
         self._unsub_command: list[Any] = []
         self._started = False
+        self._last_write: dict[str, float] = {}
+        self._write_lock = asyncio.Lock()
 
     @property
     def topic_base(self) -> str:
@@ -93,18 +128,20 @@ class KostalMqttBridge:
         from homeassistant.components import mqtt  # noqa: E402
 
         await mqtt.async_publish(  # type: ignore[attr-defined]
-            self._hass,
-            f"{self._topic_base}/available",
-            "online",
-            QOS,
-            retain=True,
+            self._hass, f"{self._topic_base}/available", "online", QOS, retain=True,
         )
 
-        writable_names = [r.name for r in SAFE_WRITABLE_REGISTERS]
-        for name in writable_names:
-            topic = f"{self._topic_base}/command/{name}"
+        for reg in SAFE_WRITABLE_REGISTERS:
+            topic = f"{self._topic_base}/command/{reg.name}"
             unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
                 self._hass, topic, self._handle_command, QOS,
+            )
+            self._unsub_command.append(unsub)
+
+        for proxy_name in PROXY_COMMAND_MAP:
+            topic = f"{self._proxy_base}/command/{proxy_name}"
+            unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
+                self._hass, topic, self._handle_proxy_command, QOS,
             )
             self._unsub_command.append(unsub)
 
@@ -114,10 +151,8 @@ class KostalMqttBridge:
         await self._publish_register_metadata()
 
         _LOGGER.info(
-            "MQTT bridge started – publishing to %s/# "
-            "(%d writable command topics)",
-            self._topic_base,
-            len(writable_names),
+            "MQTT proxy bridge started – publishing to %s/# and %s/#",
+            self._topic_base, self._proxy_base,
         )
 
     async def async_stop(self) -> None:
@@ -133,15 +168,11 @@ class KostalMqttBridge:
             from homeassistant.components import mqtt
 
             await mqtt.async_publish(  # type: ignore[attr-defined]
-                self._hass,
-                f"{self._topic_base}/available",
-                "offline",
-                QOS,
-                retain=True,
+                self._hass, f"{self._topic_base}/available", "offline", QOS, retain=True,
             )
 
         self._started = False
-        _LOGGER.debug("MQTT bridge stopped")
+        _LOGGER.debug("MQTT proxy bridge stopped")
 
     # ------------------------------------------------------------------
     # Publishing
@@ -158,7 +189,7 @@ class KostalMqttBridge:
         self._hass.async_create_task(self._publish_data(data))
 
     async def _publish_data(self, data: dict[str, Any]) -> None:
-        """Publish the full state snapshot and individual register topics."""
+        """Publish register values and simplified proxy topics."""
         if not _has_mqtt(self._hass):
             return
 
@@ -173,32 +204,65 @@ class KostalMqttBridge:
                 safe[key] = str(val)
 
         await mqtt.async_publish(  # type: ignore[attr-defined]
-            self._hass,
-            f"{self._topic_base}/state",
-            json.dumps(safe, default=str),
-            QOS,
-            retain=True,
+            self._hass, f"{self._topic_base}/state",
+            json.dumps(safe, default=str), QOS, retain=True,
         )
 
         for key, val in safe.items():
+            payload = json.dumps(val, default=str) if not isinstance(val, str) else val
             await mqtt.async_publish(  # type: ignore[attr-defined]
-                self._hass,
-                f"{self._topic_base}/register/{key}",
-                json.dumps(val, default=str) if not isinstance(val, str) else val,
-                QOS,
-                retain=True,
+                self._hass, f"{self._topic_base}/register/{key}", payload, QOS, retain=True,
             )
 
-    async def _publish_register_metadata(self) -> None:
-        """Publish a config topic with register metadata for discovery."""
+        await self._publish_proxy_topics(safe)
+
+    async def _publish_proxy_topics(self, data: dict[str, Any]) -> None:
+        """Publish simplified proxy topics for evcc/iobroker."""
         if not _has_mqtt(self._hass):
             return
 
         from homeassistant.components import mqtt
 
-        meta: list[dict[str, Any]] = []
+        proxy_map: dict[str, str | None] = {
+            "pv_power": self._fmt(data.get("total_dc_power")),
+            "grid_power": self._fmt(data.get("pm_total_active")),
+            "battery_power": self._fmt(data.get("battery_cd_power")),
+            "battery_soc": self._fmt(data.get("battery_soc")),
+            "home_power": self._fmt(data.get("home_from_pv", data.get("total_ac_power"))),
+        }
+
+        state_raw = data.get("inverter_state")
+        if state_raw is not None:
+            try:
+                proxy_map["inverter_state"] = INVERTER_STATES.get(int(state_raw), str(state_raw))
+            except (TypeError, ValueError):
+                proxy_map["inverter_state"] = str(state_raw)
+
+        for name, val in proxy_map.items():
+            if val is not None:
+                await mqtt.async_publish(  # type: ignore[attr-defined]
+                    self._hass, f"{self._proxy_base}/{name}", val, QOS, retain=True,
+                )
+
+    @staticmethod
+    def _fmt(val: Any) -> str | None:
+        if val is None:
+            return None
+        try:
+            return str(round(float(val), 1))
+        except (TypeError, ValueError):
+            return str(val)
+
+    async def _publish_register_metadata(self) -> None:
+        """Publish metadata for register discovery and proxy topic docs."""
+        if not _has_mqtt(self._hass):
+            return
+
+        from homeassistant.components import mqtt
+
+        reg_meta: list[dict[str, Any]] = []
         for reg in SAFE_WRITABLE_REGISTERS:
-            meta.append({
+            reg_meta.append({
                 "name": reg.name,
                 "address": reg.address,
                 "description": reg.description,
@@ -207,22 +271,46 @@ class KostalMqttBridge:
                 "command_topic": f"{self._topic_base}/command/{reg.name}",
             })
 
+        proxy_meta: dict[str, str] = {}
+        for name, reg in PROXY_COMMAND_MAP.items():
+            proxy_meta[name] = f"{self._proxy_base}/command/{name}"
+
         await mqtt.async_publish(  # type: ignore[attr-defined]
-            self._hass,
-            f"{self._topic_base}/config",
+            self._hass, f"{self._topic_base}/config",
             json.dumps({
                 "device_id": self._device_id,
-                "writable_registers": meta,
+                "writable_registers": reg_meta,
+                "proxy_commands": proxy_meta,
+                "proxy_topics": {
+                    "pv_power": f"{self._proxy_base}/pv_power",
+                    "grid_power": f"{self._proxy_base}/grid_power",
+                    "battery_power": f"{self._proxy_base}/battery_power",
+                    "battery_soc": f"{self._proxy_base}/battery_soc",
+                    "home_power": f"{self._proxy_base}/home_power",
+                    "inverter_state": f"{self._proxy_base}/inverter_state",
+                },
                 "state_topic": f"{self._topic_base}/state",
                 "available_topic": f"{self._topic_base}/available",
             }),
-            QOS,
-            retain=True,
+            QOS, retain=True,
         )
 
     # ------------------------------------------------------------------
-    # Command handling (inbound writes from external systems)
+    # Command handling with rate limiting + source tracking
     # ------------------------------------------------------------------
+
+    def _check_rate_limit(self, reg_name: str) -> bool:
+        """Return True if the write is allowed, False if rate-limited."""
+        now = time.monotonic()
+        last = self._last_write.get(reg_name, 0.0)
+        if now - last < RATE_LIMIT_SECONDS:
+            _LOGGER.debug(
+                "Rate-limited MQTT write to %s (%.1fs since last write)",
+                reg_name, now - last,
+            )
+            return False
+        self._last_write[reg_name] = now
+        return True
 
     async def _handle_command(self, msg: Any) -> None:
         """Process an inbound MQTT command to write a register value."""
@@ -241,9 +329,35 @@ class KostalMqttBridge:
             return
 
         if reg.access != Access.RW:
-            _LOGGER.warning(
-                "Rejected write to read-only register %s via MQTT", reg_name
-            )
+            _LOGGER.warning("Rejected write to read-only register %s via MQTT", reg_name)
+            return
+
+        if reg.name in _MQTT_EXCLUDED_NAMES:
+            _LOGGER.warning("Rejected write to protected register %s via MQTT", reg_name)
+            return
+
+        await self._execute_write(reg, payload, source=f"mqtt/command/{reg_name}")
+
+    async def _handle_proxy_command(self, msg: Any) -> None:
+        """Process a simplified proxy command (e.g. from evcc)."""
+        topic: str = msg.topic
+        payload: str = msg.payload
+
+        parts = topic.split("/")
+        if len(parts) < 2:
+            return
+        proxy_name = parts[-1]
+
+        reg = PROXY_COMMAND_MAP.get(proxy_name)
+        if reg is None:
+            _LOGGER.warning("Unknown proxy command: %s", proxy_name)
+            return
+
+        await self._execute_write(reg, payload, source=f"proxy/{proxy_name}")
+
+    async def _execute_write(self, reg: ModbusRegister, payload: str, source: str) -> None:
+        """Validate, rate-limit, and execute a register write."""
+        if not self._check_rate_limit(reg.name):
             return
 
         try:
@@ -253,33 +367,35 @@ class KostalMqttBridge:
             except (json.JSONDecodeError, ValueError):
                 value = payload
 
-            # Validate value is numeric and finite
             if isinstance(value, str):
                 try:
                     value = float(value)
                 except ValueError:
                     _LOGGER.warning(
-                        "MQTT command rejected: non-numeric value %r for %s",
-                        payload, reg_name,
+                        "MQTT command rejected: non-numeric value %r for %s (source: %s)",
+                        payload, reg.name, source,
                     )
                     return
 
             if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
                 _LOGGER.warning(
-                    "MQTT command rejected: NaN/Infinity for %s", reg_name
+                    "MQTT command rejected: NaN/Infinity for %s (source: %s)",
+                    reg.name, source,
                 )
                 return
 
-            await self._coordinator.async_write_register(reg, value)
+            async with self._write_lock:
+                await self._coordinator.async_write_register(reg, value)
+
             _LOGGER.info(
-                "MQTT command executed: %s = %s (from external system)",
-                reg_name,
-                value,
+                "MQTT command executed: %s = %s (source: %s)",
+                reg.name, value, source,
             )
 
             await self._coordinator.async_request_refresh()
 
         except Exception as err:
             _LOGGER.error(
-                "MQTT command failed for %s: %s", reg_name, err
+                "MQTT command failed for %s: %s (source: %s)",
+                reg.name, err, source,
             )
