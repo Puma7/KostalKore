@@ -203,30 +203,26 @@ async def create_modbus_number_entities(
         except (TypeError, ValueError):
             _LOGGER.warning("Invalid max power value %r, using fallback %d W", raw_max, FALLBACK_MAX_POWER)
 
+    from .notifications import notify_modbus_probe_success, notify_modbus_probe_failed
+
     bat_mgmt_mode = device_data.get(REG_BATTERY_MGMT_MODE.name)
     if bat_mgmt_mode is not None:
         mode_int = int(bat_mgmt_mode)
         if mode_int == 0x02:
             _LOGGER.info("Battery management mode: External via MODBUS (confirmed active)")
+            await notify_modbus_probe_success(coordinator.hass)
         elif mode_int == 0x00:
             _LOGGER.info("Battery management mode is 0 – probing with harmless write test...")
             modbus_write_ok = await _probe_modbus_write(coordinator)
             if modbus_write_ok:
-                _LOGGER.info(
-                    "Modbus write probe SUCCESSFUL – external battery control via Modbus is active"
-                )
+                _LOGGER.info("Modbus write probe SUCCESSFUL")
+                await notify_modbus_probe_success(coordinator.hass)
             else:
-                _LOGGER.warning(
-                    "Modbus write probe FAILED – external battery control via Modbus is NOT enabled. "
-                    "Enable it in the inverter web UI: Service > Battery settings > "
-                    "Extern über Protokoll (Modbus TCP)."
-                )
+                _LOGGER.warning("Modbus write probe FAILED")
+                await notify_modbus_probe_failed(coordinator.hass)
         else:
-            _LOGGER.warning(
-                "Battery management mode is %s (unexpected). "
-                "Check inverter web UI: Service > Battery settings.",
-                bat_mgmt_mode,
-            )
+            _LOGGER.warning("Battery management mode is %s (unexpected)", bat_mgmt_mode)
+            await notify_modbus_probe_failed(coordinator.hass)
 
     descriptions = _build_descriptions(max_power)
     entities: list[ModbusNumberEntity] = []

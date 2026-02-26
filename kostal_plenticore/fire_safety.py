@@ -93,6 +93,7 @@ class FireSafetyMonitor:
         }
         self._last_check: float = 0.0
         self._check_interval: float = 5.0
+        self._total_polls: int = 0
 
     @property
     def alerts(self) -> list[SafetyAlert]:
@@ -146,6 +147,7 @@ class FireSafetyMonitor:
         if now - self._last_check < self._check_interval:
             return []
         self._last_check = now
+        self._total_polls += 1
 
         self._record_history(data, now)
 

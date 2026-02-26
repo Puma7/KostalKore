@@ -19,6 +19,7 @@ omit =
     kostal_plenticore/longevity_advisor.py
     kostal_plenticore/longevity_entities.py
     kostal_plenticore/live_test.py
+    kostal_plenticore/notifications.py
     kostal_plenticore/binary_sensor.py
     kostal_plenticore/modbus_button.py
     kostal_plenticore/modbus_number.py

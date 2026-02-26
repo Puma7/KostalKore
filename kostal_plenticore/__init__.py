@@ -191,9 +191,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             data = modbus_coordinator.data
             if data:
                 health_monitor.update_from_modbus(data)
-                fire_safety.analyze(data)
+                new_alerts = fire_safety.analyze(data)
+                if new_alerts:
+                    from .notifications import notify_safety_alert, notify_safety_clear
+                    for alert in new_alerts:
+                        hass.async_create_task(
+                            notify_safety_alert(
+                                hass, alert.risk_level, alert.title,
+                                alert.detail, alert.action,
+                            )
+                        )
+                elif fire_safety.alert_count == 0 and fire_safety._total_polls > 0:
+                    from .notifications import notify_safety_clear
+                    hass.async_create_task(notify_safety_clear(hass))
 
         modbus_coordinator.async_add_listener(_feed_health_data)
+        fire_safety._total_polls = 0
 
     diagnostics_engine = None
     longevity_advisor = None

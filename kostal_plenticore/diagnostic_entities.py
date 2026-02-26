@@ -91,7 +91,18 @@ class AreaDiagnosticSensor(SensorEntity):
         all_diag = self._engine.diagnose_all()
         diag = all_diag.get(self._area)
         if diag is not None:
+            old_status = self._last_diagnosis.status if self._last_diagnosis else DiagStatus.OK
             self._last_diagnosis = diag
+            if diag.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH) and old_status != diag.status:
+                if self.hass is not None:
+                    from .notifications import notify_diagnosis
+                    self.hass.async_create_task(
+                        notify_diagnosis(self.hass, self._area, diag.status, diag.title, diag.detail, diag.action)
+                    )
+            elif diag.status == DiagStatus.OK and old_status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH):
+                if self.hass is not None:
+                    from .notifications import dismiss
+                    self.hass.async_create_task(dismiss(self.hass, f"diag_{self._area}"))
         return self._last_diagnosis or AreaDiagnosis(
             self._area, DiagStatus.OK, "Initialisierung...", "", "", {}
         )
