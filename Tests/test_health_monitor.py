@@ -110,7 +110,7 @@ class TestInverterHealthMonitor:
             "grid_frequency": 50.01,
             "battery_cycles": 150.0,
         })
-        assert m.isolation.current == 1000000.0
+        assert m.isolation.current == 1000.0
         assert m.controller_temp.current == 45.0
         assert m.battery_temp.current == 25.0
         assert m.grid_frequency.current == 50.01
@@ -210,7 +210,9 @@ class TestInverterHealthMonitor:
         assert "health_score" in summary
         assert "trackers" in summary
         assert "isolation_resistance" in summary["trackers"]
-        assert summary["trackers"]["isolation_resistance"]["current"] == 1500000.0
+        assert summary["trackers"]["isolation_resistance"]["current"] == 1500.0
+        assert "dc_string_imbalance" in summary
+        assert "phase_voltage_imbalance" in summary
 
     def test_all_trackers_dict(self) -> None:
         m = InverterHealthMonitor()
@@ -221,4 +223,48 @@ class TestInverterHealthMonitor:
         assert "battery_temperature" in trackers
         assert "battery_cycles" in trackers
         assert "grid_frequency" in trackers
-        assert len(trackers) == 6
+        assert "phase1_voltage" in trackers
+        assert "dc1_power" in trackers
+        assert "active_errors" in trackers
+        assert len(trackers) == 21
+
+    def test_dc_string_imbalance(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 3000.0})
+        imb = m.dc_string_imbalance
+        assert imb is not None
+        assert imb > 0
+
+    def test_dc_string_imbalance_none_when_no_data(self) -> None:
+        m = InverterHealthMonitor()
+        assert m.dc_string_imbalance is None
+
+    def test_phase_voltage_imbalance(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"phase1_voltage": 230.0, "phase2_voltage": 235.0, "phase3_voltage": 228.0})
+        imb = m.phase_voltage_imbalance
+        assert imb is not None
+        assert imb >= 0
+
+    def test_inverter_state_tracking(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"inverter_state": 6})
+        m.update_from_modbus({"inverter_state": 10})
+        m.update_from_modbus({"inverter_state": 6})
+        assert m.state_change_count == 2
+
+    def test_update_error_counts(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_error_counts(2, 5)
+        assert m.active_error_count.current == 2.0
+        assert m.active_warning_count.current == 5.0
+
+    def test_info_level_threshold(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"controller_temp": 58.0})
+        assert m.controller_temp.level == HealthLevel.INFO
+
+    def test_isolation_converted_to_kohm(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"isolation_resistance": 2000000.0})
+        assert m.isolation.current == 2000.0

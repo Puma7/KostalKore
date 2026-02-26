@@ -172,6 +172,83 @@ class HighErrorRateWarning(BinarySensorEntity):
         }
 
 
+class PhaseVoltageWarning(_HealthWarningBinarySensor):
+    """Warning: AC phase voltage outside safe range."""
+
+    _attr_device_class = BinarySensorDeviceClass.POWER
+
+    def __init__(self, monitor: InverterHealthMonitor, phase: int, entry_id: str, device_info: DeviceInfo) -> None:
+        tracker = [monitor.phase1_voltage, monitor.phase2_voltage, monitor.phase3_voltage][phase - 1]
+        super().__init__(
+            monitor, tracker, entry_id, device_info,
+            name=f"Phase {phase} Voltage Warning",
+            unique_suffix=f"warn_phase{phase}_voltage",
+            icon_on="mdi:flash-alert",
+            icon_off="mdi:flash",
+        )
+
+
+class DCStringImbalanceWarning(BinarySensorEntity):
+    """Warning: DC string power significantly imbalanced (shading/defect)."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "DC String Imbalance Warning"
+
+    def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
+        self._monitor = monitor
+        self._attr_unique_id = f"{entry_id}_health_warn_dc_imbalance"
+        self._attr_device_info = device_info
+
+    @property
+    def is_on(self) -> bool | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        imb = self._monitor.dc_string_imbalance
+        if imb is None:
+            return None
+        return imb > 30.0
+
+    @property
+    def icon(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return "mdi:solar-panel-large" if not self.is_on else "mdi:alert"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return {
+            "imbalance_percent": round(self._monitor.dc_string_imbalance, 1) if self._monitor.dc_string_imbalance is not None else None,
+        }
+
+
+class ActiveErrorsWarning(BinarySensorEntity):
+    """Warning: inverter has active error conditions."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Active Inverter Errors"
+
+    def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
+        self._monitor = monitor
+        self._attr_unique_id = f"{entry_id}_health_warn_active_errors"
+        self._attr_device_info = device_info
+
+    @property
+    def is_on(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        val = self._monitor.active_error_count.current
+        return val is not None and val > 0
+
+    @property
+    def icon(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return "mdi:alert-octagon" if self.is_on else "mdi:check-circle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return {
+            "error_count": self._monitor.active_error_count.current,
+            "warning_count": self._monitor.active_warning_count.current,
+        }
+
+
 def create_health_binary_sensors(
     monitor: InverterHealthMonitor,
     entry_id: str,
@@ -185,4 +262,9 @@ def create_health_binary_sensors(
         BatteryTempWarning(monitor, entry_id, device_info),
         GridFrequencyWarning(monitor, entry_id, device_info),
         HighErrorRateWarning(monitor, entry_id, device_info),
+        PhaseVoltageWarning(monitor, 1, entry_id, device_info),
+        PhaseVoltageWarning(monitor, 2, entry_id, device_info),
+        PhaseVoltageWarning(monitor, 3, entry_id, device_info),
+        DCStringImbalanceWarning(monitor, entry_id, device_info),
+        ActiveErrorsWarning(monitor, entry_id, device_info),
     ]

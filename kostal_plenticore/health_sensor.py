@@ -231,6 +231,83 @@ class CommunicationReliabilitySensor(SensorEntity):
         return round(self._monitor.communication_reliability, 1)
 
 
+class DCStringImbalanceSensor(SensorEntity):
+    """DC string power imbalance detection."""
+
+    _attr_icon = "mdi:solar-panel-large"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "DC String Imbalance"
+
+    def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
+        self._monitor = monitor
+        self._attr_unique_id = f"{entry_id}_health_dc_imbalance"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        val = self._monitor.dc_string_imbalance
+        return round(val, 1) if val is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return {
+            "dc1_power": self._monitor.dc1_power.current,
+            "dc2_power": self._monitor.dc2_power.current,
+            "dc3_power": self._monitor.dc3_power.current,
+        }
+
+
+class PhaseImbalanceSensor(SensorEntity):
+    """AC phase voltage imbalance detection."""
+
+    _attr_icon = "mdi:sine-wave"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Phase Voltage Imbalance"
+
+    def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
+        self._monitor = monitor
+        self._attr_unique_id = f"{entry_id}_health_phase_imbalance"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        val = self._monitor.phase_voltage_imbalance
+        return round(val, 1) if val is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return {
+            "phase1_voltage": self._monitor.phase1_voltage.current,
+            "phase2_voltage": self._monitor.phase2_voltage.current,
+            "phase3_voltage": self._monitor.phase3_voltage.current,
+        }
+
+
+class InverterStateChangeSensor(SensorEntity):
+    """Inverter state change counter."""
+
+    _attr_icon = "mdi:state-machine"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Inverter State Changes"
+
+    def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
+        self._monitor = monitor
+        self._attr_unique_id = f"{entry_id}_health_state_changes"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor.state_change_count
+
+
 def create_health_sensors(
     monitor: InverterHealthMonitor,
     entry_id: str,
@@ -245,4 +322,7 @@ def create_health_sensors(
         BatteryHealthSensor(monitor, entry_id, device_info),
         ErrorRateSensor(monitor, entry_id, device_info),
         CommunicationReliabilitySensor(monitor, entry_id, device_info),
+        DCStringImbalanceSensor(monitor, entry_id, device_info),
+        PhaseImbalanceSensor(monitor, entry_id, device_info),
+        InverterStateChangeSensor(monitor, entry_id, device_info),
     ]

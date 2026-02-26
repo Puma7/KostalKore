@@ -1,16 +1,17 @@
 """Inverter health monitoring and anomaly detection.
 
-Tracks long-term trends of critical inverter parameters and generates
-health scores and warnings. Data persists across restarts via HA's
-restore mechanism.
+Tracks long-term trends of ALL available health-relevant parameters from
+both Modbus registers and REST API sensors. Uses a 3-level threshold
+system: INFO → WARNING → CRITICAL.
 
-Monitored parameters:
-- Isolation resistance (Ohm) — declining trend indicates cable/module degradation
-- Controller temperature (°C) — overheating detection
-- Battery health (SoH %, cycles, capacity loss)
-- Error/warning event frequency
-- Communication reliability (Modbus error rate)
-- Grid frequency stability
+Monitored parameter categories:
+1. Electrical Safety: isolation resistance, PSSB fuse state
+2. Thermal: controller temperature, battery temperature
+3. Battery Health: SoH, cycles, capacity loss, voltage
+4. Grid Quality: frequency stability, cos phi, voltage per phase
+5. Communication: Modbus error rate, poll success rate
+6. Inverter Status: state tracking, error/warning counters, worktime
+7. Power Quality: DC string balance, AC phase balance
 """
 
 from __future__ import annotations
@@ -19,28 +20,19 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Any, Final
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-MAX_HISTORY_SIZE: Final[int] = 1000
-ISOLATION_WARNING_OHMS: Final[float] = 500_000.0
-ISOLATION_CRITICAL_OHMS: Final[float] = 100_000.0
-TEMP_WARNING_CELSIUS: Final[float] = 65.0
-TEMP_CRITICAL_CELSIUS: Final[float] = 75.0
-SOH_WARNING_PERCENT: Final[float] = 80.0
-SOH_CRITICAL_PERCENT: Final[float] = 60.0
-ERROR_RATE_WARNING_PER_HOUR: Final[float] = 5.0
-GRID_FREQ_NOMINAL: Final[float] = 50.0
-GRID_FREQ_TOLERANCE: Final[float] = 0.5
+MAX_HISTORY_SIZE: Final[int] = 2000
 
 
 class HealthLevel(StrEnum):
-    """Health assessment levels."""
+    """Health assessment levels (3 tiers + unknown)."""
 
-    EXCELLENT = "excellent"
     GOOD = "good"
+    INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
     UNKNOWN = "unknown"
@@ -67,11 +59,13 @@ class HealthSample:
 
 @dataclass
 class ParameterTracker:
-    """Tracks min/max/avg/trend for a single parameter."""
+    """Tracks min/max/avg/trend for a single parameter with 3-level thresholds."""
 
     name: str
     unit: str
     samples: deque[HealthSample] = field(default_factory=lambda: deque(maxlen=MAX_HISTORY_SIZE))
+    info_low: float | None = None
+    info_high: float | None = None
     warning_low: float | None = None
     warning_high: float | None = None
     critical_low: float | None = None
@@ -104,7 +98,7 @@ class ParameterTracker:
 
     @property
     def level(self) -> HealthLevel:
-        """Assess current health level based on thresholds."""
+        """Assess current health level (3-tier: info → warning → critical)."""
         val = self.current
         if val is None:
             return HealthLevel.UNKNOWN
@@ -116,6 +110,10 @@ class ParameterTracker:
             return HealthLevel.WARNING
         if self.warning_high is not None and val > self.warning_high:
             return HealthLevel.WARNING
+        if self.info_low is not None and val < self.info_low:
+            return HealthLevel.INFO
+        if self.info_high is not None and val > self.info_high:
+            return HealthLevel.INFO
         return HealthLevel.GOOD
 
     @property
@@ -142,83 +140,178 @@ class InverterHealthMonitor:
     """
 
     def __init__(self) -> None:
+        # --- Electrical Safety ---
         self.isolation = ParameterTracker(
-            name="Isolation Resistance", unit="Ohm",
-            warning_low=ISOLATION_WARNING_OHMS,
-            critical_low=ISOLATION_CRITICAL_OHMS,
+            name="Isolation Resistance", unit="kΩ",
+            info_low=1000.0, warning_low=500.0, critical_low=100.0,
         )
+
+        # --- Thermal ---
         self.controller_temp = ParameterTracker(
             name="Controller Temperature", unit="°C",
-            warning_high=TEMP_WARNING_CELSIUS,
-            critical_high=TEMP_CRITICAL_CELSIUS,
-        )
-        self.battery_soh = ParameterTracker(
-            name="Battery State of Health", unit="%",
-            warning_low=SOH_WARNING_PERCENT,
-            critical_low=SOH_CRITICAL_PERCENT,
+            info_high=55.0, warning_high=70.0, critical_high=80.0,
         )
         self.battery_temp = ParameterTracker(
             name="Battery Temperature", unit="°C",
-            warning_high=45.0,
-            critical_high=55.0,
+            info_high=35.0, warning_high=45.0, critical_high=55.0,
+        )
+
+        # --- Battery Health ---
+        self.battery_soh = ParameterTracker(
+            name="Battery State of Health", unit="%",
+            info_low=90.0, warning_low=80.0, critical_low=60.0,
         )
         self.battery_cycles = ParameterTracker(
             name="Battery Cycles", unit="cycles",
+            info_high=3000.0, warning_high=5000.0, critical_high=8000.0,
         )
+        self.battery_voltage = ParameterTracker(
+            name="Battery Voltage", unit="V",
+        )
+        self.battery_capacity_wh = ParameterTracker(
+            name="Battery Work Capacity", unit="Wh",
+        )
+
+        # --- Grid Quality ---
         self.grid_frequency = ParameterTracker(
             name="Grid Frequency", unit="Hz",
-            warning_low=GRID_FREQ_NOMINAL - GRID_FREQ_TOLERANCE,
-            warning_high=GRID_FREQ_NOMINAL + GRID_FREQ_TOLERANCE,
-            critical_low=GRID_FREQ_NOMINAL - 1.0,
-            critical_high=GRID_FREQ_NOMINAL + 1.0,
+            info_low=49.8, info_high=50.2,
+            warning_low=49.5, warning_high=50.5,
+            critical_low=49.0, critical_high=51.0,
         )
+        self.phase1_voltage = ParameterTracker(
+            name="Phase 1 Voltage", unit="V",
+            info_low=210.0, info_high=250.0,
+            warning_low=195.0, warning_high=255.0,
+            critical_low=185.0, critical_high=265.0,
+        )
+        self.phase2_voltage = ParameterTracker(
+            name="Phase 2 Voltage", unit="V",
+            info_low=210.0, info_high=250.0,
+            warning_low=195.0, warning_high=255.0,
+            critical_low=185.0, critical_high=265.0,
+        )
+        self.phase3_voltage = ParameterTracker(
+            name="Phase 3 Voltage", unit="V",
+            info_low=210.0, info_high=250.0,
+            warning_low=195.0, warning_high=255.0,
+            critical_low=185.0, critical_high=265.0,
+        )
+        self.cos_phi = ParameterTracker(
+            name="Power Factor (cos φ)", unit="",
+        )
+        self.pm_cos_phi = ParameterTracker(
+            name="Power Factor Powermeter", unit="",
+        )
+
+        # --- DC String Health ---
+        self.dc1_voltage = ParameterTracker(name="DC1 Voltage", unit="V")
+        self.dc2_voltage = ParameterTracker(name="DC2 Voltage", unit="V")
+        self.dc3_voltage = ParameterTracker(name="DC3 Voltage", unit="V")
+        self.dc1_power = ParameterTracker(name="DC1 Power", unit="W")
+        self.dc2_power = ParameterTracker(name="DC2 Power", unit="W")
+        self.dc3_power = ParameterTracker(name="DC3 Power", unit="W")
+
+        # --- Inverter Status ---
+        self.power_limit_evu = ParameterTracker(
+            name="Power Limit EVU", unit="%",
+        )
+        self.active_error_count = ParameterTracker(
+            name="Active Error Count", unit="",
+            info_high=0.0, warning_high=1.0, critical_high=5.0,
+        )
+        self.active_warning_count = ParameterTracker(
+            name="Active Warning Count", unit="",
+            info_high=0.0, warning_high=3.0, critical_high=10.0,
+        )
+
+        # --- Event / Communication ---
         self._events: deque[HealthEvent] = deque(maxlen=MAX_HISTORY_SIZE)
         self._error_timestamps: deque[float] = deque(maxlen=MAX_HISTORY_SIZE)
         self._total_polls: int = 0
         self._failed_polls: int = 0
+        self._inverter_state_changes: deque[HealthEvent] = deque(maxlen=100)
+        self._last_inverter_state: int | None = None
 
     @property
     def all_trackers(self) -> dict[str, ParameterTracker]:
         return {
             "isolation_resistance": self.isolation,
             "controller_temperature": self.controller_temp,
-            "battery_soh": self.battery_soh,
             "battery_temperature": self.battery_temp,
+            "battery_soh": self.battery_soh,
             "battery_cycles": self.battery_cycles,
+            "battery_voltage": self.battery_voltage,
+            "battery_capacity": self.battery_capacity_wh,
             "grid_frequency": self.grid_frequency,
+            "phase1_voltage": self.phase1_voltage,
+            "phase2_voltage": self.phase2_voltage,
+            "phase3_voltage": self.phase3_voltage,
+            "cos_phi": self.cos_phi,
+            "dc1_voltage": self.dc1_voltage,
+            "dc2_voltage": self.dc2_voltage,
+            "dc3_voltage": self.dc3_voltage,
+            "dc1_power": self.dc1_power,
+            "dc2_power": self.dc2_power,
+            "dc3_power": self.dc3_power,
+            "power_limit_evu": self.power_limit_evu,
+            "active_errors": self.active_error_count,
+            "active_warnings": self.active_warning_count,
         }
+
+    # ------------------------------------------------------------------
+    # Data ingestion
+    # ------------------------------------------------------------------
 
     def update_from_modbus(self, data: dict[str, Any]) -> None:
         """Feed Modbus register data into the health monitor."""
         self._total_polls += 1
 
-        if (v := data.get("isolation_resistance")) is not None:
-            try:
-                self.isolation.record(float(v))
-            except (TypeError, ValueError):
-                pass
+        _map: dict[str, ParameterTracker] = {
+            "isolation_resistance": self.isolation,
+            "controller_temp": self.controller_temp,
+            "battery_temperature": self.battery_temp,
+            "battery_voltage": self.battery_voltage,
+            "battery_cycles": self.battery_cycles,
+            "grid_frequency": self.grid_frequency,
+            "phase1_voltage": self.phase1_voltage,
+            "phase2_voltage": self.phase2_voltage,
+            "phase3_voltage": self.phase3_voltage,
+            "cos_phi": self.cos_phi,
+            "pm_cos_phi": self.pm_cos_phi,
+            "dc1_voltage": self.dc1_voltage,
+            "dc2_voltage": self.dc2_voltage,
+            "dc3_voltage": self.dc3_voltage,
+            "dc1_power": self.dc1_power,
+            "dc2_power": self.dc2_power,
+            "dc3_power": self.dc3_power,
+            "power_limit_evu": self.power_limit_evu,
+            "battery_work_capacity": self.battery_capacity_wh,
+        }
+        for key, tracker in _map.items():
+            val = data.get(key)
+            if val is not None:
+                try:
+                    fval = float(val)
+                    if key == "isolation_resistance":
+                        fval = fval / 1000.0
+                    tracker.record(fval)
+                except (TypeError, ValueError):
+                    pass
 
-        if (v := data.get("controller_temp")) is not None:
+        state = data.get("inverter_state")
+        if state is not None:
             try:
-                self.controller_temp.record(float(v))
-            except (TypeError, ValueError):
-                pass
-
-        if (v := data.get("battery_temperature")) is not None:
-            try:
-                self.battery_temp.record(float(v))
-            except (TypeError, ValueError):
-                pass
-
-        if (v := data.get("grid_frequency")) is not None:
-            try:
-                self.grid_frequency.record(float(v))
-            except (TypeError, ValueError):
-                pass
-
-        if (v := data.get("battery_cycles")) is not None:
-            try:
-                self.battery_cycles.record(float(v))
+                state_int = int(state)
+                if self._last_inverter_state is not None and state_int != self._last_inverter_state:
+                    self._inverter_state_changes.append(HealthEvent(
+                        timestamp=time.monotonic(),
+                        category="state_change",
+                        message=f"Inverter state: {self._last_inverter_state} → {state_int}",
+                        level=HealthLevel.INFO,
+                        value=float(state_int),
+                    ))
+                self._last_inverter_state = state_int
             except (TypeError, ValueError):
                 pass
 
@@ -226,51 +319,92 @@ class InverterHealthMonitor:
         """Update battery state of health (from REST API sensor)."""
         self.battery_soh.record(soh)
 
+    def update_error_counts(self, errors: int, warnings: int) -> None:
+        """Update active error/warning counters (from REST API sensors)."""
+        self.active_error_count.record(float(errors))
+        self.active_warning_count.record(float(warnings))
+
     def record_error(self, category: str, message: str) -> None:
         """Record a health-relevant error event."""
         now = time.monotonic()
         self._error_timestamps.append(now)
         self._failed_polls += 1
         self._events.append(HealthEvent(
-            timestamp=now,
-            category=category,
-            message=message,
-            level=HealthLevel.WARNING,
+            timestamp=now, category=category, message=message, level=HealthLevel.WARNING,
         ))
 
     def record_event(self, category: str, message: str, level: HealthLevel, value: float | None = None) -> None:
         """Record a general health event."""
         self._events.append(HealthEvent(
-            timestamp=time.monotonic(),
-            category=category,
-            message=message,
-            level=level,
-            value=value,
+            timestamp=time.monotonic(), category=category, message=message, level=level, value=value,
         ))
+
+    # ------------------------------------------------------------------
+    # Computed metrics
+    # ------------------------------------------------------------------
 
     @property
     def error_rate_per_hour(self) -> float:
-        """Calculate error rate over the last hour."""
         now = time.monotonic()
         one_hour_ago = now - 3600
-        recent = sum(1 for t in self._error_timestamps if t > one_hour_ago)
-        return float(recent)
+        return float(sum(1 for t in self._error_timestamps if t > one_hour_ago))
 
     @property
     def communication_reliability(self) -> float:
-        """Return communication success rate as percentage."""
         if self._total_polls == 0:
             return 100.0
         return ((self._total_polls - self._failed_polls) / self._total_polls) * 100.0
 
     @property
+    def dc_string_imbalance(self) -> float | None:
+        """Calculate DC string power imbalance as percentage.
+
+        High imbalance may indicate shading, soiling, or defective panels.
+        """
+        powers = [
+            self.dc1_power.current,
+            self.dc2_power.current,
+            self.dc3_power.current,
+        ]
+        active = [p for p in powers if p is not None and p > 50]
+        if len(active) < 2:
+            return None
+        avg = sum(active) / len(active)
+        if avg < 50:
+            return None
+        max_dev = max(abs(p - avg) for p in active)
+        return (max_dev / avg) * 100.0
+
+    @property
+    def phase_voltage_imbalance(self) -> float | None:
+        """Calculate AC phase voltage imbalance as percentage."""
+        voltages = [
+            self.phase1_voltage.current,
+            self.phase2_voltage.current,
+            self.phase3_voltage.current,
+        ]
+        active = [v for v in voltages if v is not None and v > 100]
+        if len(active) < 2:
+            return None
+        avg = sum(active) / len(active)
+        max_dev = max(abs(v - avg) for v in active)
+        return (max_dev / avg) * 100.0
+
+    @property
     def recent_events(self) -> list[HealthEvent]:
-        """Return the most recent health events."""
         return list(self._events)[-20:]
 
     @property
     def event_count(self) -> int:
         return len(self._events)
+
+    @property
+    def state_change_count(self) -> int:
+        return len(self._inverter_state_changes)
+
+    # ------------------------------------------------------------------
+    # Overall health assessment
+    # ------------------------------------------------------------------
 
     @property
     def overall_health(self) -> HealthLevel:
@@ -282,7 +416,9 @@ class InverterHealthMonitor:
             return HealthLevel.CRITICAL
         if any(l == HealthLevel.WARNING for l in levels):
             return HealthLevel.WARNING
-        if self.error_rate_per_hour > ERROR_RATE_WARNING_PER_HOUR:
+        if any(l == HealthLevel.INFO for l in levels):
+            return HealthLevel.INFO
+        if self.error_rate_per_hour > 5.0:
             return HealthLevel.WARNING
         return HealthLevel.GOOD
 
@@ -292,13 +428,18 @@ class InverterHealthMonitor:
         score = 100
         for tracker in self.all_trackers.values():
             if tracker.level == HealthLevel.CRITICAL:
-                score -= 25
+                score -= 20
             elif tracker.level == HealthLevel.WARNING:
-                score -= 10
-        if self.error_rate_per_hour > ERROR_RATE_WARNING_PER_HOUR:
-            score -= 15
+                score -= 8
+            elif tracker.level == HealthLevel.INFO:
+                score -= 3
+        if self.error_rate_per_hour > 5.0:
+            score -= 10
         if self.communication_reliability < 95:
             score -= 10
+        imb = self.dc_string_imbalance
+        if imb is not None and imb > 30:
+            score -= 5
         return max(0, min(100, score))
 
     def get_health_summary(self) -> dict[str, Any]:
@@ -311,6 +452,9 @@ class InverterHealthMonitor:
             "total_polls": self._total_polls,
             "failed_polls": self._failed_polls,
             "event_count": self.event_count,
+            "state_changes": self.state_change_count,
+            "dc_string_imbalance": round(self.dc_string_imbalance, 1) if self.dc_string_imbalance is not None else None,
+            "phase_voltage_imbalance": round(self.phase_voltage_imbalance, 1) if self.phase_voltage_imbalance is not None else None,
             "trackers": {},
         }
         for name, tracker in self.all_trackers.items():
