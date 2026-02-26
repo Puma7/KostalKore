@@ -32,8 +32,8 @@ from typing import Any, AsyncGenerator, Final
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-MIN_REQUEST_PAUSE: Final[float] = 0.05
-REQUEST_TIMEOUT: Final[float] = 30.0
+MIN_REQUEST_PAUSE: Final[float] = 0.02
+REQUEST_TIMEOUT: Final[float] = 120.0
 
 
 class RequestScheduler:
