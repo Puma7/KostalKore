@@ -314,7 +314,7 @@ INVERTER_STATES: Final[dict[int, str]] = {
     8: "ExtSwitchOff", 9: "Update", 10: "Standby",
     11: "GridSync", 12: "GridPreCheck", 13: "GridSwitchOff",
     14: "Overheating", 15: "Shutdown", 16: "ImproperDcVoltage",
-    17: "ESB", 18: "Unknown",
+    17: "ESB", 18: "Unknown", 19: "DcCheck",
 }
 
 BATTERY_TYPES: Final[dict[int, str]] = {
