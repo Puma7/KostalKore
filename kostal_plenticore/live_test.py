@@ -6,9 +6,9 @@ Run this BEFORE enabling Modbus in the HA integration to verify
 that everything works correctly with your specific inverter.
 
 Usage:
-    python tools/live_test.py --host 192.168.1.2
-    python tools/live_test.py --host 192.168.1.2 --port 1502 --unit-id 71
-    python tools/live_test.py --host 192.168.1.2 --output report.json
+    python -m kostal_plenticore.live_test --host 192.168.1.2
+    python -m kostal_plenticore.live_test --host 192.168.1.2 --port 1502 --unit-id 71
+    python -m kostal_plenticore.live_test --host 192.168.1.2 --output report.json
 
 The script will:
 1. Connect to the inverter via Modbus TCP
@@ -25,14 +25,12 @@ import argparse
 import asyncio
 import json
 import struct
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from kostal_plenticore.modbus_registers import (
+from .modbus_registers import (
     ALL_REGISTERS,
     BATTERY_MGMT_MODES,
     BATTERY_TYPES,
@@ -47,7 +45,7 @@ from kostal_plenticore.modbus_registers import (
 async def run_test(host: str, port: int, unit_id: int, output: str | None) -> None:
     from pymodbus.client import AsyncModbusTcpClient
 
-    report: dict[str, any] = {
+    report: dict[str, Any] = {
         "timestamp": datetime.now().isoformat(),
         "host": host,
         "port": port,
@@ -139,7 +137,7 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
                     3: "ILLEGAL DATA VALUE",
                     4: "SERVER DEVICE FAILURE",
                     6: "SERVER DEVICE BUSY",
-                }.get(exc_code, f"Exception 0x{exc_code:02X}" if exc_code else "Unknown")
+                }.get(int(exc_code) if exc_code is not None else -1, f"Exception 0x{exc_code:02X}" if exc_code else "Unknown")
 
                 report["registers"][reg.name] = {
                     "address": reg.address,
@@ -261,12 +259,12 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
     else:
         print(f"\n  ✗ {error_count} ERRORS -- check log above before enabling Modbus")
 
-    await client.close()
+    client.close()
 
     _save_report(report, output)
 
 
-def _decode(raw: bytes, reg: ModbusRegister, endianness: str) -> any:
+def _decode(raw: bytes, reg: ModbusRegister, endianness: str) -> Any:
     dt = reg.data_type
     if dt == DataType.UINT16:
         return struct.unpack(">H", raw[:2])[0]
@@ -297,7 +295,7 @@ def _decode(raw: bytes, reg: ModbusRegister, endianness: str) -> any:
     return raw.hex()
 
 
-def _format_value(reg: ModbusRegister, value: any) -> str:
+def _format_value(reg: ModbusRegister, value: Any) -> str:
     if reg.name == "inverter_state" and isinstance(value, int):
         return INVERTER_STATES.get(value, str(value))
     if reg.name == "battery_type" and isinstance(value, int):
@@ -311,7 +309,7 @@ def _format_value(reg: ModbusRegister, value: any) -> str:
     return str(value)
 
 
-def _save_report(report: dict, output: str | None) -> None:
+def _save_report(report: dict[str, Any], output: str | None) -> None:
     if output:
         path = Path(output)
         path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
@@ -328,9 +326,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python tools/live_test.py --host 192.168.1.2
-  python tools/live_test.py --host 192.168.1.2 --port 1502 --unit-id 71
-  python tools/live_test.py --host 192.168.1.2 --output my_report.json
+  python -m kostal_plenticore.live_test --host 192.168.1.2
+  python -m kostal_plenticore.live_test --host 192.168.1.2 --port 1502 --unit-id 71
+  python -m kostal_plenticore.live_test --host 192.168.1.2 --output my_report.json
 
 The tool is 100% read-only and will NEVER write to the inverter.
 Run this before enabling Modbus in the Home Assistant integration.
