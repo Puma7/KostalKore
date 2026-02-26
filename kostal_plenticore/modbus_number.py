@@ -72,17 +72,15 @@ async def _probe_modbus_write(coordinator: ModbusDataUpdateCoordinator) -> bool:
 
         await coordinator.client.write_register(REG_BAT_MIN_SOC, soc_value)
 
-        import asyncio
-        await asyncio.sleep(0.5)
-
-        new_mode = await coordinator.client.read_register(REG_BATTERY_MGMT_MODE)
-        mode_int = int(new_mode)
-        _LOGGER.debug("Probe: battery_mgmt_mode after write = %s", mode_int)
-
-        return mode_int == 0x02
+        _LOGGER.debug("Probe: write accepted (no exception) → external control is active")
+        return True
     except Exception as err:
-        _LOGGER.debug("Probe write failed (external control likely not enabled): %s", err)
-        return False
+        err_str = str(err).lower()
+        if "illegal" in err_str or "not authorized" in err_str or "denied" in err_str:
+            _LOGGER.debug("Probe: write rejected by inverter → external control NOT enabled: %s", err)
+            return False
+        _LOGGER.debug("Probe: write failed with transient error (may still work): %s", err)
+        return True
 
 
 def _build_descriptions(
