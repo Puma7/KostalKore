@@ -27,9 +27,11 @@ from typing import Any, Final
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-MAX_DAILY_SNAPSHOTS: Final[int] = 365
+MAX_DAILY_SNAPSHOTS: Final[int] = 730
 BASELINE_DAYS: Final[int] = 7
 SECONDS_PER_DAY: Final[float] = 86400.0
+DAYS_PER_MONTH: Final[int] = 30
+SEASONAL_WINDOW_DAYS: Final[int] = 15
 
 
 @dataclass
@@ -139,6 +141,64 @@ class TrackedParameter:
         slope_per_day = numerator / denominator
         return slope_per_day * 30.0
 
+    def seasonal_avg(self, target_day: int | None = None) -> float | None:
+        """Average for the same season (±15 days) from all available years.
+
+        Compares the current value with data from the same time of year
+        in previous data. This eliminates seasonal effects:
+        - Isolation is naturally lower in wet winter months
+        - DC peak power is lower in winter (less sunlight)
+        - Temperatures are higher in summer
+
+        If target_day is None, uses the most recent day in snapshots.
+        """
+        if not self.snapshots:
+            return None
+
+        if target_day is None:
+            target_day = self.snapshots[-1].day if self.snapshots else 0
+
+        day_of_year = target_day % 365
+
+        matching = []
+        for s in self.snapshots:
+            s_day_of_year = s.day % 365
+            diff = abs(s_day_of_year - day_of_year)
+            if diff > 182:
+                diff = 365 - diff
+            if diff <= SEASONAL_WINDOW_DAYS:
+                matching.append(s)
+
+        if not matching:
+            return None
+        return sum(s.avg for s in matching) / len(matching)
+
+    @property
+    def seasonal_deviation_pct(self) -> float | None:
+        """Percentage change vs same-season historical average.
+
+        More meaningful than baseline_deviation_pct because it
+        accounts for seasonal variation.
+        """
+        seasonal = self.seasonal_avg()
+        curr = self.current_avg
+        if seasonal is None or curr is None or seasonal == 0:
+            return None
+        return ((curr - seasonal) / abs(seasonal)) * 100.0
+
+    @property
+    def seasonal_trend_description(self) -> str:
+        """Seasonal-adjusted trend description."""
+        s_dev = self.seasonal_deviation_pct
+        if s_dev is None:
+            return "Noch nicht genug saisonale Daten"
+
+        if abs(s_dev) < 3:
+            return "Saisonbereinigt stabil"
+
+        direction = "höher" if s_dev > 0 else "niedriger"
+        return f"Saisonbereinigt {abs(s_dev):.0f}% {direction} als gleiche Jahreszeit"
+
     @property
     def trend_description(self) -> str:
         """Human-readable trend description."""
@@ -157,6 +217,11 @@ class TrackedParameter:
 
         if dev is not None and abs(dev) > 5:
             desc += f", {dev:+.1f}% seit Baseline"
+
+        s_dev = self.seasonal_deviation_pct
+        if s_dev is not None and abs(s_dev) > 5:
+            s_dir = "höher" if s_dev > 0 else "niedriger"
+            desc += f", saisonbereinigt {abs(s_dev):.0f}% {s_dir}"
 
         return desc
 

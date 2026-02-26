@@ -178,3 +178,71 @@ class TestDegradationTracker:
         alerts = t.get_alerts()
         iso_alerts = [a for a in alerts if "Isolation" in a["parameter"]]
         assert len(iso_alerts) == 0
+
+
+class TestSeasonalTracking:
+
+    def test_seasonal_avg_no_data(self) -> None:
+        p = TrackedParameter(name="test", unit="kΩ")
+        assert p.seasonal_avg() is None
+
+    def test_seasonal_avg_same_season(self) -> None:
+        p = TrackedParameter(name="test", unit="kΩ")
+        base_time = time.time()
+        for day in range(30):
+            p.record(1000.0, base_time + day * SECONDS_PER_DAY)
+        p.record(1000.0, base_time + 31 * SECONDS_PER_DAY)
+        avg = p.seasonal_avg()
+        assert avg is not None
+        assert abs(avg - 1000.0) < 1.0
+
+    def test_seasonal_deviation_stable(self) -> None:
+        p = TrackedParameter(name="test", unit="V")
+        base_time = time.time()
+        for day in range(30):
+            p.record(230.0, base_time + day * SECONDS_PER_DAY)
+        p.record(230.0, base_time + 31 * SECONDS_PER_DAY)
+        dev = p.seasonal_deviation_pct
+        assert dev is not None
+        assert abs(dev) < 1.0
+
+    def test_seasonal_deviation_changed(self) -> None:
+        p = TrackedParameter(name="test", unit="kΩ")
+        base_time = time.time()
+        for day in range(15):
+            p.record(1000.0, base_time + day * SECONDS_PER_DAY)
+        for day in range(15, 30):
+            p.record(800.0, base_time + day * SECONDS_PER_DAY)
+        p.record(800.0, base_time + 31 * SECONDS_PER_DAY)
+        dev = p.seasonal_deviation_pct
+        assert dev is not None
+
+    def test_seasonal_trend_description_stable(self) -> None:
+        p = TrackedParameter(name="test", unit="V")
+        base_time = time.time()
+        for day in range(20):
+            p.record(230.0, base_time + day * SECONDS_PER_DAY)
+        p.record(230.0, base_time + 21 * SECONDS_PER_DAY)
+        desc = p.seasonal_trend_description
+        assert "stabil" in desc.lower() or "Daten" in desc
+
+    def test_seasonal_included_in_trend_description(self) -> None:
+        p = TrackedParameter(name="iso", unit="kΩ")
+        base_time = time.time()
+        for day in range(15):
+            p.record(1000.0, base_time + day * SECONDS_PER_DAY)
+        for day in range(15, 30):
+            p.record(700.0, base_time + day * SECONDS_PER_DAY)
+        p.record(700.0, base_time + 31 * SECONDS_PER_DAY)
+        desc = p.trend_description
+        assert "Monat" in desc or "fallend" in desc
+
+    def test_seasonal_window_matches(self) -> None:
+        p = TrackedParameter(name="test", unit="W")
+        base_time = time.time()
+        for day in range(365 + 30):
+            val = 5000.0 if (day % 365) < 180 else 2000.0
+            p.record(val, base_time + day * SECONDS_PER_DAY)
+        p.record(5000.0, base_time + (365 + 31) * SECONDS_PER_DAY)
+        summer_avg = p.seasonal_avg()
+        assert summer_avg is not None

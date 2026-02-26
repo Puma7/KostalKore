@@ -69,6 +69,9 @@ class DegradationSensor(RestoreEntity, SensorEntity):
             "current_avg": round(p.current_avg, 2) if p.current_avg is not None else None,
             "baseline_deviation_pct": round(p.baseline_deviation_pct, 1) if p.baseline_deviation_pct is not None else None,
             "rate_per_month": round(p.degradation_rate_per_month, 2) if p.degradation_rate_per_month is not None else None,
+            "seasonal_avg": round(sa, 2) if (sa := p.seasonal_avg()) is not None else None,
+            "seasonal_deviation_pct": round(p.seasonal_deviation_pct, 1) if p.seasonal_deviation_pct is not None else None,
+            "seasonal_trend": p.seasonal_trend_description,
             "unit": p.unit,
         }
 
