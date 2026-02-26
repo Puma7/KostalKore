@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-02-26
+
+### Added
+- **ARCHITECTURE.md** — Konzeptdokument für die perfekte REST/Modbus-Parallelisierung (Unified Coordinator, Request Scheduler, Datenquellen-Mapping, Failover-Strategie, Migrationsplan).
+- **LEARNINGS.md** — Gesammelte Erkenntnisse aus dem gesamten Projekt: Hardware (10 Punkte), Software-Architektur (7), Sicherheit (6), Diagnose (5), Performance (3).
+
+### Changed
+- **REST API Polling verlangsamt wenn Modbus aktiv**: Process Data 10s→60s, Settings 30s→90s. Modbus übernimmt Echtzeit-Daten (5s).
+
+### Fixed
+- **DC2/DC3 Sensoren nicht verfügbar** — String Count jetzt primär aus Modbus Register 34 gelesen statt REST API (Timeout-anfällig bei parallelem Polling). Sicherer Fallback auf 2 Strings.
+- **PV System Safety "Unsicher" bei Nacht** — Alle Safety-Checks werden bei Inverter-State Off/Standby/Shutdown übersprungen. Isolation-Check prüft ob genug DC-Spannung für valide Messung vorhanden ist.
+- **Modbus Diagnostics Button** — "Run Modbus Diagnostics" erstellt einen Report direkt als HA Persistent Notification, kein Terminal nötig.
+
 ## [2.8.0] - 2026-02-26
 
 ### Added
