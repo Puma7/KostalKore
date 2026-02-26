@@ -66,6 +66,7 @@ class Plenticore:
         """Create a new plenticore manager instance."""
         self.hass = hass
         self.config_entry = config_entry
+        self._request_scheduler: Any = None
 
         self._client: ApiClient | None = None
         self._shutdown_remove_listener: CALLBACK_TYPE | None = None
@@ -92,9 +93,11 @@ class Plenticore:
 
     async def async_setup(self) -> bool:
         """Set up Plenticore API client."""
-        self._client = ExtendedApiClient(
-            async_get_clientsession(self.hass), host=self.host
-        )
+        session = async_get_clientsession(self.hass)
+        if self._request_scheduler is not None:
+            from .scheduled_session import ScheduledSession
+            session = ScheduledSession(session, self._request_scheduler)  # type: ignore[assignment]
+        self._client = ExtendedApiClient(session, host=self.host)  # type: ignore[arg-type]
         
         try:
             await self._client.login(

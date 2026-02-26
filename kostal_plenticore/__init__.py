@@ -123,6 +123,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     request_scheduler = RequestScheduler()
     plenticore = Plenticore(hass, entry)
+    plenticore._request_scheduler = request_scheduler
 
     try:
         setup_success = await asyncio.wait_for(

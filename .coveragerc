@@ -23,6 +23,7 @@ omit =
     kostal_plenticore/degradation_tracker.py
     kostal_plenticore/degradation_entities.py
     kostal_plenticore/request_scheduler.py
+    kostal_plenticore/scheduled_session.py
     kostal_plenticore/binary_sensor.py
     kostal_plenticore/modbus_button.py
     kostal_plenticore/modbus_number.py
