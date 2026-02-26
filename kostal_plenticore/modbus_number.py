@@ -58,29 +58,26 @@ G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
 })
 
 
-async def _probe_modbus_write(coordinator: ModbusDataUpdateCoordinator) -> bool:
-    """Probe if Modbus write is accepted by writing Min SoC back to itself.
+async def _probe_modbus_access(coordinator: ModbusDataUpdateCoordinator) -> bool:
+    """Probe if battery management registers are accessible (read-only).
 
-    Reads the current Min SoC value, writes the exact same value back, then
-    re-reads register 1080 to check if it switched to 0x02 (External MODBUS).
-    This is a harmless no-op for the inverter but proves write access works.
+    Reads Min SoC (register 1042) to verify the inverter exposes battery
+    management registers. Does NOT attempt to write -- the inverter may
+    need specific activation sequences that vary by firmware version.
     """
     try:
         current_soc = await coordinator.client.read_register(REG_BAT_MIN_SOC)
         soc_value = float(current_soc)
-        _LOGGER.debug("Probe: current Min SoC = %s, writing same value back", soc_value)
-
-        await coordinator.client.write_register(REG_BAT_MIN_SOC, soc_value)
-
-        _LOGGER.debug("Probe: write accepted (no exception) → external control is active")
+        _LOGGER.info(
+            "Modbus battery registers accessible (Min SoC = %.0f%%). "
+            "Write access depends on inverter WebUI setting "
+            "'Extern über Protokoll (Modbus TCP)'.",
+            soc_value,
+        )
         return True
     except Exception as err:
-        err_str = str(err).lower()
-        if "illegal" in err_str or "not authorized" in err_str or "denied" in err_str:
-            _LOGGER.debug("Probe: write rejected by inverter → external control NOT enabled: %s", err)
-            return False
-        _LOGGER.debug("Probe: write failed with transient error (may still work): %s", err)
-        return True
+        _LOGGER.debug("Battery management registers not readable: %s", err)
+        return False
 
 
 def _build_descriptions(
@@ -210,17 +207,14 @@ async def create_modbus_number_entities(
             _LOGGER.info("Battery management mode: External via MODBUS (confirmed active)")
             await notify_modbus_probe_success(coordinator.hass)
         elif mode_int == 0x00:
-            _LOGGER.info("Battery management mode is 0 – probing with harmless write test...")
-            modbus_write_ok = await _probe_modbus_write(coordinator)
-            if modbus_write_ok:
-                _LOGGER.info("Modbus write probe SUCCESSFUL")
+            registers_ok = await _probe_modbus_access(coordinator)
+            if registers_ok:
                 await notify_modbus_probe_success(coordinator.hass)
             else:
-                _LOGGER.warning("Modbus write probe FAILED")
                 await notify_modbus_probe_failed(coordinator.hass)
         else:
-            _LOGGER.warning("Battery management mode is %s (unexpected)", bat_mgmt_mode)
-            await notify_modbus_probe_failed(coordinator.hass)
+            _LOGGER.info("Battery management mode is %s", bat_mgmt_mode)
+            await _probe_modbus_access(coordinator)
 
     descriptions = _build_descriptions(max_power)
     entities: list[ModbusNumberEntity] = []

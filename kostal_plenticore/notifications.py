@@ -67,14 +67,16 @@ async def dismiss(hass: HomeAssistant, notification_id: str) -> None:
 
 
 async def notify_modbus_probe_success(hass: HomeAssistant) -> None:
-    """Notify that Modbus write access is confirmed working."""
+    """Notify that Modbus battery registers are accessible."""
     await dismiss(hass, "modbus_write_failed")
     await notify(
         hass, "modbus_write_ok",
-        "Modbus-Batteriesteuerung aktiv",
-        "Externe Batteriesteuerung über Modbus TCP ist aktiv und funktioniert.\n\n"
-        "Du kannst jetzt die Batterie-Ladeleistung, Min/Max SoC und G3-Limits "
-        "direkt über Home Assistant steuern.",
+        "Modbus-Verbindung aktiv",
+        "Modbus TCP Verbindung zum Inverter funktioniert.\n"
+        "Batterie-Register sind lesbar (Min SoC, Max SoC, Ladeleistung).\n\n"
+        "**Für Schreib-Zugriff** (Ladeleistung setzen, SoC-Limits ändern) muss "
+        "im Inverter-WebUI die Einstellung 'Extern über Protokoll (Modbus TCP)' "
+        "unter Service → Batterie-Einstellungen aktiv sein.",
         level="info",
     )
 
