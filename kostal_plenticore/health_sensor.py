@@ -308,12 +308,54 @@ class InverterStateChangeSensor(SensorEntity):
         return self._monitor.state_change_count
 
 
+class ModbusRawSensor(SensorEntity):
+    """Simple sensor that exposes a raw Modbus value from the health monitor."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        monitor: InverterHealthMonitor,
+        tracker_name: str,
+        name: str,
+        icon: str,
+        unit: str,
+        device_class: SensorDeviceClass | None,
+        entry_id: str,
+        device_info: DeviceInfo,
+        unique_suffix: str,
+    ) -> None:
+        self._monitor = monitor
+        self._tracker_name = tracker_name
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_unique_id = f"{entry_id}_modbus_raw_{unique_suffix}"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        tracker = self._monitor.all_trackers.get(self._tracker_name)
+        if tracker is None:
+            return None
+        return tracker.current
+
+    @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        tracker = self._monitor.all_trackers.get(self._tracker_name)
+        return tracker is not None and tracker.current is not None
+
+
 def create_health_sensors(
     monitor: InverterHealthMonitor,
     entry_id: str,
     device_info: DeviceInfo,
 ) -> list[SensorEntity]:
     """Create all health monitoring sensor entities."""
+    from homeassistant.const import UnitOfTemperature
+
     return [
         HealthScoreSensor(monitor, entry_id, device_info),
         HealthLevelSensor(monitor, entry_id, device_info),
@@ -325,4 +367,14 @@ def create_health_sensors(
         DCStringImbalanceSensor(monitor, entry_id, device_info),
         PhaseImbalanceSensor(monitor, entry_id, device_info),
         InverterStateChangeSensor(monitor, entry_id, device_info),
+        ModbusRawSensor(
+            monitor, "battery_temperature", "Battery Temperature (Modbus)",
+            "mdi:thermometer", UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE, entry_id, device_info, "bat_temp",
+        ),
+        ModbusRawSensor(
+            monitor, "controller_temperature", "Controller Temperature (Modbus)",
+            "mdi:thermometer", UnitOfTemperature.CELSIUS,
+            SensorDeviceClass.TEMPERATURE, entry_id, device_info, "ctrl_temp",
+        ),
     ]
