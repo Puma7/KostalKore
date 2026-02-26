@@ -150,6 +150,7 @@ class KostalModbusClient:
         port: int = DEFAULT_MODBUS_PORT,
         unit_id: int = DEFAULT_UNIT_ID,
         endianness: str = "little",
+        request_scheduler: Any = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -157,6 +158,7 @@ class KostalModbusClient:
         self._endianness = endianness
         self._client: AsyncModbusTcpClient | None = None
         self._lock = asyncio.Lock()
+        self._scheduler = request_scheduler
         self._unavailable_strikes: dict[int, int] = {}
         self._unavailable_suppressed: dict[int, float] = {}
         self._last_exc_code: int | None = None
@@ -420,6 +422,12 @@ class KostalModbusClient:
 
     async def _raw_read(self, address: int, count: int) -> bytes:
         """Read holding registers and return raw bytes."""
+        if self._scheduler is not None:
+            async with self._scheduler.request("modbus_read"):
+                return await self._raw_read_inner(address, count)
+        return await self._raw_read_inner(address, count)
+
+    async def _raw_read_inner(self, address: int, count: int) -> bytes:
         async with self._lock:
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
@@ -457,6 +465,14 @@ class KostalModbusClient:
         self, address: int, data: bytes, count: int
     ) -> None:
         """Write raw bytes to holding registers."""
+        if self._scheduler is not None:
+            async with self._scheduler.request("modbus_write"):
+                return await self._raw_write_inner(address, data, count)
+        return await self._raw_write_inner(address, data, count)
+
+    async def _raw_write_inner(
+        self, address: int, data: bytes, count: int
+    ) -> None:
         async with self._lock:
             if not self.connected:
                 raise ModbusConnectionError("Not connected")

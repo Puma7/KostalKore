@@ -45,6 +45,7 @@ from .fire_safety import FireSafetyMonitor
 from .health_monitor import InverterHealthMonitor
 from .longevity_advisor import LongevityAdvisor
 from .modbus_client import KostalModbusClient, ModbusClientError
+from .request_scheduler import RequestScheduler
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue
@@ -120,6 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     """
     start_time = time.time()
 
+    request_scheduler = RequestScheduler()
     plenticore = Plenticore(hass, entry)
 
     try:
@@ -156,6 +158,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             port=port,
             unit_id=unit_id,
             endianness="little" if endianness == "auto" else endianness,
+            request_scheduler=request_scheduler,
         )
         modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client)
         try:
@@ -235,6 +238,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "degradation_tracker": degradation_tracker,
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
+        "request_scheduler": request_scheduler,
     }
 
     try:
