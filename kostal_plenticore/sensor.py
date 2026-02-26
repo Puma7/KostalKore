@@ -1680,6 +1680,15 @@ async def async_setup_entry(
         if diag_entities:
             async_add_entities(diag_entities)
             _LOGGER.info("Added %d diagnostic sensors", len(diag_entities))
+    longevity = entry_store.get("longevity_advisor") if entry_store else None
+    if longevity is not None:
+        from .longevity_entities import create_longevity_sensors
+        longevity_entities = create_longevity_sensors(
+            longevity, entry.entry_id, plenticore.device_info
+        )
+        if longevity_entities:
+            async_add_entities(longevity_entities)
+            _LOGGER.info("Added %d longevity sensors", len(longevity_entities))
 
 
 class PlenticoreCalculatedSensor(

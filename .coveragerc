@@ -15,6 +15,9 @@ omit =
     kostal_plenticore/fire_safety_entities.py
     kostal_plenticore/diagnostics_engine.py
     kostal_plenticore/diagnostic_entities.py
+    kostal_plenticore/battery_chemistry.py
+    kostal_plenticore/longevity_advisor.py
+    kostal_plenticore/longevity_entities.py
     kostal_plenticore/binary_sensor.py
     kostal_plenticore/modbus_button.py
     kostal_plenticore/modbus_number.py

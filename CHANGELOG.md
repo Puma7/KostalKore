@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-02-26
+
+### Added
+- **Live Test Tool** (`tools/live_test.py`) — standalone read-only diagnostic script to test Modbus connection before enabling it in HA. Reads all registers, detects endianness, identifies battery type, checks battery management mode, and generates a JSON report for developer analysis.
+- **Battery Chemistry Detection** — auto-detects battery chemistry (LFP/NMC) from Modbus register 588 (battery type). Supported brands: BYD, Pyontech, VARTA, Dyness, ZYC (LFP); LG, BMZ, AXIstorage, PIKO (NMC).
+- **Per-Chemistry Temperature Thresholds**:
+  - LFP (LiFePO4): optimal <30°C, acceptable <40°C, warning >50°C, critical >60°C
+  - NMC (Li-ion): optimal <25°C, acceptable <35°C, warning >45°C, critical >55°C
+  - Unknown: conservative limits matching NMC
+- **Longevity Advisor** — generates actionable tips for extending equipment lifespan:
+  - Battery: temperature placement advice, cycle tracking, SoH trend monitoring
+  - Inverter: ventilation tips, mounting location advice
+  - PV: string imbalance, isolation trend monitoring
+- **3 Longevity Sensor Entities**:
+  - Batterie Langlebigkeit (battery temp assessment + chemistry-specific tips)
+  - Wechselrichter Langlebigkeit (controller temp assessment + ventilation tips)
+  - PV-Anlage Langlebigkeit (string health + cabling tips)
+
+### Changed
+- **Version** bumped from 2.7.0 to 2.8.0.
+
 ## [2.7.0] - 2026-02-25
 
 ### Added

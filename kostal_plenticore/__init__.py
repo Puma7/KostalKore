@@ -38,9 +38,11 @@ from .const import (
 )
 from .coordinator import Plenticore, PlenticoreConfigEntry
 from .helper import parse_modbus_exception
+from .battery_chemistry import detect_chemistry
 from .diagnostics_engine import DiagnosticsEngine
 from .fire_safety import FireSafetyMonitor
 from .health_monitor import InverterHealthMonitor
+from .longevity_advisor import LongevityAdvisor
 from .modbus_client import KostalModbusClient, ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .mqtt_bridge import KostalMqttBridge
@@ -194,8 +196,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         modbus_coordinator.async_add_listener(_feed_health_data)
 
     diagnostics_engine = None
+    longevity_advisor = None
     if health_monitor is not None and fire_safety is not None:
         diagnostics_engine = DiagnosticsEngine(health_monitor, fire_safety)
+        bat_type = modbus_coordinator.device_info_data.get("battery_type") if modbus_coordinator else None
+        bat_type_int = None  # pragma: no cover
+        if bat_type is not None:  # pragma: no cover
+            try:
+                bat_type_int = int(bat_type)
+            except (TypeError, ValueError):
+                pass
+        bat_thresholds = detect_chemistry(bat_type_int)
+        longevity_advisor = LongevityAdvisor(health_monitor, bat_thresholds)
+        _LOGGER.info("Battery chemistry: %s (%s)", bat_thresholds.chemistry, bat_thresholds.chemistry_full)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,
@@ -203,6 +216,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "health_monitor": health_monitor,
         "fire_safety": fire_safety,
         "diagnostics_engine": diagnostics_engine,
+        "longevity_advisor": longevity_advisor,
     }
 
     try:
