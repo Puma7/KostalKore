@@ -332,5 +332,82 @@ These are created under `_calc_` in `sensor.py`:
 
 ---
 
+## 🔋 Modbus Battery Charge/Discharge Control
+
+### Prerequisites
+
+1. **Enable Modbus** in the integration options (Settings → Integrations → Kostal Plenticore → Configure → Enable Modbus)
+2. **Battery Management Mode** must be set to allow external control on the inverter itself (register 1080). Check this in the Modbus diagnostic report (`battery_mgmt_mode`).
+
+### Available Control Entities (via Modbus)
+
+When Modbus is enabled, these `number` entities are created automatically:
+
+| Entity | Register | Unit | Description |
+|--------|----------|------|-------------|
+| **Battery Charge Power (Modbus)** | 1034 | W | Set absolute DC charge/discharge power. Positive = charge, negative = discharge. |
+| **Battery Max Charge Limit (Modbus)** | 1038 | W | Maximum allowed charge power. |
+| **Battery Max Discharge Limit (Modbus)** | 1040 | W | Maximum allowed discharge power. |
+| **Battery Min SoC (Modbus)** | 1042 | % | Minimum state of charge (battery won't discharge below this). |
+| **Battery Max SoC (Modbus)** | 1044 | % | Maximum state of charge (battery won't charge above this). |
+| **G3 Max Battery Charge Power (Modbus)** | 1280 | W | G3-specific max charge power limit (with fallback timer). |
+| **G3 Max Battery Discharge Power (Modbus)** | 1282 | W | G3-specific max discharge power limit (with fallback timer). |
+
+### How to Control Charging/Discharging
+
+**Method 1: Direct power control (Register 1034)**
+- Use `number.set_value` on "Battery Charge Power (Modbus)"
+- **Positive value** → force charge at specified power (e.g., 2000 W)
+- **Negative value** → force discharge at specified power (e.g., -2000 W)
+- **Zero** → normal automatic operation
+
+**Method 2: G3 power limits (Registers 1280/1282)** — recommended for G3 inverters
+- Set `G3 Max Battery Charge Power` to limit how fast the battery charges
+- Set `G3 Max Battery Discharge Power` to limit how fast it discharges
+- These registers have a **fallback timer** (register 1288): after the timer expires, the inverter reverts to fallback limits (registers 1284/1286). The integration refreshes these automatically.
+
+**Method 3: Charge/discharge limits (Registers 1038/1040)**
+- Set `Battery Max Charge Limit` and `Battery Max Discharge Limit` to cap power
+- Useful for protecting battery longevity or grid feed-in limits
+
+### Example: Home Assistant Automation
+
+```yaml
+# Charge battery at 3000W from grid (e.g., during cheap electricity)
+service: number.set_value
+target:
+  entity_id: number.YOUR_INVERTER_battery_charge_power_modbus
+data:
+  value: 3000
+
+# Discharge battery at 2000W (e.g., during peak prices)
+service: number.set_value
+target:
+  entity_id: number.YOUR_INVERTER_battery_charge_power_modbus
+data:
+  value: -2000
+
+# Return to automatic mode
+service: number.set_value
+target:
+  entity_id: number.YOUR_INVERTER_battery_charge_power_modbus
+data:
+  value: 0
+```
+
+### Read-only Battery Status (Modbus Sensors)
+
+| Sensor | Register | Unit | Description |
+|--------|----------|------|-------------|
+| Battery SoC | 514 | % | Current state of charge |
+| Battery Temperature | 214 | °C | Current battery temperature |
+| Battery Voltage | 216 | V | Current battery voltage |
+| Battery Charge/Discharge Power | 582 | W | Actual power (+ = charging, - = discharging) |
+| Battery Cycles | 194 | cycles | Total charge/discharge cycles |
+| Battery Max Charge (HW) | 1076 | W | Hardware-reported max charge power |
+| Battery Max Discharge (HW) | 1078 | W | Hardware-reported max discharge power |
+
+---
+
 *For detailed information, see `DEVELOPMENT_GUIDE.md`*
 
