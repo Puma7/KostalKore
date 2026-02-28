@@ -308,17 +308,21 @@ class BatteryTestSuite:
                 self._emit(f"    {k} = {v}")
 
         # Battery management mode
+        # NOTE: On some G3 firmware versions, register 1080 always reports 0
+        # even when external control IS active in the WebUI. We downgrade
+        # this to a warning and rely on the write-test below instead.
         mgmt = await self._rd("battery_mgmt_mode")
         if mgmt is not None:
             r.battery_mgmt_mode = int(mgmt)
-            if r.battery_mgmt_mode != 2:
-                r.errors.append(
-                    f"Batterie-Mgmt-Mode = {r.battery_mgmt_mode} (braucht 2=Modbus). "
-                    "WebUI → Service → Batterie → 'Extern über Protokoll (Modbus TCP)'"
-                )
-                r.ok = False
-            else:
+            if r.battery_mgmt_mode == 2:
                 r.checks.append(f"Mgmt-Mode: 2 (Modbus ✅)")
+            elif r.battery_mgmt_mode == 0:
+                r.checks.append(
+                    f"⚠️  Mgmt-Mode: 0 (G3-Bug? Register meldet 'keine externe Steuerung', "
+                    f"Schreibtest prüft ob es trotzdem funktioniert)"
+                )
+            else:
+                r.checks.append(f"Mgmt-Mode: {r.battery_mgmt_mode}")
 
         # Inverter max
         raw_max = dev.get("inverter_max_power")
@@ -359,14 +363,28 @@ class BatteryTestSuite:
                 r.ok = False
                 r.errors.append(f"Batterie {temp:.1f}°C > {MAX_BATTERY_TEMP_C}°C")
 
-        # Write test: try writing 0 to REG 1034 to verify write access
-        self._emit("  Schreibtest: REG 1034 = 0...")
-        if await self._wr("bat_charge_dc_abs_power", 0.0):
+        # Write test — this is the real gate-keeper (not register 1080)
+        # If writes succeed, external control is working regardless of mode register
+        self._emit("  Schreibtest REG 1034...")
+        write_ok = await self._wr("bat_charge_dc_abs_power", 0.0)
+        if write_ok:
+            await asyncio.sleep(0.5)
             rb = await self._rd("bat_charge_dc_abs_power")
-            r.checks.append(f"Schreibtest OK (readback: {rb})")
+            r.checks.append(f"Schreibtest REG 1034: OK (readback={rb})")
+
+            # Also test REG 1038/1040 (used for discharge blocking)
+            w1038 = await self._wr("bat_max_charge_limit", 20000.0)
+            w1040 = await self._wr("bat_max_discharge_limit", 20000.0)
+            if w1038 and w1040:
+                r.checks.append("Schreibtest REG 1038/1040: OK")
+            else:
+                r.checks.append("⚠️  REG 1038/1040 nicht beschreibbar (Test läuft trotzdem)")
         else:
             r.ok = False
-            r.errors.append("REG 1034 nicht beschreibbar!")
+            r.errors.append(
+                "REG 1034 nicht beschreibbar! Externe Batteriesteuerung muss "
+                "im WebUI unter Service → Batterie aktiviert sein."
+            )
 
         return r
 
