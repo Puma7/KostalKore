@@ -23,6 +23,8 @@ from .const import (
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
+    CONF_MODBUS_PROXY_ENABLED,
+    CONF_MODBUS_PROXY_PORT,
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
     CONF_SERVICE_CODE,
@@ -255,6 +257,14 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
                     CONF_MQTT_BRIDGE_ENABLED,
                     default=options.get(CONF_MQTT_BRIDGE_ENABLED, False),
                 ): bool,
+                vol.Optional(
+                    CONF_MODBUS_PROXY_ENABLED,
+                    default=options.get(CONF_MODBUS_PROXY_ENABLED, False),
+                ): bool,
+                vol.Optional(
+                    CONF_MODBUS_PROXY_PORT,
+                    default=options.get(CONF_MODBUS_PROXY_PORT, 5502),
+                ): int,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
