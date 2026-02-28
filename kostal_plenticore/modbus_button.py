@@ -227,6 +227,67 @@ class ModbusDiagnosticsButton(ButtonEntity):
         return str(val)
 
 
+class BatteryTestButton(ButtonEntity):
+    """Button to run the battery charge/discharge test suite."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:battery-sync"
+    _attr_has_entity_name = True
+    _attr_name = "Battery Charge/Discharge Test"
+
+    def __init__(
+        self,
+        coordinator: ModbusDataUpdateCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo,
+    ) -> None:
+        self._coordinator = coordinator
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_battery_test"
+        self._attr_device_info = device_info
+        self._suite: Any = None
+        self._attr_extra_state_attributes: dict[str, Any] = {
+            "status": "idle",
+        }
+
+    async def async_press(self) -> None:
+        """Start the battery test suite."""
+        from .battery_test import BatteryTestSuite
+
+        if self._suite is not None and self._suite.running:
+            self._suite.request_abort()
+            _LOGGER.info("Battery test abort requested")
+            self._attr_extra_state_attributes["status"] = "aborting"
+            self.async_write_ha_state()
+            return
+
+        self._attr_extra_state_attributes["status"] = "running"
+        self._attr_extra_state_attributes["started"] = datetime.now().isoformat()
+        self.async_write_ha_state()
+
+        self._suite = BatteryTestSuite(self._coordinator, hass=self.hass)
+
+        try:
+            results = await self._suite.run()
+            passed = sum(1 for r in results if r.success)
+            total = len(results)
+            self._attr_extra_state_attributes.update({
+                "status": "completed",
+                "finished": datetime.now().isoformat(),
+                "phases_passed": passed,
+                "phases_total": total,
+                "log_lines": len(self._suite.log_lines),
+            })
+        except Exception as err:
+            _LOGGER.error("Battery test suite failed: %s", err)
+            self._attr_extra_state_attributes.update({
+                "status": "error",
+                "error": str(err),
+            })
+        finally:
+            self.async_write_ha_state()
+
+
 def create_modbus_buttons(
     coordinator: ModbusDataUpdateCoordinator,
     entry_id: str,
@@ -236,4 +297,5 @@ def create_modbus_buttons(
     return [
         ModbusResetButton(coordinator, entry_id, device_info),
         ModbusDiagnosticsButton(coordinator, entry_id, device_info),
+        BatteryTestButton(coordinator, entry_id, device_info),
     ]
