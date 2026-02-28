@@ -46,8 +46,8 @@ from .modbus_registers import (
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-KEEPALIVE_INTERVAL: Final[float] = 25.0
-MONITOR_INTERVAL: Final[float] = 10.0
+KEEPALIVE_INTERVAL: Final[float] = 15.0
+MONITOR_INTERVAL: Final[float] = 8.0
 MIN_SOC_FOR_DISCHARGE: Final[float] = 10.0
 MAX_SOC_FOR_CHARGE: Final[float] = 98.0
 MAX_BATTERY_TEMP_C: Final[float] = 48.0
@@ -56,7 +56,18 @@ GRID_BREAKER_LIMIT_W: Final[int] = 25_000
 POWER_TOLERANCE_PCT: Final[float] = 50.0
 RAMP_UP_SAMPLES: Final[int] = 3
 
-MONITOR_REGS: Final[list[str]] = [
+# Fast path: only essential registers (5 reads ≈ 1-2s)
+# Read AFTER keepalive to minimize time between write and next write
+MONITOR_REGS_FAST: Final[list[str]] = [
+    "battery_cd_power",
+    "battery_soc",
+    "pm_total_active",
+    "battery_temperature",
+    "inverter_state",
+]
+
+# Full set: read every 3rd cycle for detailed logging
+MONITOR_REGS_FULL: Final[list[str]] = [
     "battery_cd_power", "battery_soc", "battery_state_of_charge",
     "battery_temperature", "battery_voltage", "battery_actual_current",
     "pm_total_active", "total_ac_power", "controller_temp",
@@ -189,17 +200,19 @@ class BatteryTestSuite:
             self._emit(f"  ❌ WRITE {name} = {value} → {err}")
             return False
 
-    async def _read_all_monitor(self) -> dict[str, Any]:
+    async def _read_monitor(self, full: bool = False) -> dict[str, Any]:
+        """Read monitoring registers. Fast mode (5 regs, ~1s) or full (17 regs, ~8s)."""
+        regs = MONITOR_REGS_FULL if full else MONITOR_REGS_FAST
         sample: dict[str, Any] = {"timestamp": time.time()}
-        self._debug("--- MONITOR SAMPLE START ---")
-        for name in MONITOR_REGS:
+        self._debug(f"--- MONITOR {'FULL' if full else 'FAST'} START ({len(regs)} regs) ---")
+        for name in regs:
             val = await self._read_reg(name)
             if val is not None:
                 try:
                     sample[name] = float(val)
                 except (TypeError, ValueError):
                     sample[name] = val
-        self._debug("--- MONITOR SAMPLE END ---")
+        self._debug(f"--- MONITOR {'FULL' if full else 'FAST'} END ---")
         return sample
 
     # ------------------------------------------------------------------
@@ -308,7 +321,7 @@ class BatteryTestSuite:
         self._emit("Pre-Flight: Direkte Register-Reads...")
         self._debug("=== PRE-FLIGHT START ===")
 
-        sample = await self._read_all_monitor()
+        sample = await self._read_monitor(full=True)
         dev = self._coord.device_info_data or {}
         data = self._coord.data or {}
 
@@ -412,78 +425,99 @@ class BatteryTestSuite:
     async def _run_phase(self, phase: TestPhase, pf: PreFlightResult) -> PhaseResult:
         result = PhaseResult(phase=phase, success=False)
         start = time.monotonic()
+        cycle_count = 0
 
         self._debug(f"=== PHASE START: {phase.name} power_w={phase.power_w} ===")
 
+        # Initial write
         ok = await self._write_phase_regs(phase)
         if not ok:
             result.abort_reason = "Primäres Register 1034 nicht beschreibbar"
             return result
         result.keepalive_writes = 1
+        last_write = time.monotonic()
 
-        # Readback to verify
-        await asyncio.sleep(3)
+        # Quick readback (only 4 critical registers)
+        await asyncio.sleep(2)
         rb_1034 = await self._read_reg("bat_charge_dc_abs_power")
         rb_cd = await self._read_reg("battery_cd_power")
         rb_g3c = await self._read_reg("g3_max_charge")
         rb_g3d = await self._read_reg("g3_max_discharge")
         self._emit(
             f"  🔍 Readback: REG1034={rb_1034} | "
-            f"battery_cd_power={rb_cd} | "
-            f"g3_max_charge={rb_g3c} | g3_max_discharge={rb_g3d}"
+            f"bat_cd={rb_cd} | g3c={rb_g3c} | g3d={rb_g3d}"
         )
 
         elapsed = 0.0
         power_samples: list[float] = []
-        last_keepalive = start
 
         while elapsed < phase.duration_s:
             if self._abort_requested:
                 result.abort_reason = "Benutzer-Abbruch"
                 return result
 
-            sleep_time = min(MONITOR_INTERVAL, phase.duration_s - elapsed)
-            await asyncio.sleep(sleep_time)
-            elapsed = time.monotonic() - start
+            cycle_count += 1
 
-            # Keepalive
-            if time.monotonic() - last_keepalive >= KEEPALIVE_INTERVAL:
+            # ──────────────────────────────────────────────
+            # STEP 1: KEEPALIVE FIRST — before any slow I/O
+            # This is critical: the deadman timer runs while
+            # we do monitoring reads. Write BEFORE reading.
+            # ──────────────────────────────────────────────
+            time_since_write = time.monotonic() - last_write
+            if time_since_write >= KEEPALIVE_INTERVAL:
                 ok = await self._write_phase_regs(phase)
                 result.keepalive_writes += 1
-                last_keepalive = time.monotonic()
-                self._emit(f"  🔁 Keepalive #{result.keepalive_writes} @ {elapsed:.0f}s {'✅' if ok else '⚠️'}")
+                last_write = time.monotonic()
+                self._emit(
+                    f"  🔁 Keepalive #{result.keepalive_writes} @ {elapsed:.0f}s "
+                    f"(nach {time_since_write:.0f}s) {'✅' if ok else '⚠️'}"
+                )
 
-            # Direct monitoring reads
-            sample = await self._read_all_monitor()
+            # ──────────────────────────────────────────────
+            # STEP 2: Fast monitoring (5 regs ≈ 1-2s)
+            # Full read every 3rd cycle for detailed debug
+            # ──────────────────────────────────────────────
+            full_read = (cycle_count % 3 == 0)
+            sample = await self._read_monitor(full=full_read)
             result.samples.append(sample)
 
-            # battery_cd_power: Kostal convention: negative=charging, positive=discharging
             raw_bat = sample.get("battery_cd_power", 0)
-            # Convert to our convention: positive=charging, negative=discharging
-            user_bat = -raw_bat
-
+            user_bat = -raw_bat  # Kostal: neg=charge → our: pos=charge
             power_samples.append(user_bat)
+
             soc = sample.get("battery_soc") or sample.get("battery_state_of_charge") or 0
             temp = sample.get("battery_temperature")
             grid = sample.get("pm_total_active", 0)
-            bat_v = sample.get("battery_voltage")
-            bat_i = sample.get("battery_actual_current", 0)
+            bat_i = sample.get("battery_actual_current")
 
             t = f"T={temp:.0f}°C " if temp else ""
-            v = f"V={bat_v:.0f}V " if bat_v else ""
+            i_str = f"I={bat_i:+.1f}A " if bat_i is not None else ""
+            secs_to_next = KEEPALIVE_INTERVAL - (time.monotonic() - last_write)
 
+            elapsed = time.monotonic() - start
             self._emit(
                 f"  📊 {elapsed:5.0f}s │ "
-                f"BatPower={user_bat:+6.0f}W (raw:{raw_bat:+.0f}) │ "
+                f"Bat={user_bat:+6.0f}W (raw:{raw_bat:+.0f}) │ "
                 f"Grid={grid:+7.0f}W │ "
                 f"SoC={soc:5.1f}% │ "
-                f"I={bat_i:+.1f}A {t}{v}"
+                f"{i_str}{t}"
+                f"next_write:{secs_to_next:.0f}s"
             )
 
             abort = self._live_safety(phase, sample)
             if abort:
                 result.abort_reason = abort
                 return result
+
+            # ──────────────────────────────────────────────
+            # STEP 3: Sleep — but not longer than time to
+            # next keepalive, so we never miss the deadline
+            # ──────────────────────────────────────────────
+            time_to_next_write = KEEPALIVE_INTERVAL - (time.monotonic() - last_write)
+            time_to_phase_end = phase.duration_s - (time.monotonic() - start)
+            actual_sleep = max(1.0, min(MONITOR_INTERVAL, time_to_next_write - 2.0, time_to_phase_end))
+            await asyncio.sleep(actual_sleep)
+            elapsed = time.monotonic() - start
 
         result.success = True
         result.duration_actual_s = time.monotonic() - start
