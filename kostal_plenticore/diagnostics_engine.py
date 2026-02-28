@@ -77,7 +77,8 @@ class DiagnosticsEngine:
         h = self._health
         raw: dict[str, Any] = {}
 
-        for i in range(1, 4):
+        max_pv_dc = 2 if h._num_bidirectional >= 1 else 3
+        for i in range(1, max_pv_dc + 1):
             p = getattr(h, f"dc{i}_power").current
             v = getattr(h, f"dc{i}_voltage").current
             if p is not None:

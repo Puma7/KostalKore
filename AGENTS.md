@@ -13,7 +13,7 @@ The test directory is `Tests/` (uppercase T) but `pytest.ini` references `testpa
 source .venv/bin/activate
 python -m pytest Tests/ -v --timeout=60
 ```
-All 138 tests should pass with 100% coverage. Coverage config (`.coveragerc`) omits `coordinator.py`, `number.py`, `sensor.py`, `switch.py` from branch-coverage counting.
+375 tests should pass with 100% coverage. 3 known errors in `test_modbus_integration.py` (`test_setup_entry_modbus_enabled_success`, `test_setup_entry_modbus_auto_endianness`, `test_setup_entry_mqtt_bridge_enabled`) are pre-existing "Lingering timer" fixture teardown issues. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list).
 
 ### Type checking
 ```bash
@@ -31,3 +31,5 @@ Uses strict mode per `mypy.ini`. Should report zero issues.
 - This is not a standalone application. It is a Home Assistant plugin tested entirely via pytest with mocked HA internals.
 - No GUI, no dev server, no build step. The "hello world" is running the test suite successfully.
 - `develop` is the default working branch; `main` reflects tagged releases.
+- `pymodbus>=3.6` is listed in `manifest.json` but not in `requirements_test.txt`; the update script installs it separately.
+- System package `python3.12-venv` is required on Ubuntu (not pre-installed on cloud VMs).

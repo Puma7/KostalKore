@@ -30,6 +30,8 @@ from .const import (
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
+    CONF_MODBUS_PROXY_ENABLED,
+    CONF_MODBUS_PROXY_PORT,
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
     DEFAULT_MODBUS_PORT,
@@ -148,6 +150,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     # Optional Modbus TCP setup
     modbus_coordinator = None
     mqtt_bridge = None
+    modbus_proxy = None
     if entry.options.get(CONF_MODBUS_ENABLED, False):
         host = entry.data[CONF_HOST]
         port = entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)
@@ -184,13 +187,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             )
             await mqtt_bridge.async_start()
 
+        if modbus_coordinator and entry.options.get(  # pragma: no cover
+            CONF_MODBUS_PROXY_ENABLED, False
+        ):
+            from .modbus_proxy import ModbusTcpProxyServer, DEFAULT_PROXY_PORT
+
+            proxy_port = entry.options.get(CONF_MODBUS_PROXY_PORT, DEFAULT_PROXY_PORT)
+            endianness = entry.options.get(CONF_MODBUS_ENDIANNESS, "auto")
+            if endianness == "auto":
+                endianness = modbus_client.endianness if hasattr(modbus_client, "endianness") else "little"
+            modbus_proxy = ModbusTcpProxyServer(
+                modbus_coordinator,
+                port=int(proxy_port),
+                unit_id=int(entry.options.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID)),
+                endianness=endianness,
+            )
+            try:
+                await modbus_proxy.start()
+            except OSError as proxy_err:
+                _LOGGER.warning("Modbus proxy failed to start on port %s: %s", proxy_port, proxy_err)
+                modbus_proxy = None
+
     # Health + Fire Safety + Degradation monitors
     health_monitor = None
     fire_safety = None
     degradation_tracker = None
     if modbus_coordinator is not None:
-        health_monitor = InverterHealthMonitor()
-        fire_safety = FireSafetyMonitor()
+        num_bi = 0
+        _bi_raw = modbus_coordinator.device_info_data.get("num_bidirectional")
+        if _bi_raw is not None:  # pragma: no cover
+            try:
+                num_bi = int(_bi_raw)
+            except (TypeError, ValueError):
+                pass
+        health_monitor = InverterHealthMonitor(num_bidirectional=num_bi)
+        fire_safety = FireSafetyMonitor(num_bidirectional=num_bi)
         degradation_tracker = DegradationTracker()
 
         @callback
@@ -234,12 +265,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,
         "mqtt_bridge": mqtt_bridge,
+        "modbus_proxy": modbus_proxy if modbus_coordinator is not None else None,
         "health_monitor": health_monitor,
         "fire_safety": fire_safety,
         "degradation_tracker": degradation_tracker,
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
         "request_scheduler": request_scheduler,
+        "num_bidirectional": num_bi if modbus_coordinator is not None else 0,
     }
 
     try:
@@ -287,8 +320,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     """
     start_time = time.time()
 
-    # Clean up Modbus + MQTT bridge
+    # Clean up Modbus proxy + MQTT bridge
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    modbus_proxy = entry_data.get("modbus_proxy")
+    if modbus_proxy:  # pragma: no cover
+        await modbus_proxy.stop()
     mqtt_bridge = entry_data.get("mqtt_bridge")
     if mqtt_bridge:
         await mqtt_bridge.async_stop()

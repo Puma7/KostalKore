@@ -1,0 +1,349 @@
+"""Modbus TCP proxy server for Kostal Plenticore.
+
+Exposes the inverter's Modbus registers on a local TCP port so that
+external systems (evcc, SolarAssistant, …) can read and write registers
+*without* opening their own connection to the inverter.
+
+Architecture::
+
+    evcc / other ──Modbus TCP──► THIS PROXY (port 502/5502)
+                                    │
+                        reads from cache ──► ModbusDataUpdateCoordinator
+                        writes forwarded ──► KostalModbusClient ──► Inverter
+
+Only ONE real Modbus TCP connection exists (from our plugin to the
+inverter). The proxy serves reads from the coordinator's cache and
+forwards writes through the coordinator's write API.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import struct
+from typing import Any, Final
+
+from .modbus_registers import (
+    ALL_REGISTERS,
+    Access,
+    DataType,
+    ModbusRegister,
+    REGISTER_BY_ADDRESS,
+    DEFAULT_UNIT_ID,
+)
+
+_LOGGER: Final = logging.getLogger(__name__)
+
+DEFAULT_PROXY_PORT: Final[int] = 5502
+MBAP_HEADER_SIZE: Final[int] = 7
+
+FC_READ_HOLDING: Final[int] = 0x03
+FC_READ_INPUT: Final[int] = 0x04
+FC_WRITE_SINGLE: Final[int] = 0x06
+FC_WRITE_MULTIPLE: Final[int] = 0x10
+
+# Build a sorted list of (start_address, register) for range lookups
+_SORTED_REGISTERS: Final[list[tuple[int, ModbusRegister]]] = sorted(
+    ((r.address, r) for r in ALL_REGISTERS),
+    key=lambda x: x[0],
+)
+
+
+def _encode_value(value: Any, register: ModbusRegister, endianness: str = "little") -> bytes:
+    """Re-encode a decoded Python value back to raw Modbus register bytes."""
+    import math
+
+    dt = register.data_type
+
+    if dt == DataType.UINT16:
+        return struct.pack(">H", int(value) if value is not None else 0)
+
+    if dt == DataType.SINT16:
+        return struct.pack(">h", int(value) if value is not None else 0)
+
+    if dt == DataType.UINT32:
+        v = int(value) if value is not None else 0
+        if endianness == "big":
+            return struct.pack(">I", v)
+        lo = v & 0xFFFF
+        hi = (v >> 16) & 0xFFFF
+        return struct.pack(">HH", lo, hi)
+
+    if dt == DataType.SINT32:
+        v = int(value) if value is not None else 0
+        if endianness == "big":
+            return struct.pack(">i", v)
+        if v < 0:
+            v += 0x100000000
+        lo = v & 0xFFFF
+        hi = (v >> 16) & 0xFFFF
+        return struct.pack(">HH", lo, hi)
+
+    if dt == DataType.FLOAT32:
+        fv = float(value) if value is not None else 0.0
+        if math.isnan(fv) or math.isinf(fv):
+            fv = 0.0
+        if endianness == "big":
+            return struct.pack(">f", fv)
+        packed = struct.pack(">f", fv)
+        hi, lo = struct.unpack(">HH", packed)
+        return struct.pack(">HH", lo, hi)
+
+    if dt == DataType.STRING:
+        s = str(value) if value is not None else ""
+        raw = s.encode("ascii", errors="replace")
+        padded = raw.ljust(register.count * 2, b"\x00")[:register.count * 2]
+        return padded
+
+    if dt == DataType.BOOL:
+        return struct.pack(">H", 1 if value else 0)
+
+    if dt == DataType.UINT8:
+        return struct.pack(">H", int(value) if value is not None else 0)
+
+    return b"\x00" * (register.count * 2)
+
+
+def _build_register_image(
+    start_addr: int,
+    quantity: int,
+    data: dict[str, Any],
+    endianness: str,
+) -> bytes | None:
+    """Build raw register bytes for a read request from cached data.
+
+    Returns *quantity * 2* bytes or None if the range is completely unknown.
+    """
+    image = bytearray(quantity * 2)
+    found_any = False
+
+    for base_addr, reg in _SORTED_REGISTERS:
+        reg_end = base_addr + reg.count
+        if base_addr >= start_addr + quantity:
+            break
+        if reg_end <= start_addr:
+            continue
+
+        val = data.get(reg.name)
+        if val is None:
+            continue
+
+        try:
+            raw = _encode_value(val, reg, endianness)
+        except (ValueError, OverflowError, struct.error):
+            continue
+
+        for i in range(reg.count):
+            abs_addr = base_addr + i
+            if start_addr <= abs_addr < start_addr + quantity:
+                offset = (abs_addr - start_addr) * 2
+                reg_byte_offset = i * 2
+                if reg_byte_offset + 2 <= len(raw):
+                    image[offset : offset + 2] = raw[reg_byte_offset : reg_byte_offset + 2]
+                    found_any = True
+
+    return bytes(image) if found_any else None
+
+
+class ModbusTcpProxyServer:
+    """Lightweight Modbus TCP proxy that serves register reads from cache.
+
+    Writes are forwarded to the real inverter through the coordinator.
+    """
+
+    def __init__(
+        self,
+        coordinator: Any,
+        port: int = DEFAULT_PROXY_PORT,
+        unit_id: int = DEFAULT_UNIT_ID,
+        endianness: str = "little",
+    ) -> None:
+        self._coordinator = coordinator
+        self._port = port
+        self._unit_id = unit_id
+        self._endianness = endianness
+        self._server: asyncio.Server | None = None
+        self._clients: set[asyncio.Task[None]] = set()
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
+    def running(self) -> bool:
+        return self._server is not None and self._server.is_serving()
+
+    async def start(self) -> None:
+        """Start listening for Modbus TCP connections."""
+        self._server = await asyncio.start_server(
+            self._handle_client, "0.0.0.0", self._port
+        )
+        _LOGGER.info(
+            "Modbus TCP proxy started on port %d (unit_id=%d, endianness=%s)",
+            self._port, self._unit_id, self._endianness,
+        )
+
+    async def stop(self) -> None:
+        """Stop the proxy server and disconnect all clients."""
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
+
+        for task in self._clients:
+            task.cancel()
+        self._clients.clear()
+
+        _LOGGER.info("Modbus TCP proxy stopped")
+
+    async def _handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        """Handle a single client connection."""
+        peer = writer.get_extra_info("peername")
+        _LOGGER.info("Modbus proxy: client connected from %s", peer)
+        task = asyncio.current_task()
+        if task is not None:
+            self._clients.add(task)
+
+        try:
+            while True:
+                header = await reader.readexactly(MBAP_HEADER_SIZE)
+                txn_id, proto_id, length, unit_id = struct.unpack(">HHHB", header)
+
+                if proto_id != 0:
+                    _LOGGER.debug("Non-Modbus protocol ID %d, ignoring", proto_id)
+                    await reader.readexactly(length - 1)
+                    continue
+
+                pdu = await reader.readexactly(length - 1)
+                response_pdu = await self._process_pdu(pdu, unit_id)
+
+                resp_length = len(response_pdu) + 1
+                resp_header = struct.pack(">HHHB", txn_id, 0, resp_length, unit_id)
+                writer.write(resp_header + response_pdu)
+                await writer.drain()
+
+        except asyncio.IncompleteReadError:
+            _LOGGER.debug("Modbus proxy: client %s disconnected", peer)
+        except asyncio.CancelledError:
+            pass
+        except Exception as err:
+            _LOGGER.warning("Modbus proxy: client %s error: %s", peer, err)
+        finally:
+            writer.close()
+            if task is not None:
+                self._clients.discard(task)
+
+    async def _process_pdu(self, pdu: bytes, unit_id: int) -> bytes:
+        """Process a Modbus PDU and return a response PDU."""
+        if len(pdu) < 1:
+            return self._error_response(0, 0x01)
+
+        fc = pdu[0]
+
+        if fc in (FC_READ_HOLDING, FC_READ_INPUT):
+            return await self._handle_read(pdu)
+        elif fc == FC_WRITE_SINGLE:
+            return await self._handle_write_single(pdu)
+        elif fc == FC_WRITE_MULTIPLE:
+            return await self._handle_write_multiple(pdu)
+        else:
+            return self._error_response(fc, 0x01)
+
+    async def _handle_read(self, pdu: bytes) -> bytes:
+        """Handle FC 03/04: Read Holding/Input Registers."""
+        if len(pdu) < 5:
+            return self._error_response(pdu[0], 0x03)
+
+        fc = pdu[0]
+        start_addr = struct.unpack(">H", pdu[1:3])[0]
+        quantity = struct.unpack(">H", pdu[3:5])[0]
+
+        if quantity < 1 or quantity > 125:
+            return self._error_response(fc, 0x03)
+
+        data = self._coordinator.data or {}
+        image = _build_register_image(start_addr, quantity, data, self._endianness)
+
+        if image is None:
+            image = b"\x00" * (quantity * 2)
+
+        byte_count = quantity * 2
+        return struct.pack(">BB", fc, byte_count) + image
+
+    async def _handle_write_single(self, pdu: bytes) -> bytes:
+        """Handle FC 06: Write Single Register."""
+        if len(pdu) < 5:
+            return self._error_response(FC_WRITE_SINGLE, 0x03)
+
+        address = struct.unpack(">H", pdu[1:3])[0]
+        value = struct.unpack(">H", pdu[3:5])[0]
+
+        reg = REGISTER_BY_ADDRESS.get(address)
+        if reg is None or reg.access != Access.RW:
+            return self._error_response(FC_WRITE_SINGLE, 0x02)
+
+        try:
+            await self._coordinator.async_write_by_address(address, value)
+            return pdu[:5]
+        except Exception as err:
+            _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
+            return self._error_response(FC_WRITE_SINGLE, 0x04)
+
+    async def _handle_write_multiple(self, pdu: bytes) -> bytes:
+        """Handle FC 16: Write Multiple Registers."""
+        if len(pdu) < 6:
+            return self._error_response(FC_WRITE_MULTIPLE, 0x03)
+
+        start_addr = struct.unpack(">H", pdu[1:3])[0]
+        quantity = struct.unpack(">H", pdu[3:5])[0]
+        byte_count = pdu[5]
+
+        if len(pdu) < 6 + byte_count:
+            return self._error_response(FC_WRITE_MULTIPLE, 0x03)
+
+        reg = REGISTER_BY_ADDRESS.get(start_addr)
+        if reg is None or reg.access != Access.RW:
+            return self._error_response(FC_WRITE_MULTIPLE, 0x02)
+
+        if quantity != reg.count:
+            return self._error_response(FC_WRITE_MULTIPLE, 0x03)
+
+        reg_values = pdu[6 : 6 + byte_count]
+
+        try:
+            decoded = self._decode_for_write(reg, reg_values)
+            await self._coordinator.async_write_register(reg, decoded)
+            return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
+        except Exception as err:
+            _LOGGER.warning(
+                "Proxy write-multiple failed at address %d: %s", start_addr, err
+            )
+            return self._error_response(FC_WRITE_MULTIPLE, 0x04)
+
+    def _decode_for_write(self, reg: ModbusRegister, raw: bytes) -> Any:
+        """Decode raw register bytes from a write request into a Python value."""
+        dt = reg.data_type
+
+        if dt == DataType.UINT16:
+            return struct.unpack(">H", raw[:2])[0]
+        if dt == DataType.SINT16:
+            return struct.unpack(">h", raw[:2])[0]
+        if dt == DataType.FLOAT32:
+            if self._endianness == "big":
+                return struct.unpack(">f", raw[:4])[0]
+            hi, lo = struct.unpack(">HH", raw[:4])
+            return struct.unpack(">f", struct.pack(">HH", lo, hi))[0]
+        if dt == DataType.UINT32:
+            if self._endianness == "big":
+                return struct.unpack(">I", raw[:4])[0]
+            hi, lo = struct.unpack(">HH", raw[:4])
+            return (lo << 16) | hi
+
+        return struct.unpack(">H", raw[:2])[0]
+
+    @staticmethod
+    def _error_response(fc: int, exception_code: int) -> bytes:
+        """Build a Modbus exception response PDU."""
+        return struct.pack(">BB", fc | 0x80, exception_code)

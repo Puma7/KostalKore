@@ -15,6 +15,8 @@ CONF_MODBUS_PORT: Final[str] = "modbus_port"
 CONF_MODBUS_UNIT_ID: Final[str] = "modbus_unit_id"
 CONF_MODBUS_ENDIANNESS: Final[str] = "modbus_endianness"
 CONF_MQTT_BRIDGE_ENABLED: Final[str] = "mqtt_bridge_enabled"
+CONF_MODBUS_PROXY_ENABLED: Final[str] = "modbus_proxy_enabled"
+CONF_MODBUS_PROXY_PORT: Final[str] = "modbus_proxy_port"
 
 DEFAULT_MODBUS_PORT: Final[int] = 1502
 DEFAULT_MODBUS_UNIT_ID: Final[int] = 71
@@ -43,6 +45,8 @@ __all__ = [
     "CONF_MODBUS_ENABLED",
     "CONF_MODBUS_ENDIANNESS",
     "CONF_MODBUS_PORT",
+    "CONF_MODBUS_PROXY_ENABLED",
+    "CONF_MODBUS_PROXY_PORT",
     "CONF_MODBUS_UNIT_ID",
     "CONF_MQTT_BRIDGE_ENABLED",
     "CONF_PASSWORD",

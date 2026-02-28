@@ -1,45 +1,117 @@
-# Kostal Plenticore MQTT Proxy Bridge
+# Kostal Plenticore Proxy – evcc & externe Systeme anbinden
 
-## Architecture
+## Architektur
 
 ```
-                          ┌─── Home Assistant (HA entities)
-                          │
-Kostal Inverter ◄──Modbus TCP──► MQTT Proxy Bridge ◄──MQTT──► evcc
-  (port 1502)          (exclusive)        │                    iobroker
-                                          │                    Node-RED
-                                          └──MQTT──►           any MQTT client
+                             ┌─── Home Assistant (HA entities)
+                             │
+Kostal Inverter ◄──Modbus TCP (exklusiv)──► Kostal Plenticore Integration
+  (port 1502)                                  │
+                                ┌──────────────┼──────────────┐
+                                │              │              │
+                          Modbus TCP       MQTT Bridge    HA Entities
+                           Proxy              │
+                          (port 5502)         │
+                            │            ┌────┴────┐
+                           evcc       iobroker  Node-RED
 ```
 
-**Only this integration connects to the inverter via Modbus TCP.**
-All external systems read data and send commands through MQTT.
+**Nur diese Integration verbindet sich per Modbus TCP mit dem Wechselrichter.**
+Externe Systeme nutzen entweder den **Modbus TCP Proxy** oder die **MQTT Bridge**.
 
-## Setup
+---
 
-### 1. Prerequisites
+## Option 1: Modbus TCP Proxy (empfohlen für evcc)
 
-- MQTT broker running (e.g. Mosquitto)
-- MQTT integration configured in Home Assistant
-- Modbus enabled in this integration (Settings > Devices > Kostal > Configure)
-- MQTT Bridge enabled in the same configuration
+Der Modbus TCP Proxy stellt alle Wechselrichter-Register auf einem lokalen TCP-Port
+zur Verfügung. evcc kann damit das **eingebaute Kostal-Template** direkt verwenden –
+keine Custom-Meter-Konfiguration nötig.
 
-### 2. Disconnect evcc from Modbus
+### 1. Voraussetzungen
 
-In your evcc configuration, **remove** the direct Modbus connection:
+- Modbus in der Integration aktiviert (Einstellungen → Geräte → Kostal → Konfigurieren)
+- **Modbus-Proxy aktiviert** in der gleichen Konfiguration
+- Proxy-Port: Standard 5502 (frei wählbar)
+
+### 2. evcc konfigurieren
+
+In `evcc.yaml` den Kostal-Wechselrichter auf den **Proxy-Port der HA-Maschine** zeigen
+(nicht direkt auf den Wechselrichter!):
 
 ```yaml
-# REMOVE this:
-# meters:
-# - name: pv
-#   type: template
-#   template: kostal-plenticore
-#   modbus: tcpip
-#   ...
+meters:
+- name: pv
+  type: template
+  template: kostal-plenticore-gen2
+  usage: pv
+  modbus: tcpip
+  id: 71
+  host: <HOME-ASSISTANT-IP>  # IP des HA-Servers, NICHT des Wechselrichters!
+  port: 5502                  # Proxy-Port (Standard 5502)
+
+- name: grid
+  type: template
+  template: kostal-plenticore-gen2
+  usage: grid
+  modbus: tcpip
+  id: 71
+  host: <HOME-ASSISTANT-IP>
+  port: 5502
+
+- name: battery
+  type: template
+  template: kostal-plenticore-gen2
+  usage: battery
+  modbus: tcpip
+  id: 71
+  host: <HOME-ASSISTANT-IP>
+  port: 5502
 ```
 
-### 3. Configure evcc to use MQTT
+**Wichtig:**
+- `host` = IP-Adresse des Home-Assistant-Servers (z.B. `192.168.1.100`)
+- `port` = Proxy-Port (Standard `5502`, konfigurierbar in den Integrationsoptionen)
+- `id` = Modbus Unit-ID des Wechselrichters (Standard `71`)
+- Die `template`-Namen hängen von deinem Wechselrichter ab. Für G2-Modelle: `kostal-plenticore-gen2`,
+  für ältere G1: `kostal-plenticore`. Prüfe die aktuelle evcc-Dokumentation.
 
-Replace the direct Modbus meters with MQTT-based custom meters:
+### 3. Batteriesteuerung über evcc
+
+evcc kann über den Proxy auch Batterie-Register schreiben. Die relevanten Register:
+
+| Register | Adresse | Beschreibung |
+|----------|---------|-------------|
+| `bat_charge_dc_abs_power` | 1034 | Lade/Entladeleistung setzen (W) |
+| `bat_max_charge_limit` | 1038 | Maximale Ladeleistung begrenzen (W) |
+| `bat_max_discharge_limit` | 1040 | Maximale Entladeleistung begrenzen (W) |
+| `bat_min_soc` | 1042 | Mindest-SoC setzen (%) |
+| `bat_max_soc` | 1044 | Maximum-SoC setzen (%) |
+| `g3_max_charge` | 1280 | G3: Max. Ladeleistung (W) |
+| `g3_max_discharge` | 1282 | G3: Max. Entladeleistung (W) |
+
+### 4. So funktioniert der Proxy
+
+- **Lese-Anfragen**: Werden aus dem Cache des Koordinators bedient (Daten alle 5s aktualisiert).
+  Es wird KEINE zusätzliche Verbindung zum Wechselrichter aufgebaut.
+- **Schreib-Anfragen**: Werden direkt über die bestehende Modbus-Verbindung an den Wechselrichter weitergeleitet.
+- **Latenz**: Lesedaten sind max. 5 Sekunden alt (Polling-Intervall des Koordinators).
+
+---
+
+## Option 2: MQTT Bridge (für iobroker, Node-RED, Custom-evcc)
+
+Die MQTT Bridge publiziert alle Modbus-Daten als MQTT-Topics und akzeptiert
+Steuerungsbefehle über MQTT.
+
+### 1. Voraussetzungen
+
+- MQTT Broker (z.B. Mosquitto)
+- MQTT Integration in Home Assistant konfiguriert
+- Modbus aktiviert + MQTT Bridge aktiviert in den Integrationsoptionen
+
+### 2. evcc mit MQTT konfigurieren (Alternative)
+
+Falls kein Modbus-Proxy gewünscht ist:
 
 ```yaml
 meters:
@@ -75,22 +147,22 @@ meters:
       topic: kostal_plenticore/{SERIAL}/proxy/command/battery_charge
 ```
 
-Replace `{SERIAL}` with your inverter's serial number (or the HA config entry ID).
+`{SERIAL}` durch die Seriennummer des Wechselrichters ersetzen.
 
-### 4. Configure iobroker
+### 3. iobroker konfigurieren
 
-Use the iobroker MQTT adapter to subscribe to:
+MQTT Adapter subscriben auf:
 
 ```
-kostal_plenticore/{SERIAL}/proxy/#     → simplified values
-kostal_plenticore/{SERIAL}/modbus/#    → all register values
+kostal_plenticore/{SERIAL}/proxy/#     → vereinfachte Werte
+kostal_plenticore/{SERIAL}/modbus/#    → alle Register-Werte
 ```
 
-Write commands via:
+Steuerbefehle schreiben:
 ```
-kostal_plenticore/{SERIAL}/proxy/command/battery_charge    → set charge power (W)
-kostal_plenticore/{SERIAL}/proxy/command/battery_min_soc   → set min SoC (%)
-kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → set max SoC (%)
+kostal_plenticore/{SERIAL}/proxy/command/battery_charge    → Ladeleistung (W)
+kostal_plenticore/{SERIAL}/proxy/command/battery_min_soc   → Min SoC (%)
+kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 ```
 
 ## MQTT Topic Reference

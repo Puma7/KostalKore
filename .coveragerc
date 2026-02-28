@@ -29,6 +29,7 @@ omit =
     kostal_plenticore/modbus_number.py
     kostal_plenticore/modbus_test.py
     kostal_plenticore/mqtt_bridge.py
+    kostal_plenticore/modbus_proxy.py
     kostal_plenticore/button.py
 
 [report]
