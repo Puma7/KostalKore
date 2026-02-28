@@ -299,10 +299,9 @@ class FireSafetyMonitor:
                 **{f"{k}_voltage": v for k, v in voltages.items()},
             }
 
-            # Only flag truly anomalous rapid fluctuations (possible arc fault).
-            # Require BOTH high deviation AND very rapid change relative to that
-            # string's own recent power level, to avoid false positives from
-            # normal cloud transients or different string orientations.
+            # Arc fault detection: require BOTH high deviation AND very rapid
+            # change relative to that string's own recent power level, to avoid
+            # false positives from normal cloud transients or different orientations.
             if (
                 rate is not None
                 and abs(rate) > power * 0.5
@@ -316,6 +315,17 @@ class FireSafetyMonitor:
                     f"rapid change detected. Possible intermittent contact or developing arc fault.",
                     f"Inspect {string} connectors, MC4 plugs, and cable routing. "
                     f"Look for burn marks, loose connections, or animal damage.",
+                    vals,
+                ))
+            elif deviation > 85 and not self._is_stable_ratio(now):
+                alerts.append(SafetyAlert(
+                    now, FireRiskLevel.MONITOR, "dc_imbalance",
+                    f"DC string {string} significantly weaker than others",
+                    f"{string}: {power:.0f}W vs avg {avg_power:.0f}W "
+                    f"({deviation:.0f}% deviation). Could indicate shading, "
+                    f"soiling, or damaged panel/cable.",
+                    f"Check {string} panels for shading, soiling, physical "
+                    f"damage, or disconnected connectors.",
                     vals,
                 ))
 

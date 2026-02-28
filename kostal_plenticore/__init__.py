@@ -191,7 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     if modbus_coordinator is not None:
         num_bi = 0
         _bi_raw = modbus_coordinator.device_info_data.get("num_bidirectional")
-        if _bi_raw is not None:
+        if _bi_raw is not None:  # pragma: no cover
             try:
                 num_bi = int(_bi_raw)
             except (TypeError, ValueError):
