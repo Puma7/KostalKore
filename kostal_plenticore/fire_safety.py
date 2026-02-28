@@ -82,7 +82,7 @@ class FireSafetyMonitor:
     monitors would miss.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, num_bidirectional: int = 0) -> None:
         self._alerts: deque[SafetyAlert] = deque(maxlen=500)
         self._iso_history: deque[tuple[float, float]] = deque(maxlen=100)
         self._ctrl_temp_history: deque[tuple[float, float]] = deque(maxlen=100)
@@ -94,6 +94,8 @@ class FireSafetyMonitor:
         self._last_check: float = 0.0
         self._check_interval: float = 5.0
         self._total_polls: int = 0
+        self._num_bidirectional: int = num_bidirectional
+        self._dc_ratio_history: deque[tuple[float, float]] = deque(maxlen=200)
 
     @property
     def alerts(self) -> list[SafetyAlert]:
@@ -255,9 +257,14 @@ class FireSafetyMonitor:
 
     def _check_dc_string_anomaly(self, data: dict[str, Any], now: float) -> list[SafetyAlert]:
         alerts: list[SafetyAlert] = []
-        powers = {}
-        voltages = {}
-        for i in range(1, 4):
+        powers: dict[str, float] = {}
+        voltages: dict[str, float] = {}
+
+        # Determine which DC inputs are PV strings vs battery
+        # When num_bidirectional >= 1, DC3 is typically used as battery I/O
+        max_pv_dc = 2 if self._num_bidirectional >= 1 else 3
+
+        for i in range(1, max_pv_dc + 1):
             p = _float(data.get(f"dc{i}_power"))
             v = _float(data.get(f"dc{i}_voltage"))
             if p is not None and p > 20:
@@ -272,30 +279,58 @@ class FireSafetyMonitor:
         if avg_power < 100:
             return alerts
 
+        # Track the ratio between strings over time for baseline learning.
+        # Steady-state differences (different orientations, Y-adapters) are normal
+        # and should NOT trigger alerts. Only sudden deviations from the
+        # established ratio indicate a real problem.
+        if len(powers) == 2:
+            vals_list = sorted(powers.values())
+            ratio = vals_list[0] / vals_list[1] if vals_list[1] > 0 else 0
+            self._dc_ratio_history.append((now, ratio))
+
         for string, power in powers.items():
             deviation = abs(power - avg_power) / avg_power * 100
-            if deviation > 50:
-                rate = _rate_of_change(self._dc_power_history.get(string, deque()), RATE_WINDOW_SECONDS)
-                vals = {**{f"{k}_power": v for k, v in powers.items()}, **{f"{k}_voltage": v for k, v in voltages.items()}}
 
-                if rate is not None and abs(rate) > avg_power * 0.3:
-                    alerts.append(SafetyAlert(
-                        now, FireRiskLevel.ELEVATED, "dc_arc_indicator",
-                        f"DC string {string} power fluctuating abnormally",
-                        f"{string} power: {power:.0f}W (avg: {avg_power:.0f}W), rapid change detected. Possible intermittent contact or developing arc fault.",
-                        f"Inspect {string} connectors, MC4 plugs, and cable routing. Look for burn marks, loose connections, or animal damage.",
-                        vals,
-                    ))
-                elif deviation > 70:
-                    alerts.append(SafetyAlert(
-                        now, FireRiskLevel.MONITOR, "dc_imbalance",
-                        f"DC string {string} significantly weaker than others",
-                        f"{string}: {power:.0f}W vs avg {avg_power:.0f}W ({deviation:.0f}% deviation). Could indicate shading, soiling, or damaged panel/cable.",
-                        f"Check {string} panels for shading, soiling, physical damage, or disconnected connectors.",
-                        vals,
-                    ))
+            rate = _rate_of_change(
+                self._dc_power_history.get(string, deque()), RATE_WINDOW_SECONDS
+            )
+            vals = {
+                **{f"{k}_power": v for k, v in powers.items()},
+                **{f"{k}_voltage": v for k, v in voltages.items()},
+            }
+
+            # Only flag truly anomalous rapid fluctuations (possible arc fault).
+            # Require BOTH high deviation AND very rapid change relative to that
+            # string's own recent power level, to avoid false positives from
+            # normal cloud transients or different string orientations.
+            if (
+                rate is not None
+                and abs(rate) > power * 0.5
+                and deviation > 80
+                and not self._is_stable_ratio(now)
+            ):
+                alerts.append(SafetyAlert(
+                    now, FireRiskLevel.ELEVATED, "dc_arc_indicator",
+                    f"DC string {string} power fluctuating abnormally",
+                    f"{string} power: {power:.0f}W (avg: {avg_power:.0f}W), "
+                    f"rapid change detected. Possible intermittent contact or developing arc fault.",
+                    f"Inspect {string} connectors, MC4 plugs, and cable routing. "
+                    f"Look for burn marks, loose connections, or animal damage.",
+                    vals,
+                ))
 
         return alerts
+
+    def _is_stable_ratio(self, now: float) -> bool:
+        """Check if the DC string power ratio has been stable (normal installation difference)."""
+        window = [r for t, r in self._dc_ratio_history if now - t < 1800]
+        if len(window) < 10:
+            return False
+        avg_ratio = sum(window) / len(window)
+        if avg_ratio == 0:
+            return False
+        max_dev = max(abs(r - avg_ratio) / avg_ratio for r in window)
+        return max_dev < 0.25
 
     # ------------------------------------------------------------------
     # Check 3: Battery thermal runaway precursors

@@ -189,8 +189,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     fire_safety = None
     degradation_tracker = None
     if modbus_coordinator is not None:
-        health_monitor = InverterHealthMonitor()
-        fire_safety = FireSafetyMonitor()
+        num_bi = 0
+        _bi_raw = modbus_coordinator.device_info_data.get("num_bidirectional")
+        if _bi_raw is not None:
+            try:
+                num_bi = int(_bi_raw)
+            except (TypeError, ValueError):
+                pass
+        health_monitor = InverterHealthMonitor(num_bidirectional=num_bi)
+        fire_safety = FireSafetyMonitor(num_bidirectional=num_bi)
         degradation_tracker = DegradationTracker()
 
         @callback
@@ -240,6 +247,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
         "request_scheduler": request_scheduler,
+        "num_bidirectional": num_bi if modbus_coordinator is not None else 0,
     }
 
     try:

@@ -139,7 +139,8 @@ class InverterHealthMonitor:
     tracks trends, and generates health assessments.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, num_bidirectional: int = 0) -> None:
+        self._num_bidirectional: int = num_bidirectional
         # --- Electrical Safety ---
         self.isolation = ParameterTracker(
             name="Isolation Resistance", unit="kΩ",
@@ -316,7 +317,13 @@ class InverterHealthMonitor:
                 pass
 
     def update_battery_soh(self, soh: float) -> None:
-        """Update battery state of health (from REST API sensor)."""
+        """Update battery state of health (from REST API sensor).
+
+        A value of 0% is treated as not available, since many inverters
+        report 0 when the actual SoH reading is unsupported.
+        """
+        if soh <= 0:
+            return
         self.battery_soh.record(soh)
 
     def update_error_counts(self, errors: int, warnings: int) -> None:
@@ -360,12 +367,13 @@ class InverterHealthMonitor:
         """Calculate DC string power imbalance as percentage.
 
         High imbalance may indicate shading, soiling, or defective panels.
+        Excludes DC3 when it is used as battery I/O (num_bidirectional >= 1).
         """
-        powers = [
-            self.dc1_power.current,
-            self.dc2_power.current,
-            self.dc3_power.current,
-        ]
+        trackers = [self.dc1_power, self.dc2_power]
+        if self._num_bidirectional < 1:
+            trackers.append(self.dc3_power)
+
+        powers = [t.current for t in trackers]
         active = [p for p in powers if p is not None and p > 50]
         if len(active) < 2:
             return None
