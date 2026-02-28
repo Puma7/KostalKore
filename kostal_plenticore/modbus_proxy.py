@@ -8,12 +8,14 @@ Architecture::
 
     evcc / other ──Modbus TCP──► THIS PROXY (port 502/5502)
                                     │
-                        reads from cache ──► ModbusDataUpdateCoordinator
-                        writes forwarded ──► KostalModbusClient ──► Inverter
+                        cache hit ──► serve from coordinator cache (fast)
+                        cache miss ──► forward to inverter via client (SunSpec etc.)
+                        writes ──► forward to inverter via coordinator
 
 Only ONE real Modbus TCP connection exists (from our plugin to the
-inverter). The proxy serves reads from the coordinator's cache and
-forwards writes through the coordinator's write API.
+inverter). Known registers are served from the coordinator's polling
+cache. Unknown addresses (e.g. SunSpec registers at 40000+) are
+transparently forwarded to the inverter through the existing connection.
 """
 
 from __future__ import annotations
@@ -252,7 +254,13 @@ class ModbusTcpProxyServer:
             return self._error_response(fc, 0x01)
 
     async def _handle_read(self, pdu: bytes) -> bytes:
-        """Handle FC 03/04: Read Holding/Input Registers."""
+        """Handle FC 03/04: Read Holding/Input Registers.
+
+        Strategy:
+        1. Try to serve from the coordinator's cached register data (fast path).
+        2. On cache miss (e.g. SunSpec registers at 40000+), forward the raw
+           read to the real inverter through the existing Modbus connection.
+        """
         if len(pdu) < 5:
             return self._error_response(pdu[0], 0x03)
 
@@ -266,11 +274,41 @@ class ModbusTcpProxyServer:
         data = self._coordinator.data or {}
         image = _build_register_image(start_addr, quantity, data, self._endianness)
 
-        if image is None:
-            image = b"\x00" * (quantity * 2)
+        if image is not None:
+            byte_count = quantity * 2
+            return struct.pack(">BB", fc, byte_count) + image
 
-        byte_count = quantity * 2
-        return struct.pack(">BB", fc, byte_count) + image
+        # Cache miss → forward to the real inverter (SunSpec, unknown ranges)
+        raw = await self._forward_read(start_addr, quantity)
+        if raw is not None:
+            byte_count = len(raw)
+            return struct.pack(">BB", fc, byte_count) + raw
+
+        return self._error_response(fc, 0x02)
+
+    async def _forward_read(
+        self, start_addr: int, quantity: int
+    ) -> bytes | None:
+        """Forward a register read to the real inverter via the coordinator's client."""
+        client = getattr(self._coordinator, "client", None)
+        if client is None or not getattr(client, "connected", False):
+            _LOGGER.debug(
+                "Proxy: cannot forward read at %d (client unavailable)", start_addr,
+            )
+            return None
+
+        try:
+            raw: bytes = await client._raw_read(start_addr, quantity)
+            _LOGGER.debug(
+                "Proxy: forwarded read at addr=%d qty=%d (%d bytes)",
+                start_addr, quantity, len(raw),
+            )
+            return raw
+        except Exception as err:
+            _LOGGER.debug(
+                "Proxy: forwarded read failed at addr=%d: %s", start_addr, err,
+            )
+            return None
 
     async def _handle_write_single(self, pdu: bytes) -> bytes:
         """Handle FC 06: Write Single Register."""
@@ -281,15 +319,33 @@ class ModbusTcpProxyServer:
         value = struct.unpack(">H", pdu[3:5])[0]
 
         reg = REGISTER_BY_ADDRESS.get(address)
-        if reg is None or reg.access != Access.RW:
-            return self._error_response(FC_WRITE_SINGLE, 0x02)
+        if reg is not None and reg.access == Access.RW:
+            try:
+                await self._coordinator.async_write_by_address(address, value)
+                return pdu[:5]
+            except Exception as err:
+                _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
+                return self._error_response(FC_WRITE_SINGLE, 0x04)
 
-        try:
-            await self._coordinator.async_write_by_address(address, value)
+        # Unknown register → forward raw write to inverter
+        raw_result = await self._forward_write_single(address, value)
+        if raw_result:
             return pdu[:5]
+        return self._error_response(FC_WRITE_SINGLE, 0x02)
+
+    async def _forward_write_single(self, address: int, value: int) -> bool:
+        """Forward a single-register write to the real inverter."""
+        client = getattr(self._coordinator, "client", None)
+        if client is None or not getattr(client, "connected", False):
+            return False
+        try:
+            data = struct.pack(">H", value)
+            await client._raw_write(address, data, 1)
+            _LOGGER.debug("Proxy: forwarded write-single addr=%d val=%d", address, value)
+            return True
         except Exception as err:
-            _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
-            return self._error_response(FC_WRITE_SINGLE, 0x04)
+            _LOGGER.debug("Proxy: forwarded write-single failed at addr=%d: %s", address, err)
+            return False
 
     async def _handle_write_multiple(self, pdu: bytes) -> bytes:
         """Handle FC 16: Write Multiple Registers."""
@@ -303,24 +359,44 @@ class ModbusTcpProxyServer:
         if len(pdu) < 6 + byte_count:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
-        reg = REGISTER_BY_ADDRESS.get(start_addr)
-        if reg is None or reg.access != Access.RW:
-            return self._error_response(FC_WRITE_MULTIPLE, 0x02)
-
-        if quantity != reg.count:
-            return self._error_response(FC_WRITE_MULTIPLE, 0x03)
-
         reg_values = pdu[6 : 6 + byte_count]
 
-        try:
-            decoded = self._decode_for_write(reg, reg_values)
-            await self._coordinator.async_write_register(reg, decoded)
+        reg = REGISTER_BY_ADDRESS.get(start_addr)
+        if reg is not None and reg.access == Access.RW and quantity == reg.count:
+            try:
+                decoded = self._decode_for_write(reg, reg_values)
+                await self._coordinator.async_write_register(reg, decoded)
+                return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
+            except Exception as err:
+                _LOGGER.warning(
+                    "Proxy write-multiple failed at address %d: %s", start_addr, err
+                )
+                return self._error_response(FC_WRITE_MULTIPLE, 0x04)
+
+        # Unknown register → forward raw write to inverter
+        raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)
+        if raw_result:
             return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
-        except Exception as err:
-            _LOGGER.warning(
-                "Proxy write-multiple failed at address %d: %s", start_addr, err
+        return self._error_response(FC_WRITE_MULTIPLE, 0x02)
+
+    async def _forward_write_multiple(
+        self, start_addr: int, quantity: int, data: bytes
+    ) -> bool:
+        """Forward a multi-register write to the real inverter."""
+        client = getattr(self._coordinator, "client", None)
+        if client is None or not getattr(client, "connected", False):
+            return False
+        try:
+            await client._raw_write(start_addr, data, quantity)
+            _LOGGER.debug(
+                "Proxy: forwarded write-multiple addr=%d qty=%d", start_addr, quantity,
             )
-            return self._error_response(FC_WRITE_MULTIPLE, 0x04)
+            return True
+        except Exception as err:
+            _LOGGER.debug(
+                "Proxy: forwarded write-multiple failed at addr=%d: %s", start_addr, err,
+            )
+            return False
 
     def _decode_for_write(self, reg: ModbusRegister, raw: bytes) -> Any:
         """Decode raw register bytes from a write request into a Python value."""
