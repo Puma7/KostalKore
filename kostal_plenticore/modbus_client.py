@@ -176,6 +176,10 @@ class KostalModbusClient:
         return self._client is not None and self._client.connected
 
     @property
+    def endianness(self) -> str:
+        return self._endianness
+
+    @property
     def unavailable_registers(self) -> frozenset[int]:
         """Registers currently suppressed due to repeated ILLEGAL_DATA_ADDRESS."""
         return frozenset(self._unavailable_suppressed.keys())
