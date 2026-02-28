@@ -494,36 +494,42 @@ class BatteryTestSuite:
         return result
 
     async def _set_phase_registers(self, phase: TestPhase) -> None:
-        """Write all control registers for a phase. Called initially and on keepalive."""
+        """Write all control registers for a phase. Called initially and on keepalive.
+
+        Write order: charge/discharge registers FIRST (critical), then
+        fallback timer (optional – some firmware versions reject it).
+        """
         power = abs(phase.power_w)
         charging = phase.power_w > 0
 
-        # 1. Set G3 fallback timer (how long before reverting to fallback values)
-        self._emit(f"  📝 Schreibe REG 1288 (g3_fallback_time) = {FALLBACK_TIMER_S}s")
-        await self._coord.async_write_register(REG_G3_FALLBACK_TIME, FALLBACK_TIMER_S)
-
         if charging:
-            # CHARGE: Allow charging at target power, block discharging
-            self._emit(f"  📝 Schreibe REG 1280 (g3_max_charge) = {power} W")
+            self._emit(f"  📝 REG 1280 g3_max_charge = {power} W")
             await self._coord.async_write_register(REG_G3_MAX_CHARGE, float(power))
 
-            self._emit("  📝 Schreibe REG 1282 (g3_max_discharge) = 0 W")
+            self._emit("  📝 REG 1282 g3_max_discharge = 0 W")
             await self._coord.async_write_register(REG_G3_MAX_DISCHARGE, 0.0)
 
-            # Also set DC absolute as hint
-            self._emit(f"  📝 Schreibe REG 1034 (bat_charge_dc_abs_power) = {power} W")
+            self._emit(f"  📝 REG 1034 bat_charge_dc_abs_power = {power} W")
             await self._coord.async_write_register(REG_BAT_CHARGE_DC_ABS_POWER, float(power))
         else:
-            # DISCHARGE: Allow discharging at target power, block charging
-            self._emit("  📝 Schreibe REG 1280 (g3_max_charge) = 0 W")
+            self._emit("  📝 REG 1280 g3_max_charge = 0 W")
             await self._coord.async_write_register(REG_G3_MAX_CHARGE, 0.0)
 
-            self._emit(f"  📝 Schreibe REG 1282 (g3_max_discharge) = {power} W")
+            self._emit(f"  📝 REG 1282 g3_max_discharge = {power} W")
             await self._coord.async_write_register(REG_G3_MAX_DISCHARGE, float(power))
 
-            # Negative value = discharge
-            self._emit(f"  📝 Schreibe REG 1034 (bat_charge_dc_abs_power) = -{power} W")
+            self._emit(f"  📝 REG 1034 bat_charge_dc_abs_power = -{power} W")
             await self._coord.async_write_register(REG_BAT_CHARGE_DC_ABS_POWER, float(-power))
+
+        # Fallback timer is optional – some firmware versions don't support writing it
+        try:
+            self._emit(f"  📝 REG 1288 g3_fallback_time = {FALLBACK_TIMER_S}s")
+            await self._coord.async_write_register(REG_G3_FALLBACK_TIME, FALLBACK_TIMER_S)
+        except Exception as err:
+            self._emit(
+                f"  ℹ️  REG 1288 g3_fallback_time nicht beschreibbar ({err}) "
+                f"– Keepalive kompensiert"
+            )
 
     def _collect_sample(self, data: dict[str, Any]) -> dict[str, Any]:
         sample: dict[str, Any] = {"timestamp": time.time()}
