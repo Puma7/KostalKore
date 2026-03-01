@@ -1,5 +1,47 @@
 # Release Notes
 
+## Documentation sync update (post v2.16.0-alpha.4)
+
+- Reviewed and updated all maintained Markdown docs for current `kostal_kore` naming and behavior.
+- Corrected stale setup/developer paths and outdated architecture notes.
+- Aligned developer docs with current optional Modbus/MQTT/proxy capabilities and installer-access model.
+
+## v2.16.0-alpha.4 (Experimental)
+
+This alpha update adds two-step migration support from the legacy plugin.
+
+- Added **Import Legacy Plenticore Data** and **Finalize Legacy Cleanup** buttons.
+- Added registry migration logic to preserve existing entity IDs/history where possible.
+- Added migration test coverage (data/options import, host matching, duplicate handling).
+- Added explicit project provenance and transparency notes in README (credits to `@stegm`, AI-assisted development disclosure, manual checks by `@Puma7`).
+
+> Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
+
+## v2.16.0-alpha.2 (Experimental)
+
+This alpha update focuses on setup UX, access control clarity, and branding alignment.
+
+- Added a first-run setup wizard step to directly enable Modbus TCP, MQTT bridge, and Modbus proxy.
+- Added best-effort local auto-discovery when host/IP is left empty during setup.
+- Added account-role detection and explicit installer-write capability handling.
+- Switched integration release domain/path branding to `kostal_kore`.
+- Added plugin logo asset and integrated it into README.
+
+> Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
+
+## v2.16.0-alpha.1 (Experimental)
+
+This is the first **experimental alpha release** for HACS rollout preparation.
+
+- Added HACS release metadata (`hacs.json`), explicit MIT license, and updated manifest metadata.
+- Hardened external write channels (Modbus proxy + MQTT bridge) with installer-access checks.
+- Introduced proxy bind-address hardening (`127.0.0.1` default) to reduce network exposure.
+- Replaced fixed high power defaults with inverter-aware dynamic limits.
+- Added adaptive 50/60Hz and 120/230V diagnostic profiles for broader worldwide compatibility.
+- Fixed `num_bidirectional` device-info polling to improve topology handling.
+
+> Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
+
 ## v2.4.1
 
 Hotfix for calculation accuracy and test coverage.

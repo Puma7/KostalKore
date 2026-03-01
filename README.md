@@ -1,6 +1,22 @@
-# Kostal Plenticore Solar Inverter Home Assistant Integration
+# KOSTAL KORE for Home Assistant (Experimental Alpha)
 
-A custom Home Assistant integration for monitoring and controlling Kostal Plenticore solar inverters through their local API interface.
+> Powered by **KOSTAL KISS OS 2.0**
+>
+> **Alpha release notice:** This release is intended for real-world testing with early adopters.  
+> Please report issues and attach diagnostics: <https://github.com/Puma7/Kostal/issues>
+
+KOSTAL KORE is a custom Home Assistant integration for monitoring and controlling Kostal Plenticore inverters using local interfaces (REST + optional Modbus tooling).
+
+![KOSTAL KORE plugin logo](docs/assets/kostal_kore_logo.svg)
+
+## Credits & Transparency
+
+- **Thank you to the original author**: This project builds on years of groundwork by `@stegm`, especially the foundational `pykoplenti` repository: <https://github.com/stegm/pykoplenti>.
+- **Why this exists as a separate line**: Scope and architecture changed heavily over time, so a clean merge back into the original repository was not feasible.
+- **Stability disclosure**: This integration is heavily vibe-coded and is **not considered 100% stable**.
+- **Real-world usage disclaimer**: It runs in `@Puma7`'s own setup (Kostal Plenticore G3 L 20kW), but that does **not** guarantee identical behavior on all hardware, firmware, or regional setups.
+- **AI disclosure**: Large parts of this codebase were generated with **Claude Opus** and **OpenAI Codex**.
+- **Human validation**: Manual checks were performed by `@Puma7`.
 
 ## Overview
 
@@ -10,7 +26,17 @@ This integration provides comprehensive monitoring and control capabilities for 
 - Control inverter settings and operating modes
 - Access detailed inverter status and diagnostic information
 
+### Why KOSTAL KORE?
+KOSTAL KORE transforms your inverter from a simple energy source into a controllable automation node for Home Assistant.  
+With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, actionable diagnostics and practical interoperability for advanced setups.
+
 ## Features
+
+### 🚀 KORE Launch Gadgets
+- **KORE FlowBridge**: Optional Modbus proxy + MQTT bridge for EVCC, Wallbox and automation stacks.
+- **KORE Safety Sentinel**: Early-warning diagnostics for isolation, thermal and grid anomalies.
+- **KORE GridGuard**: Grid feed-in optimization and battery control helpers with inverter-aware limits.
+- **KORE Insight Pack**: Health, degradation and longevity entities prepared for dashboarding.
 
 ### 📊 **Sensors**
 - **Power Monitoring**: Real-time AC/DC power measurements, voltage, current
@@ -29,7 +55,7 @@ This integration provides comprehensive monitoring and control capabilities for 
 - **Select Entities**: Operating mode selection (e.g., battery management modes)
 - **Switch Entities**: Enable/disable various inverter functions
 - **G3 Battery Limitation**: Max charge/discharge power limits are re-applied cyclically to keep them active (per vendor requirement)
-- **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `kostal_plenticore/QUICK_REFERENCE.md` for full lists)
+- **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `custom_components/kostal_kore/QUICK_REFERENCE.md` for full lists)
 
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting
@@ -41,6 +67,13 @@ This integration provides comprehensive monitoring and control capabilities for 
 - Kostal Plenticore Solar Inverters
 - Compatible with firmware versions supporting local API access
 - Requires network connectivity to the inverter
+
+## Worldwide Compatibility & Safety
+
+- **Inverter-size aware limits**: Control paths now derive limits from inverter capabilities (no fixed 20 kW restore values).
+- **Generation-aware operation**: Designed for G1/G2/G3 variants with dynamic topology handling.
+- **Grid profile adaptation**: Diagnostics and safety checks adapt to detected **50/60 Hz** and **120/230 V** profiles.
+- **Secure defaults**: The optional Modbus proxy defaults to `127.0.0.1` to avoid accidental LAN exposure.
 
 ## Prerequisites
 
@@ -62,14 +95,30 @@ This integration provides comprehensive monitoring and control capabilities for 
 ### Method 1: HACS (Recommended)
 1. Open HACS in Home Assistant
 2. Navigate to Integrations
-3. Click "Explore & Download Repositories"
-4. Search for "Kostal Plenticore"
-5. Click "Download" and restart Home Assistant
+3. Open the menu (top right) and select **Custom repositories**
+4. Add repository URL: `https://github.com/Puma7/Kostal`
+5. Category: **Integration**
+6. Install **KOSTAL KORE (Experimental Alpha)**
+7. Restart Home Assistant
+8. If shown, allow pre-release/alpha updates in HACS update settings
 
 ### Method 2: Manual Installation
-1. Copy the `kostal_plenticore` folder to your `config/custom_components` directory
+1. Copy `custom_components/kostal_kore` to `config/custom_components/kostal_kore`
 2. Restart Home Assistant
 3. The integration will be available for configuration
+
+## Migration from old `kostal_plenticore` plugin (two-step flow)
+
+If you previously used the old `kostal_plenticore` integration:
+
+1. Install and set up `KOSTAL KORE` first (new entry in Home Assistant).
+2. Open the KOSTAL KORE device and click **Import Legacy Plenticore Data**.
+3. KORE imports old config/options and migrates entity/device registry mappings, but keeps the legacy entry for safety/testing.
+4. After your validation period, click **Finalize Legacy Cleanup** to remove old legacy artifacts and the old config entry.
+
+This split flow lets you migrate first, test in production for a few weeks, and only then finalize cleanup.
+
+Detailed step-by-step guide: see `migration.md`.
 
 ## Development
 
@@ -79,22 +128,37 @@ This integration provides comprehensive monitoring and control capabilities for 
 
 ### Release Notes
 See `RELEASE_NOTES.md` for the latest release highlights.
+See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
+
+### Documentation map
+- `README.md`: User-facing install/setup/operations overview.
+- `migration.md`: Step-by-step migration guide from `kostal_plenticore` to `kostal_kore`.
+- `PROXY_SETUP.md`: Modbus proxy + MQTT bridge integration examples (evcc/iobroker).
+- `ENTITY_REFERENCE.md`: Entity/register and threshold reference.
+- `custom_components/kostal_kore/QUICK_REFERENCE.md`: Fast maintainer cheat sheet.
+- `custom_components/kostal_kore/AI_DOCUMENTATION.md`: AI-assistant context for repository internals.
+- `CHANGELOG.md` + `RELEASE_NOTES.md`: Change history and release communication.
 
 ## Configuration
 
 ### Initial Setup
 1. In Home Assistant, go to **Settings > Devices & Services**
 2. Click **+ Add Integration**
-3. Search for "Kostal Plenticore Solar Inverter"
+3. Search for "KOSTAL KORE (Experimental Alpha)"
 4. Enter the required information:
-   - **Host**: IP address or hostname of your inverter
+   - **Host**: Optional. Leave empty for auto-discovery or enter IP/hostname manually
    - **Password**: Inverter web interface password
-   - **Service Code**: (Optional) Service code for advanced features
+   - **Service Code**: Optional for installer-level features
+5. In step 2 of the wizard, directly enable:
+   - Modbus TCP
+   - MQTT Bridge
+   - Modbus Proxy
+6. The wizard shows detected access role (user vs installer) and whether write access is enabled
 
 ### Configuration Parameters
-- **Host**: The network address of your Kostal inverter (e.g., `192.168.1.100`)
+- **Host**: Optional. If empty, setup tries local-network auto-discovery first
 - **Password**: Password for accessing the inverter's web interface
-- **Service Code**: Optional service code for accessing advanced settings (typically used by installers)
+- **Service Code**: Optional service code. Actual write permissions are validated from detected account role.
 
 ## Data Update
 
@@ -112,7 +176,7 @@ The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from
 
 ## Known Limitations
 
-- **No auto-discovery**: Kostal Plenticore inverters do not broadcast via mDNS/SSDP/DHCP. The inverter IP must be entered manually.
+- **Auto-discovery is best-effort**: The wizard scans likely local IPv4 hosts when host is empty. If discovery fails, enter inverter host/IP manually.
 - **DC string count**: The number of DC inputs (PV strings) is detected automatically on first setup. Changes require re-adding the integration.
 - **Firmware dependency**: Some advanced settings (G3 battery controls, external control registers) are only available on specific firmware versions.
 - **Installer access**: Certain controls require the installer/service code. Without it, these entities remain disabled.
@@ -124,7 +188,7 @@ The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from
 
 ### File Structure
 ```
-kostal_plenticore/
+custom_components/kostal_kore/
 ├── __init__.py          # Integration entry point and setup
 ├── manifest.json        # Integration metadata and dependencies
 ├── config_flow.py       # Configuration flow and user interface
@@ -253,7 +317,7 @@ logger:
   default: info
   logs:
     pykoplenti: debug
-    custom_components.kostal_plenticore: debug
+    custom_components.kostal_kore: debug
 ```
 
 ## Security Considerations
@@ -262,6 +326,8 @@ logger:
 - Use a strong, unique password for your inverter
 - Ensure your local network is secure
 - Consider network segmentation for sensitive devices
+- The Modbus proxy bind default is `127.0.0.1`; only expose it to LAN if strictly required
+- Installer/service code is required for advanced battery control write paths
 
 ## API Documentation
 
@@ -394,8 +460,8 @@ Contributions are welcome! Please:
 
 ## Version History
 
-- **Current**: v2.4.0 — Based on pykoplenti v1.5.0
-- **Compatibility**: Home Assistant 2023.1+
+- **Current**: `v2.16.0-alpha.4` (experimental release channel)
+- **Compatibility**: Home Assistant 2024.1+
 - **API Support**: Kostal Plenticore local API
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history
 
@@ -404,12 +470,16 @@ Contributions are welcome! Please:
 For issues and questions:
 1. Check the troubleshooting section above
 2. Review Home Assistant logs for error messages
-3. Create an issue in the integration's repository
+3. Open an issue: <https://github.com/Puma7/Kostal/issues>
 4. Provide diagnostic data when reporting issues
+
+### Alpha Feedback Program
+- This is an **experimental alpha**. Production use is possible, but only with careful monitoring.
+- Please include model generation (G1/G2/G3), inverter power class (e.g. 1kW, 3kW, 5kW, 20kW), and grid profile (50/60 Hz) in bug reports.
 
 ## License
 
-This integration follows the same license as Home Assistant core components.
+MIT License. See [`LICENSE`](LICENSE).
 
 ---
 

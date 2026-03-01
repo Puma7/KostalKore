@@ -1,0 +1,22 @@
+name: HACS Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate HACS integration
+        uses: hacs/action@main
+        with:
+          category: integration
+          # Repo metadata checks (description/topics/brands) are managed in GitHub settings.
+          # integration_manifest/hacsjson use raw.githubusercontent URLs that do not resolve slash refs.
+          ignore: description topics brands integration_manifest hacsjson

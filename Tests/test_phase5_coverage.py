@@ -16,9 +16,9 @@ from pykoplenti import ApiException, AuthenticationException
 
 import importlib
 
-kp_init = importlib.import_module("kostal_plenticore.__init__")
-from kostal_plenticore import config_flow, diagnostics, helper, repairs, select
-from kostal_plenticore.const import CONF_HOST, CONF_PASSWORD, DOMAIN
+kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
+from custom_components.kostal_kore import config_flow, diagnostics, helper, repairs, select
+from custom_components.kostal_kore.const import CONF_HOST, CONF_PASSWORD, DOMAIN
 
 
 @pytest.mark.parametrize(
@@ -32,14 +32,14 @@ from kostal_plenticore.const import CONF_HOST, CONF_PASSWORD, DOMAIN
 )
 def test_handle_init_error_branches(err) -> None:
     with patch(
-        "kostal_plenticore.__init__.parse_modbus_exception",
+        "custom_components.kostal_kore.__init__.parse_modbus_exception",
         return_value=SimpleNamespace(message="modbus"),
     ):
         assert kp_init._handle_init_error(err, "setup") is False
 
 
 def test_log_setup_metrics_branches() -> None:
-    with patch("kostal_plenticore.__init__._LOGGER") as logger:
+    with patch("custom_components.kostal_kore.__init__._LOGGER") as logger:
         kp_init._log_setup_metrics(0.0, True)
         kp_init._log_setup_metrics(0.0, False)
         assert logger.info.called
@@ -60,8 +60,8 @@ async def test_async_setup_entry_platform_setup_error(
 
     mock_config_entry.add_to_hass(hass)
 
-    with patch("kostal_plenticore.__init__.Plenticore", DummyPlenticore), patch(
-        "kostal_plenticore.__init__.clear_issue"
+    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
+        "custom_components.kostal_kore.__init__.clear_issue"
     ), patch(
         "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
         AsyncMock(side_effect=RuntimeError("boom")),
@@ -83,8 +83,8 @@ async def test_async_setup_entry_success(
 
     mock_config_entry.add_to_hass(hass)
 
-    with patch("kostal_plenticore.__init__.Plenticore", DummyPlenticore), patch(
-        "kostal_plenticore.__init__.clear_issue"
+    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
+        "custom_components.kostal_kore.__init__.clear_issue"
     ), patch(
         "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
         AsyncMock(return_value=True),
@@ -106,8 +106,8 @@ async def test_async_setup_entry_setup_error(
 
     mock_config_entry.add_to_hass(hass)
 
-    with patch("kostal_plenticore.__init__.Plenticore", DummyPlenticore), patch(
-        "kostal_plenticore.__init__._handle_init_error", return_value=False
+    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
+        "custom_components.kostal_kore.__init__._handle_init_error", return_value=False
     ):
         assert await kp_init.async_setup_entry(hass, mock_config_entry) is False
 
@@ -126,7 +126,7 @@ async def test_async_unload_entry_branches(
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=True),
-    ), patch("kostal_plenticore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]):
+    ), patch("custom_components.kostal_kore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]):
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
 
 
@@ -163,7 +163,7 @@ async def test_async_unload_entry_cleanup_warning(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=True),
     ), patch(
-        "kostal_plenticore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]
+        "custom_components.kostal_kore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]
     ):
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
 
@@ -221,13 +221,19 @@ async def test_test_connection_safe_success(hass: HomeAssistant) -> None:
         async def get_setting_values(self, module_id, data_id):
             return {module_id: {data_id: "scb"}}
 
-    with patch("kostal_plenticore.config_flow.ApiClient", DummyClient), patch(
-        "kostal_plenticore.config_flow.get_hostname_id", AsyncMock(return_value="Hostname")
+        async def get_me(self):
+            return SimpleNamespace(role="USER")
+
+    with patch("custom_components.kostal_kore.config_flow.ApiClient", DummyClient), patch(
+        "custom_components.kostal_kore.config_flow.get_hostname_id", AsyncMock(return_value="Hostname")
     ):
-        hostname = await config_flow.test_connection_safe(
+        result = await config_flow.test_connection_safe(
             hass, {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
         )
-    assert hostname == "scb"
+    assert result.host == "1.2.3.4"
+    assert result.hostname == "scb"
+    assert result.access_role == "USER"
+    assert result.installer_access is False
 
 
 @pytest.mark.asyncio
@@ -244,22 +250,18 @@ async def test_test_connection_safe_error(hass: HomeAssistant) -> None:
         async def login(self, _password, service_code=None):
             raise AuthenticationException("bad", "error")
 
-    with patch("kostal_plenticore.config_flow.ApiClient", DummyClient), patch(
-        "kostal_plenticore.config_flow._handle_config_flow_error"
-    ) as handle_err:
+    with patch("custom_components.kostal_kore.config_flow.ApiClient", DummyClient):
         with pytest.raises(AuthenticationException):
             await config_flow.test_connection_safe(
                 hass, {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
             )
-        assert handle_err.called
 
 
 @pytest.mark.asyncio
 async def test_reauth_step_roundtrip(hass: HomeAssistant) -> None:
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
-        result = await flow.async_step_reauth()
+    result = await flow.async_step_reauth()
     assert result["type"] == "form"
 
 
@@ -272,7 +274,17 @@ async def test_reauth_confirm_updates_entry(
     flow.hass = hass
     flow.context = {"entry_id": mock_config_entry.entry_id}
 
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(
+            return_value=config_flow.ConnectionCheckResult(
+                host="1.2.3.4",
+                hostname="scb",
+                access_role="USER",
+                installer_access=False,
+            )
+        ),
+    ):
         result = await flow.async_step_reauth_confirm(
             {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
         )
@@ -284,7 +296,10 @@ async def test_reauth_confirm_updates_entry(
 async def test_reauth_confirm_error_shows_form(hass: HomeAssistant) -> None:
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(side_effect=RuntimeError("boom"))):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    ):
         result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
     assert result["type"] == "form"
 
@@ -293,7 +308,17 @@ async def test_reauth_confirm_error_shows_form(hass: HomeAssistant) -> None:
 async def test_reauth_confirm_without_entry_id(hass: HomeAssistant) -> None:
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(
+            return_value=config_flow.ConnectionCheckResult(
+                host="1.2.3.4",
+                hostname="scb",
+                access_role="USER",
+                installer_access=False,
+            )
+        ),
+    ):
         result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
     assert result["type"] == "abort"
 
@@ -303,7 +328,17 @@ async def test_reauth_confirm_missing_entry(hass: HomeAssistant) -> None:
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
     flow.context = {"entry_id": "missing"}
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(
+            return_value=config_flow.ConnectionCheckResult(
+                host="1.2.3.4",
+                hostname="scb",
+                access_role="USER",
+                installer_access=False,
+            )
+        ),
+    ):
         result = await flow.async_step_reauth_confirm({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
     assert result["type"] == "abort"
 
@@ -315,16 +350,30 @@ async def test_user_step_forms_and_success(hass: HomeAssistant) -> None:
     result = await flow.async_step_user()
     assert result["type"] == "form"
 
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(
+            return_value=config_flow.ConnectionCheckResult(
+                host="1.2.3.4",
+                hostname="scb",
+                access_role="USER",
+                installer_access=False,
+            )
+        ),
+    ):
         result = await flow.async_step_user({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
-    assert result["type"] == "create_entry"
+    assert result["type"] == "form"
+    assert result["step_id"] == "setup_options"
 
 
 @pytest.mark.asyncio
 async def test_user_step_error_shows_form(hass: HomeAssistant) -> None:
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(side_effect=RuntimeError("boom"))):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    ):
         result = await flow.async_step_user({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
     assert result["type"] == "form"
 
@@ -334,9 +383,17 @@ async def test_reconfigure_step_success(hass: HomeAssistant, mock_config_entry: 
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
     mock_config_entry.add_to_hass(hass)
-    with patch("kostal_plenticore.config_flow.test_connection_safe", AsyncMock(return_value="scb")), patch.object(
-        flow, "_get_reconfigure_entry", return_value=mock_config_entry
-    ):
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(
+            return_value=config_flow.ConnectionCheckResult(
+                host="1.2.3.4",
+                hostname="scb",
+                access_role="USER",
+                installer_access=False,
+            )
+        ),
+    ), patch.object(flow, "_get_reconfigure_entry", return_value=mock_config_entry):
         result = await flow.async_step_reconfigure({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
     assert result["type"] == "abort"
 
@@ -511,8 +568,8 @@ def test_format_back_exceptions() -> None:
 
 
 def test_repairs_create_and_clear(hass: HomeAssistant) -> None:
-    with patch("kostal_plenticore.repairs.ir.async_create_issue") as create_issue, patch(
-        "kostal_plenticore.repairs.ir.async_delete_issue"
+    with patch("custom_components.kostal_kore.repairs.ir.async_create_issue") as create_issue, patch(
+        "custom_components.kostal_kore.repairs.ir.async_delete_issue"
     ) as delete_issue:
         repairs.create_auth_failed_issue(hass)
         repairs.create_api_unreachable_issue(hass)
@@ -733,7 +790,7 @@ async def test_select_registry_migration_error_branch(
     entities: list = []
 
     with patch.object(select, "_get_settings_data_safe", _empty_settings), patch(
-        "kostal_plenticore.select.er.async_get", side_effect=RuntimeError("boom")
+        "custom_components.kostal_kore.select.er.async_get", side_effect=RuntimeError("boom")
     ):
         await select.async_setup_entry(hass, mock_config_entry, entities.extend)
 

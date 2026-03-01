@@ -1,0 +1,260 @@
+# Kostal Plenticore Degradation Dashboard
+#
+# Importiere dieses Dashboard in Home Assistant:
+# 1. Gehe zu Settings → Dashboards → + Dashboard hinzufügen
+# 2. Wähle "Aus YAML erstellen"
+# 3. Kopiere den Inhalt dieser Datei
+#
+# Oder füge die Karten einzeln zu einem bestehenden Dashboard hinzu.
+#
+# Ersetze "scb" durch deinen Entity-Prefix falls abweichend.
+
+title: "PV Anlage - Degradation & Gesundheit"
+icon: mdi:solar-power-variant
+path: pv-degradation
+
+cards:
+  # ============================================================
+  # Zeile 1: Gesamtübersicht
+  # ============================================================
+  - type: horizontal-stack
+    cards:
+      - type: gauge
+        entity: sensor.scb_inverter_health_score
+        name: "Gesundheit"
+        min: 0
+        max: 100
+        severity:
+          green: 80
+          yellow: 50
+          red: 20
+        needle: true
+
+      - type: entity
+        entity: sensor.scb_inverter_health_level
+        name: "Status"
+        icon: mdi:shield-check
+
+      - type: entity
+        entity: sensor.scb_fire_risk_level
+        name: "Brandrisiko"
+        icon: mdi:fire-alert
+
+      - type: entity
+        entity: sensor.scb_degradation_alerts
+        name: "Degradation Alerts"
+        icon: mdi:trending-down
+
+  # ============================================================
+  # Zeile 2: Temperatur-Trends (das Wichtigste für Langlebigkeit)
+  # ============================================================
+  - type: history-graph
+    title: "🌡️ Temperatur-Verlauf (24h)"
+    hours_to_show: 24
+    entities:
+      - entity: sensor.scb_battery_temperature_modbus
+        name: "Batterie"
+      - entity: sensor.scb_controller_temperature_modbus
+        name: "Controller"
+
+  - type: statistics-graph
+    title: "🌡️ Temperatur-Trend (30 Tage)"
+    period: day
+    days_to_show: 30
+    stat_types:
+      - mean
+      - max
+    entities:
+      - sensor.scb_battery_temperature_modbus
+      - sensor.scb_controller_temperature_modbus
+
+  # ============================================================
+  # Zeile 3: Batterie-Gesundheit
+  # ============================================================
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.scb_battery_health_soh_trend
+        name: "Batterie SoH"
+        icon: mdi:battery-heart-variant
+
+      - type: entity
+        entity: sensor.scb_batterie_langlebigkeit
+        name: "Langlebigkeit"
+        icon: mdi:battery-clock
+
+  - type: entities
+    title: "🔋 Batterie-Degradation"
+    entities:
+      - entity: sensor.scb_degradation_batterie_soh
+        name: "SoH Trend"
+        icon: mdi:trending-down
+      - entity: sensor.scb_degradation_batterie_kapazitat
+        name: "Kapazität Trend"
+        icon: mdi:battery-medium
+      - entity: sensor.scb_degradation_batterie_temperatur
+        name: "Ø-Temperatur Trend"
+        icon: mdi:thermometer
+      - type: attribute
+        entity: sensor.scb_degradation_batterie_soh
+        attribute: rate_per_month
+        name: "SoH Rate/Monat"
+        suffix: "%"
+      - type: attribute
+        entity: sensor.scb_degradation_batterie_soh
+        attribute: seasonal_trend
+        name: "Saisonbereinigt"
+
+  # ============================================================
+  # Zeile 4: DC Solar Strings
+  # ============================================================
+  - type: history-graph
+    title: "☀️ DC String Leistung (24h)"
+    hours_to_show: 24
+    entities:
+      - entity: sensor.scb_dc1_power
+        name: "String 1"
+      - entity: sensor.scb_dc2_power
+        name: "String 2"
+
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.scb_dc_string_imbalance
+        name: "String Imbalance"
+        icon: mdi:solar-panel-large
+
+      - type: entity
+        entity: sensor.scb_pv_anlage_langlebigkeit
+        name: "PV Langlebigkeit"
+        icon: mdi:solar-power-variant
+
+  - type: entities
+    title: "☀️ PV-Degradation"
+    entities:
+      - entity: sensor.scb_degradation_dc1_spitzenleistung
+        name: "DC1 Peak Trend"
+      - entity: sensor.scb_degradation_dc2_spitzenleistung
+        name: "DC2 Peak Trend"
+      - entity: sensor.scb_degradation_tagesertrag
+        name: "Tagesertrag Trend"
+      - type: attribute
+        entity: sensor.scb_degradation_dc1_spitzenleistung
+        attribute: seasonal_trend
+        name: "DC1 Saisonbereinigt"
+      - type: attribute
+        entity: sensor.scb_degradation_dc2_spitzenleistung
+        attribute: seasonal_trend
+        name: "DC2 Saisonbereinigt"
+
+  # ============================================================
+  # Zeile 5: Isolationswiderstand
+  # ============================================================
+  - type: entities
+    title: "⚡ Isolation & Sicherheit"
+    entities:
+      - entity: sensor.scb_degradation_isolationswiderstand
+        name: "Isolation Trend"
+        icon: mdi:resistor
+      - type: attribute
+        entity: sensor.scb_degradation_isolationswiderstand
+        attribute: rate_per_month
+        name: "Rate/Monat"
+        suffix: "kΩ"
+      - type: attribute
+        entity: sensor.scb_degradation_isolationswiderstand
+        attribute: baseline_deviation_pct
+        name: "Vs. Baseline"
+        suffix: "%"
+      - type: attribute
+        entity: sensor.scb_degradation_isolationswiderstand
+        attribute: seasonal_trend
+        name: "Saisonbereinigt"
+      - entity: binary_sensor.scb_isolation_resistance_warning
+        name: "Isolation Warnung"
+      - entity: binary_sensor.scb_pv_system_safety
+        name: "PV Sicherheit"
+
+  # ============================================================
+  # Zeile 6: Netz & Frequenz
+  # ============================================================
+  - type: history-graph
+    title: "🔌 Netzfrequenz (24h)"
+    hours_to_show: 24
+    entities:
+      - entity: sensor.scb_ac_frequency
+        name: "Frequenz"
+
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.scb_phase_voltage_imbalance
+        name: "Phasen-Imbalance"
+        icon: mdi:sine-wave
+
+      - type: entity
+        entity: sensor.scb_modbus_communication_reliability
+        name: "Kommunikation"
+        icon: mdi:lan-connect
+
+  # ============================================================
+  # Zeile 7: Diagnosen
+  # ============================================================
+  - type: entities
+    title: "🔍 Bereichs-Diagnosen"
+    entities:
+      - entity: sensor.scb_diagnose_dc_solaranlage
+        name: "DC Solaranlage"
+        icon: mdi:solar-panel
+      - entity: sensor.scb_diagnose_ac_netzanbindung
+        name: "AC Netzanbindung"
+        icon: mdi:transmission-tower
+      - entity: sensor.scb_diagnose_batterie
+        name: "Batterie"
+        icon: mdi:battery-check
+      - entity: sensor.scb_diagnose_wechselrichter
+        name: "Wechselrichter"
+        icon: mdi:power-plug-outline
+      - entity: sensor.scb_diagnose_sicherheit
+        name: "Sicherheit"
+        icon: mdi:shield-check
+
+  # ============================================================
+  # Zeile 8: Wechselrichter Langlebigkeit
+  # ============================================================
+  - type: entities
+    title: "⚙️ Wechselrichter"
+    entities:
+      - entity: sensor.scb_wechselrichter_langlebigkeit
+        name: "Langlebigkeit"
+      - entity: sensor.scb_degradation_controller_temperatur
+        name: "Controller Temp Trend"
+      - entity: sensor.scb_error_rate_per_hour
+        name: "Fehlerrate"
+      - entity: sensor.scb_inverter_state_changes
+        name: "Zustandswechsel"
+
+  # ============================================================
+  # Zeile 9: Aktionen
+  # ============================================================
+  - type: horizontal-stack
+    cards:
+      - type: button
+        entity: button.scb_run_modbus_diagnostics
+        name: "Diagnose starten"
+        icon: mdi:stethoscope
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.scb_run_modbus_diagnostics
+
+      - type: button
+        entity: button.scb_reset_modbus_registers
+        name: "Register Reset"
+        icon: mdi:restart
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.scb_reset_modbus_registers

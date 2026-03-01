@@ -1,4 +1,4 @@
-"""Test the Kostal Plenticore coordinator with Platinum features."""
+"""Test the KOSTAL KORE coordinator with Platinum features."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class TestPlatinumCoordinator:
     def mock_config_entry(self) -> MockConfigEntry:
         """Mock a config entry."""
         return MockConfigEntry(
-            domain="kostal_plenticore",
+            domain="kostal_kore",
             data={
                 "host": "192.168.1.100",
                 "password": "test_password",
@@ -38,7 +38,7 @@ class TestPlatinumCoordinator:
         plenticore = MagicMock()
         plenticore.client = MagicMock()
         plenticore.device_info = {
-            "identifiers": {"kostal_plenticore": "test_serial"},
+            "identifiers": {"kostal_kore": "test_serial"},
             "manufacturer": "Kostal",
             "model": "Test Model",
             "name": "Test Inverter",
@@ -52,7 +52,7 @@ class TestPlatinumCoordinator:
     ):
         """Test concurrent operations during setup."""
         try:
-            from kostal_plenticore.coordinator import Plenticore
+            from custom_components.kostal_kore.coordinator import Plenticore
 
             plenticore = Plenticore(hass, mock_config_entry)
 
@@ -81,7 +81,7 @@ class TestPlatinumCoordinator:
     ):
         """Test timeout protection during unload."""
         try:
-            from kostal_plenticore.coordinator import Plenticore
+            from custom_components.kostal_kore.coordinator import Plenticore
 
             plenticore = Plenticore(hass, mock_config_entry)
             plenticore._client = MagicMock()
@@ -98,7 +98,7 @@ class TestPlatinumCoordinator:
     def test_modbus_exception_hierarchy(self):
         """Test MODBUS exception hierarchy."""
         try:
-            from kostal_plenticore.helper import (
+            from custom_components.kostal_kore.helper import (
                 ModbusException,
                 ModbusIllegalFunctionError,
                 ModbusIllegalDataAddressError,
@@ -139,7 +139,10 @@ class TestPlatinumCoordinator:
     def test_modbus_exception_parsing(self):
         """Test MODBUS exception parsing."""
         try:
-            from kostal_plenticore.helper import parse_modbus_exception, ModbusException
+            from custom_components.kostal_kore.helper import (
+                parse_modbus_exception,
+                ModbusException,
+            )
             from pykoplenti import ApiException
 
             test_cases = [
@@ -182,12 +185,12 @@ class TestPlatinumCoordinator:
 
     def test_coordinator_type_annotations(self):
         """Test coordinator type annotations."""
-        from kostal_plenticore.coordinator import PlenticoreConfigEntry
+        from custom_components.kostal_kore.coordinator import PlenticoreConfigEntry
         assert PlenticoreConfigEntry is not None
 
     def test_coordinator_documentation(self):
         """Test coordinator documentation quality."""
-        from kostal_plenticore.coordinator import PlenticoreUpdateCoordinator
+        from custom_components.kostal_kore.coordinator import PlenticoreUpdateCoordinator
 
         assert PlenticoreUpdateCoordinator.__doc__ is not None
         assert len(PlenticoreUpdateCoordinator.__doc__) > 10
@@ -203,7 +206,7 @@ class TestPlatinumDataUpdateCoordinator:
         mock_config_entry: MockConfigEntry,
     ):
         """Test request deduplication in data update coordinator."""
-        from kostal_plenticore.coordinator import ProcessDataUpdateCoordinator
+        from custom_components.kostal_kore.coordinator import ProcessDataUpdateCoordinator
 
         coordinator = ProcessDataUpdateCoordinator(
             hass,
