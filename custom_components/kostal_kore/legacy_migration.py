@@ -41,6 +41,17 @@ class LegacyMigrationResult:
     removed_source_entry: bool = False
 
 
+@dataclass(slots=True)
+class LegacyCleanupResult:
+    """Summary for legacy cleanup after a prior migration."""
+
+    source_entry_id: str
+    target_entry_id: str
+    removed_legacy_entities: int = 0
+    detached_legacy_devices: int = 0
+    removed_source_entry: bool = False
+
+
 def _rewrite_unique_id(
     unique_id: str,
     source_entry_id: str,
@@ -135,6 +146,7 @@ async def migrate_legacy_plenticore_entry(
     hass: HomeAssistant,
     target_entry_id: str,
     source_entry_id: str | None = None,
+    remove_source_entry: bool = False,
 ) -> LegacyMigrationResult:
     """Migrate a legacy ``kostal_plenticore`` entry to an existing ``kostal_kore`` entry."""
     target_entry = hass.config_entries.async_get_entry(target_entry_id)
@@ -213,18 +225,25 @@ async def migrate_legacy_plenticore_entry(
         dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
     )
     for source_device in source_devices:
-        updated = device_registry.async_update_device(
-            source_device.id,
-            add_config_entry_id=target_entry.entry_id,
-            remove_config_entry_id=source_entry.entry_id,
-        )
+        if remove_source_entry:
+            updated = device_registry.async_update_device(
+                source_device.id,
+                add_config_entry_id=target_entry.entry_id,
+                remove_config_entry_id=source_entry.entry_id,
+            )
+        else:
+            updated = device_registry.async_update_device(
+                source_device.id,
+                add_config_entry_id=target_entry.entry_id,
+            )
         if updated is not None:
             result.migrated_devices += 1
 
-    await hass.config_entries.async_remove(source_entry.entry_id)
-    result.removed_source_entry = (
-        hass.config_entries.async_get_entry(source_entry.entry_id) is None
-    )
+    if remove_source_entry:
+        await hass.config_entries.async_remove(source_entry.entry_id)
+        result.removed_source_entry = (
+            hass.config_entries.async_get_entry(source_entry.entry_id) is None
+        )
     await hass.config_entries.async_reload(target_entry.entry_id)
 
     _LOGGER.info(
@@ -234,6 +253,63 @@ async def migrate_legacy_plenticore_entry(
         result.migrated_entities,
         result.migrated_devices,
         result.removed_target_duplicates,
+        result.removed_source_entry,
+    )
+    return result
+
+
+async def finalize_legacy_cleanup(
+    hass: HomeAssistant,
+    target_entry_id: str,
+    source_entry_id: str | None = None,
+) -> LegacyCleanupResult:
+    """Delete leftover legacy config entry and any remaining legacy registry artifacts."""
+    target_entry = hass.config_entries.async_get_entry(target_entry_id)
+    if target_entry is None:
+        raise HomeAssistantError(f"Target entry '{target_entry_id}' not found.")
+    if target_entry.domain != DOMAIN:
+        raise HomeAssistantError(
+            f"Target entry '{target_entry_id}' is not a '{DOMAIN}' entry."
+        )
+
+    source_entry = _select_source_entry(hass, target_entry, source_entry_id)
+    result = LegacyCleanupResult(
+        source_entry_id=source_entry.entry_id,
+        target_entry_id=target_entry.entry_id,
+    )
+
+    entity_registry = er.async_get(hass)
+    source_entities = list(
+        er.async_entries_for_config_entry(entity_registry, source_entry.entry_id)
+    )
+    for source_entity in source_entities:
+        entity_registry.async_remove(source_entity.entity_id)
+        result.removed_legacy_entities += 1
+
+    device_registry = dr.async_get(hass)
+    source_devices = list(
+        dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
+    )
+    for source_device in source_devices:
+        updated = device_registry.async_update_device(
+            source_device.id,
+            remove_config_entry_id=source_entry.entry_id,
+        )
+        if updated is not None:
+            result.detached_legacy_devices += 1
+
+    await hass.config_entries.async_remove(source_entry.entry_id)
+    result.removed_source_entry = (
+        hass.config_entries.async_get_entry(source_entry.entry_id) is None
+    )
+    await hass.config_entries.async_reload(target_entry.entry_id)
+
+    _LOGGER.info(
+        "Legacy cleanup complete: source=%s target=%s removed_entities=%d detached_devices=%d removed_source=%s",
+        result.source_entry_id,
+        result.target_entry_id,
+        result.removed_legacy_entities,
+        result.detached_legacy_devices,
         result.removed_source_entry,
     )
     return result

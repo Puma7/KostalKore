@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_MODBUS_ENABLED, DOMAIN
 from .coordinator import PlenticoreConfigEntry
-from .legacy_migration import migrate_legacy_plenticore_entry
+from .legacy_migration import finalize_legacy_cleanup, migrate_legacy_plenticore_entry
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class LegacyMigrationButton(ButtonEntity):
             result = await migrate_legacy_plenticore_entry(
                 self.hass,
                 target_entry_id=self._entry_id,
+                remove_source_entry=False,
             )
             self._attr_extra_state_attributes = {
                 "last_status": "ok",
@@ -50,6 +51,7 @@ class LegacyMigrationButton(ButtonEntity):
                 "migrated_devices": result.migrated_devices,
                 "duplicates_removed": result.removed_target_duplicates,
                 "removed_source_entry": result.removed_source_entry,
+                "next_step": "Use 'Finalize Legacy Cleanup' after validation period.",
             }
             self.async_write_ha_state()
 
@@ -59,12 +61,14 @@ class LegacyMigrationButton(ButtonEntity):
                 {
                     "title": "KOSTAL KORE migration completed",
                     "message": (
-                        "Legacy data import finished.\n\n"
+                        "Legacy import step 1 completed.\n\n"
                         f"Source entry: `{result.source_entry_id}`\n"
                         f"Migrated entities: **{result.migrated_entities}**\n"
                         f"Migrated devices: **{result.migrated_devices}**\n"
                         f"Removed duplicate target entities: **{result.removed_target_duplicates}**\n"
-                        f"Removed legacy entry: **{result.removed_source_entry}**"
+                        f"Legacy entry removed: **{result.removed_source_entry}**\n\n"
+                        "Step 2 is optional and can be done later: "
+                        "**Finalize Legacy Cleanup**."
                     ),
                     "notification_id": f"kostal_kore_migration_{self._entry_id}",
                 },
@@ -94,13 +98,89 @@ class LegacyMigrationButton(ButtonEntity):
             )
 
 
+class LegacyCleanupButton(ButtonEntity):
+    """Finalize migration by removing legacy entry and leftover artifacts."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Finalize Legacy Cleanup"
+    _attr_icon = "mdi:delete-sweep"
+
+    def __init__(self, entry: PlenticoreConfigEntry) -> None:
+        """Initialize legacy cleanup button."""
+        self._entry_id = entry.entry_id
+        self._attr_unique_id = f"{entry.entry_id}_finalize_legacy_cleanup"
+        self._attr_device_info = entry.runtime_data.device_info
+        self._attr_extra_state_attributes: dict[str, Any] = {
+            "last_status": "idle",
+        }
+
+    async def async_press(self) -> None:
+        """Delete remaining legacy artifacts."""
+        try:
+            result = await finalize_legacy_cleanup(
+                self.hass,
+                target_entry_id=self._entry_id,
+            )
+            self._attr_extra_state_attributes = {
+                "last_status": "ok",
+                "last_run": datetime.now().isoformat(),
+                "source_entry_id": result.source_entry_id,
+                "removed_legacy_entities": result.removed_legacy_entities,
+                "detached_legacy_devices": result.detached_legacy_devices,
+                "removed_source_entry": result.removed_source_entry,
+            }
+            self.async_write_ha_state()
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "KOSTAL KORE legacy cleanup completed",
+                    "message": (
+                        "Migration cleanup step completed.\n\n"
+                        f"Source entry: `{result.source_entry_id}`\n"
+                        f"Removed remaining legacy entities: **{result.removed_legacy_entities}**\n"
+                        f"Detached legacy devices: **{result.detached_legacy_devices}**\n"
+                        f"Removed legacy entry: **{result.removed_source_entry}**"
+                    ),
+                    "notification_id": f"kostal_kore_migration_{self._entry_id}",
+                },
+                blocking=True,
+            )
+        except Exception as err:
+            self._attr_extra_state_attributes = {
+                "last_status": "error",
+                "last_run": datetime.now().isoformat(),
+                "error": str(err),
+            }
+            self.async_write_ha_state()
+            _LOGGER.error("Legacy cleanup failed for entry %s: %s", self._entry_id, err)
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "KOSTAL KORE legacy cleanup failed",
+                    "message": (
+                        "Cleanup step failed.\n\n"
+                        f"Target entry: `{self._entry_id}`\n"
+                        f"Error: `{err}`"
+                    ),
+                    "notification_id": f"kostal_kore_migration_{self._entry_id}",
+                },
+                blocking=True,
+            )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PlenticoreConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities for the integration."""
-    buttons: list[ButtonEntity] = [LegacyMigrationButton(entry)]
+    buttons: list[ButtonEntity] = [
+        LegacyMigrationButton(entry),
+        LegacyCleanupButton(entry),
+    ]
 
     if entry.options.get(CONF_MODBUS_ENABLED, False):
         entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})

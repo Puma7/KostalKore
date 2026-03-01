@@ -33,8 +33,9 @@ async def test_setup_entry_adds_legacy_migration_button_without_modbus(hass):
 
     await button_platform.async_setup_entry(hass, entry, _add_entities)
 
-    assert len(added) == 1
+    assert len(added) == 2
     assert added[0].unique_id.endswith("_import_legacy_plenticore_data")
+    assert added[1].unique_id.endswith("_finalize_legacy_cleanup")
 
 
 async def test_setup_entry_adds_modbus_buttons_when_available(hass):
@@ -63,8 +64,12 @@ async def test_setup_entry_adds_modbus_buttons_when_available(hass):
     ):
         await button_platform.async_setup_entry(hass, entry, _add_entities)
 
-    assert len(added) == 3
+    assert len(added) == 4
     assert any(
         getattr(entity, "unique_id", "").endswith("_import_legacy_plenticore_data")
+        for entity in added
+    )
+    assert any(
+        getattr(entity, "unique_id", "").endswith("_finalize_legacy_cleanup")
         for entity in added
     )

@@ -16,6 +16,7 @@ from custom_components.kostal_kore.const import (
 )
 from custom_components.kostal_kore.legacy_migration import (
     LEGACY_DOMAIN,
+    finalize_legacy_cleanup,
     migrate_legacy_plenticore_entry,
 )
 
@@ -80,6 +81,7 @@ async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):
         result = await migrate_legacy_plenticore_entry(
             hass,
             target_entry_id=target_entry.entry_id,
+            remove_source_entry=False,
         )
     await hass.async_block_till_done()
 
@@ -88,7 +90,7 @@ async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):
     assert result.migrated_entities >= 1
     assert result.migrated_devices >= 1
     assert result.removed_target_duplicates == 1
-    assert result.removed_source_entry is True
+    assert result.removed_source_entry is False
     mock_reload.assert_awaited_once_with(target_entry.entry_id)
 
     updated_target = hass.config_entries.async_get_entry(target_entry.entry_id)
@@ -107,7 +109,25 @@ async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):
     migrated_device = device_registry.async_get(old_device.id)
     assert migrated_device is not None
     assert target_entry.entry_id in migrated_device.config_entries
-    assert source_entry.entry_id not in migrated_device.config_entries
+    assert source_entry.entry_id in migrated_device.config_entries
+    assert hass.config_entries.async_get_entry(source_entry.entry_id) is not None
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        AsyncMock(return_value=True),
+    ) as mock_reload_cleanup:
+        cleanup = await finalize_legacy_cleanup(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+        )
+    await hass.async_block_till_done()
+
+    assert cleanup.removed_source_entry is True
+    assert cleanup.source_entry_id == source_entry.entry_id
+    assert cleanup.detached_legacy_devices >= 1
+    mock_reload_cleanup.assert_awaited_once_with(target_entry.entry_id)
     assert hass.config_entries.async_get_entry(source_entry.entry_id) is None
 
 
@@ -143,7 +163,7 @@ async def test_migrate_legacy_entry_prefers_host_match_when_multiple_sources(has
         )
 
     assert result.source_entry_id == source_match.entry_id
-    assert hass.config_entries.async_get_entry(source_match.entry_id) is None
+    assert hass.config_entries.async_get_entry(source_match.entry_id) is not None
     assert hass.config_entries.async_get_entry(source_other.entry_id) is not None
 
 

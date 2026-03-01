@@ -103,11 +103,11 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 If you previously used the old `kostal_plenticore` integration:
 
 1. Install and set up `KOSTAL KORE` first (new entry in Home Assistant).
-2. Open the KOSTAL KORE device and click the button **Import Legacy Plenticore Data**.
-3. KORE imports old config/options and migrates entity/device registry mappings.
-4. The legacy config entry is removed automatically after successful migration.
+2. Open the KOSTAL KORE device and click **Import Legacy Plenticore Data**.
+3. KORE imports old config/options and migrates entity/device registry mappings, but keeps the legacy entry for safety/testing.
+4. After your validation period, click **Finalize Legacy Cleanup** to remove old legacy artifacts and the old config entry.
 
-This migration keeps existing entity IDs whenever possible so Recorder/history statistics remain connected.
+This split flow lets you migrate first, test in production for a few weeks, and only then finalize cleanup.
 
 ## Development
 
@@ -440,7 +440,7 @@ Contributions are welcome! Please:
 
 ## Version History
 
-- **Current**: `v2.16.0-alpha.3` (experimental release channel)
+- **Current**: `v2.16.0-alpha.4` (experimental release channel)
 - **Compatibility**: Home Assistant 2024.1+
 - **API Support**: Kostal Plenticore local API
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history

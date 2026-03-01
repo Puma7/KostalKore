@@ -28,7 +28,7 @@
 
 ## Migration readiness
 
-- [x] One-click import routine exists to migrate legacy `kostal_plenticore` config/registry data into `kostal_kore`.
+- [x] Two-step routine exists: migrate first, cleanup old legacy entry later.
 
 ## Known limitations (alpha)
 

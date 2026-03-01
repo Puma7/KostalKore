@@ -1,7 +1,7 @@
 {
   "domain": "kostal_kore",
   "name": "KOSTAL KORE (Experimental Alpha)",
-  "version": "2.16.0-alpha.3",
+  "version": "2.16.0-alpha.4",
   "codeowners": [
     "@stegm"
   ],
