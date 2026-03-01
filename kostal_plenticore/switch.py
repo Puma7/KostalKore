@@ -855,6 +855,19 @@ async def async_setup_entry(
             )
         # Ensure we don't crash - basic switches will still be created
 
+    # Add Modbus-based charge block switch if Modbus is enabled
+    try:  # pragma: no cover
+        from .const import CONF_MODBUS_ENABLED as _CME, DOMAIN as _DOM
+        entry_data = hass.data.get(_DOM, {}).get(entry.entry_id, {})
+        modbus_coord = entry_data.get("modbus_coordinator") if entry_data else None
+        if entry.options.get(_CME, False) and modbus_coord is not None:
+            from .charge_block_switch import BatteryChargeBlockSwitch
+            entities.append(BatteryChargeBlockSwitch(
+                modbus_coord, entry.entry_id, plenticore.device_info, hass=hass,
+            ))
+    except Exception:
+        pass
+
     # New entities are created with entity_registry_enabled_default=False.
     # Users who deliberately enable entities keep their choice across restarts.
     async_add_entities(entities)

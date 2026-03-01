@@ -31,6 +31,9 @@ omit =
     kostal_plenticore/mqtt_bridge.py
     kostal_plenticore/modbus_proxy.py
     kostal_plenticore/battery_test.py
+    kostal_plenticore/battery_soc_controller.py
+    kostal_plenticore/soc_controller_entities.py
+    kostal_plenticore/charge_block_switch.py
     kostal_plenticore/button.py
 
 [report]

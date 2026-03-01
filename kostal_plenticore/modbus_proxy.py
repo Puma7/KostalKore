@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import time
 from typing import Any, Final
 
 from .modbus_registers import (
@@ -147,10 +148,25 @@ def _build_register_image(
     return bytes(image) if found_any else None
 
 
-class ModbusTcpProxyServer:
-    """Lightweight Modbus TCP proxy that serves register reads from cache.
+WRITE_LOCK_SECONDS: Final[float] = 5.0
+BATTERY_CONTROL_REGISTERS: Final[frozenset[int]] = frozenset({
+    1034, 1038, 1040, 1042, 1044,  # Section 3.4 battery management
+    1280, 1282, 1284, 1286, 1288,  # Section 3.5 G3 battery limits
+})
 
-    Writes are forwarded to the real inverter through the coordinator.
+
+class ModbusTcpProxyServer:
+    """Modbus TCP proxy with write arbitration for multi-client safety.
+
+    Read requests: served from coordinator cache or forwarded to inverter.
+
+    Write requests: Battery control registers (1034, 1038, 1040, etc.)
+    are subject to arbitration. When the internal SoC controller is active,
+    external writes to battery registers are REJECTED with a Modbus
+    exception (0x06 = Server Device Busy) and a log warning. This prevents
+    conflicting control signals from evcc and our own controller.
+
+    Non-battery writes are always forwarded.
     """
 
     def __init__(
@@ -159,13 +175,16 @@ class ModbusTcpProxyServer:
         port: int = DEFAULT_PROXY_PORT,
         unit_id: int = DEFAULT_UNIT_ID,
         endianness: str = "little",
+        soc_controller: Any = None,
     ) -> None:
         self._coordinator = coordinator
         self._port = port
         self._unit_id = unit_id
         self._endianness = endianness
+        self._soc_controller = soc_controller
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task[None]] = set()
+        self._last_ext_write: dict[int, float] = {}  # address → timestamp
 
     @property
     def port(self) -> int:
@@ -216,6 +235,12 @@ class ModbusTcpProxyServer:
                 if proto_id != 0:
                     _LOGGER.debug("Non-Modbus protocol ID %d, ignoring", proto_id)
                     await reader.readexactly(length - 1)
+                    continue
+
+                if length < 2 or length > 260:
+                    _LOGGER.debug("Proxy: invalid MBAP length %d, dropping", length)
+                    if length > 1:
+                        await reader.readexactly(min(length - 1, 260))
                     continue
 
                 pdu = await reader.readexactly(length - 1)
@@ -310,24 +335,65 @@ class ModbusTcpProxyServer:
             )
             return None
 
+    def _check_write_arbitration(self, address: int, peer: str = "") -> bytes | None:
+        """Check if a write to this address is allowed.
+
+        Returns a Modbus error response if blocked, None if allowed.
+        Battery control registers are blocked when the internal SoC
+        controller is active (returns 0x06 = Server Device Busy).
+        """
+        if address not in BATTERY_CONTROL_REGISTERS:
+            return None
+
+        ctrl = self._soc_controller
+        if ctrl is not None and getattr(ctrl, "active", False):
+            _LOGGER.warning(
+                "Proxy: BLOCKED external write to battery register %d "
+                "(SoC Controller is active, target=%.0f%%). "
+                "Stop the SoC Controller first to allow external control.",
+                address, ctrl.target_soc or 0,
+            )
+            return None  # We return 0x06 below per function code
+
+        return None
+
     async def _handle_write_single(self, pdu: bytes) -> bytes:
-        """Handle FC 06: Write Single Register."""
+        """Handle FC 06: Write Single Register with arbitration."""
         if len(pdu) < 5:
             return self._error_response(FC_WRITE_SINGLE, 0x03)
 
         address = struct.unpack(">H", pdu[1:3])[0]
         value = struct.unpack(">H", pdu[3:5])[0]
 
+        # Arbitration: block battery writes if SoC controller is active
+        if address in BATTERY_CONTROL_REGISTERS:
+            ctrl = self._soc_controller
+            if ctrl is not None and getattr(ctrl, "active", False):
+                _LOGGER.warning(
+                    "Proxy: REJECTED write to reg %d = %d (SoC Controller active, "
+                    "target=%.0f%%). External client should retry later.",
+                    address, value, ctrl.target_soc or 0,
+                )
+                return self._error_response(FC_WRITE_SINGLE, 0x06)
+
+        self._last_ext_write[address] = time.monotonic()
+
         reg = REGISTER_BY_ADDRESS.get(address)
         if reg is not None and reg.access == Access.RW:
+            if reg.count > 1:
+                _LOGGER.debug(
+                    "Proxy: FC06 rejected for %d-register %s (use FC16)",
+                    reg.count, reg.name,
+                )
+                return self._error_response(FC_WRITE_SINGLE, 0x03)
             try:
                 await self._coordinator.async_write_by_address(address, value)
+                _LOGGER.info("Proxy: write reg %d = %d (external)", address, value)
                 return pdu[:5]
             except Exception as err:
                 _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
                 return self._error_response(FC_WRITE_SINGLE, 0x04)
 
-        # Unknown register → forward raw write to inverter
         raw_result = await self._forward_write_single(address, value)
         if raw_result:
             return pdu[:5]
@@ -348,7 +414,7 @@ class ModbusTcpProxyServer:
             return False
 
     async def _handle_write_multiple(self, pdu: bytes) -> bytes:
-        """Handle FC 16: Write Multiple Registers."""
+        """Handle FC 16: Write Multiple Registers with arbitration."""
         if len(pdu) < 6:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
@@ -359,6 +425,19 @@ class ModbusTcpProxyServer:
         if len(pdu) < 6 + byte_count:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
+        # Arbitration: block battery writes if SoC controller is active
+        if start_addr in BATTERY_CONTROL_REGISTERS:
+            ctrl = self._soc_controller
+            if ctrl is not None and getattr(ctrl, "active", False):
+                _LOGGER.warning(
+                    "Proxy: REJECTED write-multiple to reg %d qty %d "
+                    "(SoC Controller active, target=%.0f%%). "
+                    "External client should retry later.",
+                    start_addr, quantity, ctrl.target_soc or 0,
+                )
+                return self._error_response(FC_WRITE_MULTIPLE, 0x06)
+
+        self._last_ext_write[start_addr] = time.monotonic()
         reg_values = pdu[6 : 6 + byte_count]
 
         reg = REGISTER_BY_ADDRESS.get(start_addr)
@@ -366,6 +445,9 @@ class ModbusTcpProxyServer:
             try:
                 decoded = self._decode_for_write(reg, reg_values)
                 await self._coordinator.async_write_register(reg, decoded)
+                _LOGGER.info(
+                    "Proxy: write-multiple reg %d = %s (external)", start_addr, decoded,
+                )
                 return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
             except Exception as err:
                 _LOGGER.warning(
@@ -373,7 +455,6 @@ class ModbusTcpProxyServer:
                 )
                 return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
-        # Unknown register → forward raw write to inverter
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)
         if raw_result:
             return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)

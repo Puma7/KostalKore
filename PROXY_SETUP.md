@@ -206,19 +206,49 @@ kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 | **Admin protection** | `modbus_enable`, `unit_id`, `byte_order` read-only via MQTT |
 | **NaN/Infinity guard** | Rejected at MQTT, coordinator, and client layers |
 | **Value validation** | Type check + numeric conversion before write |
+| **Write-Arbitration** | Batterie-Register blockiert wenn SoC-Controller aktiv |
+
+## Write-Arbitration (Multi-Client-Schutz)
+
+Wenn der interne **SoC-Controller** aktiv ist (Ziel-SoC gesetzt), werden externe
+Schreibzugriffe auf Batterie-Register **blockiert**:
+
+```
+evcc schreibt REG 1034 ──► Proxy
+                            │
+                     SoC Controller aktiv?
+                            │
+                       JA → Modbus Exception 0x06 (Server Device Busy)
+                            + Log: "REJECTED write to reg 1034"
+                            → evcc erkennt Fehler, retried später
+                            │
+                      NEIN → Write durchgeleitet ✅
+```
+
+**Betroffene Register:** 1034, 1038, 1040, 1042, 1044, 1280, 1282, 1284, 1286, 1288
+
+**Lösung bei Konflikten:**
+1. SoC-Controller auf 0 setzen (Automatik) → externe Writes wieder möglich
+2. Oder: evcc-Template so konfigurieren, dass es den SoC-Controller via HA-API steuert
 
 ## Troubleshooting
 
-### evcc shows no data
-- Check `kostal_plenticore/{SERIAL}/modbus/available` → should be `online`
-- Verify MQTT broker is reachable from both HA and evcc
-- Check HA logs for `MQTT proxy bridge started`
+### evcc zeigt keine Daten
+- Proxy aktiv? → HA-Logs: `Modbus TCP proxy started on port 5502`
+- evcc zeigt auf HA-IP:5502 (nicht auf Wechselrichter-IP:1502)?
+- "not a SunSpec device" → Proxy leitet SunSpec-Register (40000+) weiter, prüfe Verbindung
 
-### Write commands are ignored
-- Check HA logs for `Rate-limited` messages (wait 1 second between writes)
-- Verify battery management mode is `External via MODBUS` in inverter web UI
-- Check if register is in the protected list (modbus_enable, unit_id, byte_order)
+### evcc Schreibfehler "Server Device Busy" (0x06)
+- Der SoC-Controller ist aktiv → setze `number.XXX_battery_target_soc` auf 0
+- Prüfe HA-Logs nach `REJECTED write` Meldungen
 
-### Values seem wrong
-- Check endianness: auto-detection reads register 5 from the inverter
-- Verify the inverter's Modbus byte order setting matches (little-endian CDAB is default)
+### MQTT Bridge zeigt keine Daten
+- Prüfe ob MQTT Bridge in den Integrationsoptionen aktiviert ist
+- `kostal_plenticore/{SERIAL}/modbus/available` → `online`?
+- MQTT Broker erreichbar von HA und evcc?
+
+### Batterie reagiert nicht auf Steuerbefehle
+- Externe Batteriesteuerung aktiv? → WR-WebUI → Service → Batterie → "Extern über Protokoll"
+- G3-Bug: REG 1080 meldet immer 0, Schreibtest: REG 1034 = 0 → Readback prüfen
+- Vorzeichen korrekt? REG 1034: **NEGATIV** = Laden, **POSITIV** = Entladen
+- Keepalive aktiv? Wert muss alle 15-30s neu geschrieben werden (Deadman-Switch)

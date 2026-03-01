@@ -102,12 +102,12 @@ class PhaseResult:
 DEFAULT_PHASES: Final[list[TestPhase]] = [
     TestPhase("Netzladung 1 kW", 1000, 300,
               "Batterie lädt mit 1 kW aus dem Netz"),
-    TestPhase("Netzladung 5 kW", 5000, 180,
-              "Batterie lädt mit 5 kW aus dem Netz"),
+    TestPhase("Netzladung 5 kW", 5000, 240,
+              "Batterie lädt mit 5 kW aus dem Netz (4min für Ramp-Up)"),
     TestPhase("Netzentladung 1 kW", -1000, 300,
               "Batterie entlädt 1 kW ins Netz"),
-    TestPhase("Netzentladung 5 kW", -5000, 180,
-              "Batterie entlädt 5 kW ins Netz"),
+    TestPhase("Netzentladung 5 kW", -5000, 240,
+              "Batterie entlädt 5 kW ins Netz (4min für Ramp-Up)"),
 ]
 
 
@@ -232,12 +232,13 @@ class BatteryTestSuite:
 
         try:
             self._emit("═" * 60)
-            self._emit("BATTERIE-TEST v4 (evcc-kompatible Strategie)")
+            self._emit("BATTERIE-TEST v5 (evcc-kompatibel, kein Reset zwischen Phasen)")
             self._emit("═" * 60)
             self._emit("  Laden:    REG 1034 = -Watt (Kostal §3.4: negativ=Laden)")
             self._emit("  Entladen: REG 1034 = +Watt, REG 1038 = 0 (Laden blockiert)")
             self._emit("  Normal:   REG 1034 = 0")
             self._emit(f"  Keepalive: alle {KEEPALIVE_INTERVAL:.0f}s")
+            self._emit("  Phasen-Übergang: DIREKT (kein Reset, WR bleibt aktiv)")
             self._emit(f"  Debug-Log: {self._debug_path}")
             self._emit("")
 
@@ -259,6 +260,24 @@ class BatteryTestSuite:
                 if self._abort_requested:
                     self._emit("⚠️  Abbruch")
                     break
+
+                # Check inverter state before each phase
+                inv_state = await self._rd("inverter_state")
+                if inv_state is not None:
+                    try:
+                        si = int(inv_state)
+                        if si in (0, 1, 10, 15):
+                            self._emit(f"  ⚠️  WR ist State={si} (nicht aktiv)")
+                            if phase.power_w < 0:
+                                self._emit("  ⏭️  Entlade-Phase übersprungen (WR nicht im FeedIn)")
+                                results.append(PhaseResult(
+                                    phase=phase, success=False,
+                                    abort_reason=f"WR nicht aktiv (State={si}), Entladung nicht möglich",
+                                ))
+                                continue
+                    except (TypeError, ValueError):
+                        pass
+
                 self._emit("")
                 self._emit(f"{'━' * 60}")
                 self._emit(f"PHASE {i}/{len(phases)}: {phase.name}")
@@ -273,10 +292,11 @@ class BatteryTestSuite:
                 icon = "✅" if r.power_match else "⚠️"
                 self._emit(f"{icon} Ist: {r.avg_actual_power:+.0f}W | Writes: {r.keepalive_writes}x")
 
-                await self._write_normal()
+                # NO reset between phases! Direct transition to keep WR active.
+                # Reset only happens in the finally block at the very end.
                 if i < len(phases):
-                    self._emit("  ⏳ 15s...")
-                    await asyncio.sleep(15)
+                    self._emit("  ⏩ Direkter Übergang zur nächsten Phase (kein Reset)")
+                    await asyncio.sleep(3)
 
         finally:
             await self._write_normal()

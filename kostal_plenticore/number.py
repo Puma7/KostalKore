@@ -1491,6 +1491,18 @@ async def async_setup_entry(
             async_add_entities(modbus_entities)
             _LOGGER.info("Added %d Modbus number entities", len(modbus_entities))
 
+        # SoC Controller entities (Target SoC, Max Charge/Discharge Power)
+        soc_ctrl = modbus_data.get("soc_controller")
+        if soc_ctrl is not None:  # pragma: no cover
+            from .soc_controller_entities import create_soc_controller_entities
+
+            soc_entities = create_soc_controller_entities(
+                soc_ctrl, entry.entry_id, plenticore.device_info
+            )
+            if soc_entities:
+                async_add_entities(soc_entities)
+                _LOGGER.info("Added %d SoC controller entities", len(soc_entities))
+
 
 class PlenticoreDataNumber(
     CoordinatorEntity[SettingDataUpdateCoordinator], NumberEntity
