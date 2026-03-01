@@ -409,5 +409,55 @@ data:
 
 ---
 
+## 🎯 Battery SoC Controller (Automatische Lade-/Entladesteuerung)
+
+### Entities
+
+| Entity | Typ | Beschreibung |
+|--------|-----|-------------|
+| `number.XXX_battery_target_soc` | Slider 0-95% | Ziel-SoC (0 = aus) |
+| `number.XXX_battery_max_charge_power_soc_ctrl` | Box 100-20000W | Max. Ladeleistung |
+| `number.XXX_battery_max_discharge_power_soc_ctrl` | Box 100-20000W | Max. Entladeleistung |
+
+### Bedienung
+
+```yaml
+# Batterie auf 80% laden:
+service: number.set_value
+target:
+  entity_id: number.YOUR_INVERTER_battery_target_soc
+data:
+  value: 80
+
+# Batterie auf 30% entladen:
+service: number.set_value
+target:
+  entity_id: number.YOUR_INVERTER_battery_target_soc
+data:
+  value: 30
+
+# Controller stoppen:
+service: number.set_value
+target:
+  entity_id: number.YOUR_INVERTER_battery_target_soc
+data:
+  value: 0
+```
+
+### Sicherheit
+
+- **SoC-Bereich:** 10-95% (schützt Batterie vor Tiefentladung/Überladung)
+- **SoC-Sprung-Schutz:** Direktionaler Vergleich (Laden stoppt bei SoC ≥ Ziel, Entladen bei SoC ≤ Ziel)
+- **Temperatur-Pause:** Bei >48°C wird automatisch pausiert
+- **WR-Status:** Pausiert wenn WR nicht aktiv (State 0/1/10/15)
+- **Keepalive:** Alle 15s (Deadman-sicher)
+- **Reset:** Immer auf Automatik bei Stop/Fehler/Ziel erreicht
+
+### Proxy Write-Arbitration
+
+Wenn der SoC-Controller aktiv ist, werden externe Batterie-Writes (z.B. von evcc) **blockiert** mit Modbus Exception 0x06 (Server Device Busy). Das verhindert Steuerungskonflikte.
+
+---
+
 *For detailed information, see `DEVELOPMENT_GUIDE.md`*
 

@@ -74,17 +74,47 @@
 
 3. **Startup-Optimierung: Modbus Device Info vor REST Settings** -- Modbus Register 34 (String Count) ist sofort verfügbar, REST Properties:StringCnt kann bei Last timeoutsen.
 
+### Batterie-Steuerung Learnings (v2.15.0, März 2026)
+
+11. **Kostal Vorzeichenkonvention ist invertiert** (§3.4 Note 1): Register 1034: **NEGATIV = Laden, POSITIV = Entladen**. Das Gegenteil der intuitiven Konvention. Aus der offiziellen Doku: *"Negative values will charge the battery, positive values will discharge the battery."*
+
+12. **Deadman-Switch / Totmann-Schalter** -- Der Kostal G3 setzt externe Batterie-Steuerwerte nach ~60s zurück wenn sie nicht zyklisch neu geschrieben werden. Keepalive muss **VOR** langsamen I/O-Operationen laufen, nicht danach. Monitoring-Reads (17 Register × 500ms = 8.5s) verschieben den nächsten Keepalive um die Lesezeit.
+
+13. **G3 Fallback-Timer (REG 1288) nicht beschreibbar** -- Auf manchen Firmware-Versionen gibt Register 1288 "Server device failure" (0x04) zurück. Der Timer muss über häufigere Keepalive-Writes kompensiert werden statt den Timer zu verlängern.
+
+14. **G3 Firmware-Bug: REG 1080 meldet immer 0** -- `battery_mgmt_mode` zeigt "keine externe Steuerung" obwohl externe Steuerung aktiv ist. Register-Writes werden trotzdem akzeptiert. Der Schreibtest (Write + Readback) ist der einzige zuverlässige Indikator.
+
+15. **Pylontech SoC-Sprünge** -- Die Pylontech Force H meldet SoC-Werte manchmal verspätet und springt dann (z.B. 18% → 9%). Stopp-Logik muss **direktional** sein: "Laden stoppt bei SoC ≥ Ziel" statt "SoC == Ziel ±1%".
+
+16. **WR schaltet nachts ab bei REG 1034 = 0** -- Ohne aktiven Steuerbefehl UND ohne PV geht der Wechselrichter in Standby (State=0). Zwischen Lade- und Entladephasen darf KEIN Reset auf 0 erfolgen — direkter Übergang von Laden auf Entladen.
+
+17. **Batterie Ramp-Up dauert 2.5 Minuten** -- Die Pyontech Force H regelt die Ladeleistung graduell hoch. Bei 5kW: Start ~500W, nach 2.5min erst 5000W. Testphasen müssen lang genug sein.
+
+18. **evcc nutzt KEINE G3-Register (1280/1282)** -- Analysiert aus dem evcc-Quellcode (`kostal-plenticore-gen2.yaml`). evcc verwendet nur REG 1034 (Laden/Normal) und REG 1040 (Entladung blockieren). Kein Mode 4 "Force Discharge".
+
+19. **evcc verwendet SunSpec für Reads** -- PV-Leistung via SunSpec 160:DCW, Batterie via SunSpec 802:W/SoC. Diese Register liegen bei Adresse 40000+ und müssen vom Proxy transparent weitergeleitet werden.
+
+20. **Multi-Client-Arbitration erforderlich** -- Wenn der interne SoC-Controller UND evcc gleichzeitig Batterie-Register schreiben, entstehen Konflikte. Lösung: Proxy blockt externe Writes mit Modbus Exception 0x06 (Server Device Busy) wenn der interne Controller aktiv ist.
+
+### Proxy/evcc Learnings
+
+21. **evcc `float32s` = CDAB (Little-Endian Swapped)** -- Float32 mit getauschten 16-Bit-Wörtern. Unser `_encode` macht genau das: `pack(">f", val)` → Wörter tauschen → `pack(">HH", lo, hi)`.
+
+22. **evcc Watchdog = 60s, Re-Write bei timeout/2 = 30s** -- Aus dem Template: `timeout: 60s`, `source: watchdog`. Unser Keepalive bei 15s ist konservativ und sicher.
+
+23. **SunSpec-Erkennung zwingend für evcc** -- evcc liest zuerst SunSpec-Header (ab 40000). Ohne diese Forwards meldet evcc "not a SunSpec device". Der Proxy muss Cache-Misses transparent an den Wechselrichter weiterleiten.
+
 ### Projekt-Statistiken
 
 | Metrik | Wert |
 |---|---|
-| Neue Dateien | 42 |
-| Neue Codezeilen | ~8.500 |
-| Tests | 348 |
+| Neue Dateien | 48 |
+| Neue Codezeilen | ~11.000 |
+| Tests | 375 |
 | Test Coverage | 100% |
-| mypy Errors | 0 (30 Dateien) |
+| mypy Errors | 0 (40 Dateien) |
 | pyright Errors | 0 |
-| Releases | v2.5.0 → v2.9.0 (5 Minor, 3 Patch) |
+| Releases | v2.5.0 → v2.15.0 |
 | Modbus Register | 90+ |
-| HA Entities (Modbus) | 8 Number + 2 Button + 10 Health Sensor + 11 Binary Sensor + 5 Diagnose + 3 Longevity + 2 Fire Safety Sensor + 4 Fire Safety Binary |
+| HA Entities (Modbus) | 8 Number + 3 Button + 3 SoC Controller + 10 Health + 11 Binary + 5 Diagnose + 3 Longevity + 2 Fire Safety + 4 Fire Safety Binary |
 | Safety Fixes | 5 CRITICAL + 5 HIGH |

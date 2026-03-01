@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] - 2026-03-01
+
+### Added
+- **Modbus TCP Proxy Server** (`modbus_proxy.py`) — Lokaler TCP-Proxy (Port 5502) für evcc und andere externe Systeme. Nur EINE Modbus-Verbindung zum Wechselrichter nötig.
+  - Cache-Hit: Bekannte Register sofort aus dem Coordinator-Cache
+  - Cache-Miss: SunSpec-Register (40000+) transparent an den Wechselrichter weitergeleitet
+  - **Write-Arbitration**: Batterie-Register werden blockiert wenn der interne SoC-Controller aktiv ist (Modbus Exception 0x06 = Server Device Busy)
+  - Konfigurierbar über HA-Oberfläche (Proxy aktivieren + Port)
+- **Battery SoC Controller** (`battery_soc_controller.py`) — Automatische Lade-/Entladesteuerung auf einen Ziel-SoC.
+  - `number.XXX_battery_target_soc` — Slider 10-95%
+  - `number.XXX_battery_max_charge_power` — Max. Ladeleistung (W)
+  - `number.XXX_battery_max_discharge_power` — Max. Entladeleistung (W)
+  - Sichere Stopp-Logik: Direktionaler Vergleich verhindert Überschießen bei Pylontech SoC-Sprüngen
+  - Automatischer Reset auf Automatik-Modus bei Ziel, Fehler oder Stopp
+- **Battery Test Suite** (`battery_test.py`) — 4-Phasen Lade-/Entladetest mit Pre-Flight-Checks, Live-Monitoring, Keepalive und Debug-Log-Datei.
+  - Pre-Flight: WR-Kapazität, HW-Limits, SoC, Temperatur, Hauslast, Isolation
+  - Live-Monitoring: Direkter Register-Read alle 10s, Safety-Abbruch
+  - Debug-Log: `battery_test_debug.log` mit jedem Register-Read/Write
+- **Modbus Batterie-Steuerungsdoku** in `QUICK_REFERENCE.md` — Register-Tabelle, 3 Steuerungsmethoden, evcc-Konfigurationsbeispiele, HA-Automationsbeispiele
+- **evcc-Anbindungsdoku** in `PROXY_SETUP.md` — Komplett überarbeitete Anleitung für Modbus TCP Proxy und MQTT Bridge
+
+### Changed
+- **Version** von 2.14.3 auf 2.15.0
+- **Power Meter Voltage** — Zeigt jetzt 1 Nachkommastelle statt gerundeter ganzer Zahlen
+- **DC-String Vergleich** — Nutzt `num_bidirectional` (Modbus Register 30) um DC3 als Batterie zu erkennen und aus PV-Vergleichen auszuschließen
+- **Battery SoH 0%** — Wird als "nicht verfügbar" behandelt statt als kritische Warnung
+
+### Fixed
+- **Falsche DC-String Sicherheitswarnungen** — Verschiedene String-Ausrichtungen (Süd/Nord, Y-Adapter) lösen keine Fehlalarme mehr aus. Ratio-Learning erkennt stabile Leistungsverhältnisse.
+- **Batterie-Steuerung: Vorzeichenkonvention** (Kostal §3.4) — Register 1034: negativ=Laden, positiv=Entladen. War invertiert implementiert.
+- **Batterie-Steuerung: Deadman-Switch** — Keepalive läuft jetzt VOR den langsamen Monitor-Reads. Intervall 15s statt 25s. Verhindert Timeout des G3-Fallback-Timers.
+- **G3 Firmware-Bug REG 1080** — `battery_mgmt_mode` meldet immer 0 obwohl externe Steuerung aktiv. Herabgestuft zu Warnung, Schreibtest ist der echte Gate-Keeper.
+- **Batterie-Test: WR-Abschaltung bei Phasenwechsel** — Kein Reset zwischen Phasen, direkter Übergang verhindert Standby-Abschaltung des WR bei Nacht.
+
 ## [2.9.0] - 2026-02-26
 
 ### Added
