@@ -1,5 +1,18 @@
 # Release Notes
 
+## v2.16.0-alpha.1 (Experimental)
+
+This is the first **experimental alpha release** for HACS rollout preparation.
+
+- Added HACS release metadata (`hacs.json`), explicit MIT license, and updated manifest metadata.
+- Hardened external write channels (Modbus proxy + MQTT bridge) with installer-access checks.
+- Introduced proxy bind-address hardening (`127.0.0.1` default) to reduce network exposure.
+- Replaced fixed high power defaults with inverter-aware dynamic limits.
+- Added adaptive 50/60Hz and 120/230V diagnostic profiles for broader worldwide compatibility.
+- Fixed `num_bidirectional` device-info polling to improve topology handling.
+
+> Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
+
 ## v2.4.1
 
 Hotfix for calculation accuracy and test coverage.

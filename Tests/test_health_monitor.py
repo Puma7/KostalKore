@@ -116,6 +116,22 @@ class TestInverterHealthMonitor:
         assert m.grid_frequency.current == 50.01
         assert m.battery_cycles.current == 150.0
 
+    def test_grid_thresholds_adapt_to_60hz(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"grid_frequency": 60.1})
+        assert m.grid_frequency.level == HealthLevel.GOOD
+
+    def test_voltage_thresholds_adapt_to_120v(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus(
+            {
+                "phase1_voltage": 121.0,
+                "phase2_voltage": 119.0,
+                "phase3_voltage": 122.0,
+            }
+        )
+        assert m.phase1_voltage.level == HealthLevel.GOOD
+
     def test_update_from_modbus_skips_none(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({})

@@ -32,6 +32,8 @@ keine Custom-Meter-Konfiguration nötig.
 - Modbus in der Integration aktiviert (Einstellungen → Geräte → Kostal → Konfigurieren)
 - **Modbus-Proxy aktiviert** in der gleichen Konfiguration
 - Proxy-Port: Standard 5502 (frei wählbar)
+- Proxy-Bind-Adresse: Standard `127.0.0.1` (empfohlen), nur bei Bedarf auf LAN-IP/`0.0.0.0` setzen
+- Für Batterie-Schreibzugriffe ist ein hinterlegter Installer-/Service-Code erforderlich
 
 ### 2. evcc konfigurieren
 
@@ -108,6 +110,7 @@ Steuerungsbefehle über MQTT.
 - MQTT Broker (z.B. Mosquitto)
 - MQTT Integration in Home Assistant konfiguriert
 - Modbus aktiviert + MQTT Bridge aktiviert in den Integrationsoptionen
+- Für Batterie-Schreibzugriffe ist ein hinterlegter Installer-/Service-Code erforderlich
 
 ### 2. evcc mit MQTT konfigurieren (Alternative)
 
@@ -204,6 +207,7 @@ kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 | **Command serialization** | Async lock prevents concurrent Modbus writes |
 | **Source tracking** | Every command logged with origin (proxy/evcc, mqtt/command) |
 | **Admin protection** | `modbus_enable`, `unit_id`, `byte_order` read-only via MQTT |
+| **Installer protection** | Batterie-Schreibregister nur mit Service-Code |
 | **NaN/Infinity guard** | Rejected at MQTT, coordinator, and client layers |
 | **Value validation** | Type check + numeric conversion before write |
 | **Write-Arbitration** | Batterie-Register blockiert wenn SoC-Controller aktiv |
@@ -234,7 +238,7 @@ evcc schreibt REG 1034 ──► Proxy
 ## Troubleshooting
 
 ### evcc zeigt keine Daten
-- Proxy aktiv? → HA-Logs: `Modbus TCP proxy started on port 5502`
+- Proxy aktiv? → HA-Logs: `Modbus TCP proxy started on 127.0.0.1:5502` (oder konfigurierter Bind/Port)
 - evcc zeigt auf HA-IP:5502 (nicht auf Wechselrichter-IP:1502)?
 - "not a SunSpec device" → Proxy leitet SunSpec-Register (40000+) weiter, prüfe Verbindung
 

@@ -148,10 +148,27 @@ class TestFireSafetyMonitor:
         alerts = m.analyze({"grid_frequency": 47.0, "inverter_state": 6})
         assert any(a.category == "grid_emergency" for a in alerts)
 
+    def test_grid_frequency_60hz_profile_no_emergency(self) -> None:
+        m = FireSafetyMonitor()
+        alerts = m.analyze({"grid_frequency": 60.2, "inverter_state": 6})
+        assert not any(a.category == "grid_emergency" for a in alerts)
+
     def test_phase_voltage_extreme(self) -> None:
         m = FireSafetyMonitor()
         alerts = m.analyze({"phase1_voltage": 280.0, "inverter_state": 6})
         assert any(a.category == "voltage_extreme" for a in alerts)
+
+    def test_phase_voltage_120v_profile_no_extreme(self) -> None:
+        m = FireSafetyMonitor()
+        alerts = m.analyze(
+            {
+                "phase1_voltage": 120.0,
+                "phase2_voltage": 122.0,
+                "phase3_voltage": 119.0,
+                "inverter_state": 6,
+            }
+        )
+        assert not any(a.category == "voltage_extreme" for a in alerts)
 
     def test_multiple_hazards(self) -> None:
         m = FireSafetyMonitor()

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0-alpha.1] - 2026-03-01
+
+### Added
+- **HACS Alpha Release Metadata**: `hacs.json`, explicit `LICENSE`, updated manifest links (`documentation`, `issue_tracker`) and minimum Home Assistant version metadata.
+- **Proxy Security Hardening**:
+  - New option `modbus_proxy_bind` (default `127.0.0.1`) to avoid accidental network-wide exposure.
+  - Installer access is now required for battery-control writes via Modbus proxy and MQTT bridge.
+- **Worldwide Grid Profile Adaptation**:
+  - Fire safety, health monitor and diagnostics now adapt thresholds to detected **50/60Hz** and **120/230V** profiles.
+- **Inverter-size-aware control limits**:
+  - New `power_limits.py` helper to derive safe limits from `inverter_max_power` instead of fixed 20kW assumptions.
+
+### Changed
+- **SoC Controller / charge blocking / feed-in optimizer** now clamp and restore power limits based on inverter capabilities.
+- **Modbus device info polling** now includes `num_bidirectional` for better DC3/battery topology handling.
+- **Version** bumped from `2.15.0` to experimental `2.16.0-alpha.1`.
+
+### Fixed
+- Removed fixed 20kW restore values in several control paths that could conflict with small inverters (e.g. 1kW/3kW/5kW systems).
+- Modbus proxy FC16 arbitration now checks range overlap for protected battery registers (not only start address).
+
 ## [2.15.0] - 2026-03-01
 
 ### Added

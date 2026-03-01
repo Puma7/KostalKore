@@ -1,0 +1,8 @@
+{
+  "name": "KOSTAL KORE (Experimental Alpha)",
+  "domains": [
+    "kostal_plenticore"
+  ],
+  "homeassistant": "2024.1.0",
+  "render_readme": true
+}
