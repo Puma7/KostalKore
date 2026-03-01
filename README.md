@@ -107,9 +107,9 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 2. Restart Home Assistant
 3. The integration will be available for configuration
 
-## Migration from old `kostal_plenticore` plugin (two-step flow)
+## Migration from `kostal_plenticore` plugin (two-step flow)
 
-If you previously used the old `kostal_plenticore` integration:
+If you previously used the `kostal_plenticore` integration:
 
 1. Install and set up `KOSTAL KORE` first (new entry in Home Assistant).
 2. Open the KOSTAL KORE device and click **Import Legacy Plenticore Data**.
