@@ -241,7 +241,15 @@ async def test_setup_entry_modbus_enabled_success(
     with patch(
         "custom_components.kostal_kore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
         new_callable=AsyncMock,
+    ), patch(
+        "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+    ) as mock_soc_controller, patch(
+        "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+        new=AsyncMock(return_value=True),
     ):
+        mock_soc = MagicMock()
+        mock_soc.stop = AsyncMock()
+        mock_soc_controller.return_value = mock_soc
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
@@ -280,7 +288,17 @@ async def test_setup_entry_modbus_auto_endianness(
             new_callable=AsyncMock,
             return_value="little",
         ) as mock_detect,
+        patch(
+            "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+        ) as mock_soc_controller,
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+            new=AsyncMock(return_value=True),
+        ),
     ):
+        mock_soc = MagicMock()
+        mock_soc.stop = AsyncMock()
+        mock_soc_controller.return_value = mock_soc
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
@@ -318,7 +336,17 @@ async def test_setup_entry_mqtt_bridge_enabled(
             "custom_components.kostal_kore.mqtt_bridge.KostalMqttBridge.async_start",
             new_callable=AsyncMock,
         ) as mock_start,
+        patch(
+            "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+        ) as mock_soc_controller,
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+            new=AsyncMock(return_value=True),
+        ),
     ):
+        mock_soc = MagicMock()
+        mock_soc.stop = AsyncMock()
+        mock_soc_controller.return_value = mock_soc
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
