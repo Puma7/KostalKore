@@ -1,41 +1,44 @@
 [run]
 branch = True
-source = kostal_plenticore
+source = custom_components/kostal_kore
 omit =
-    kostal_plenticore/coordinator.py
-    kostal_plenticore/number.py
-    kostal_plenticore/sensor.py
-    kostal_plenticore/switch.py
-    kostal_plenticore/modbus_client.py
-    kostal_plenticore/modbus_coordinator.py
-    kostal_plenticore/health_monitor.py
-    kostal_plenticore/health_sensor.py
-    kostal_plenticore/health_binary_sensor.py
-    kostal_plenticore/fire_safety.py
-    kostal_plenticore/fire_safety_entities.py
-    kostal_plenticore/diagnostics_engine.py
-    kostal_plenticore/diagnostic_entities.py
-    kostal_plenticore/battery_chemistry.py
-    kostal_plenticore/longevity_advisor.py
-    kostal_plenticore/longevity_entities.py
-    kostal_plenticore/live_test.py
-    kostal_plenticore/notifications.py
-    kostal_plenticore/degradation_tracker.py
-    kostal_plenticore/degradation_entities.py
-    kostal_plenticore/request_scheduler.py
-    kostal_plenticore/scheduled_session.py
-    kostal_plenticore/binary_sensor.py
-    kostal_plenticore/modbus_button.py
-    kostal_plenticore/modbus_number.py
-    kostal_plenticore/modbus_test.py
-    kostal_plenticore/mqtt_bridge.py
-    kostal_plenticore/modbus_proxy.py
-    kostal_plenticore/battery_test.py
-    kostal_plenticore/battery_soc_controller.py
-    kostal_plenticore/soc_controller_entities.py
-    kostal_plenticore/charge_block_switch.py
-    kostal_plenticore/grid_charge_limiter.py
-    kostal_plenticore/button.py
+    custom_components/kostal_kore/coordinator.py
+    custom_components/kostal_kore/number.py
+    custom_components/kostal_kore/sensor.py
+    custom_components/kostal_kore/switch.py
+    custom_components/kostal_kore/modbus_client.py
+    custom_components/kostal_kore/modbus_coordinator.py
+    custom_components/kostal_kore/health_monitor.py
+    custom_components/kostal_kore/health_sensor.py
+    custom_components/kostal_kore/health_binary_sensor.py
+    custom_components/kostal_kore/fire_safety.py
+    custom_components/kostal_kore/fire_safety_entities.py
+    custom_components/kostal_kore/diagnostics_engine.py
+    custom_components/kostal_kore/diagnostic_entities.py
+    custom_components/kostal_kore/battery_chemistry.py
+    custom_components/kostal_kore/longevity_advisor.py
+    custom_components/kostal_kore/longevity_entities.py
+    custom_components/kostal_kore/live_test.py
+    custom_components/kostal_kore/notifications.py
+    custom_components/kostal_kore/degradation_tracker.py
+    custom_components/kostal_kore/degradation_entities.py
+    custom_components/kostal_kore/request_scheduler.py
+    custom_components/kostal_kore/scheduled_session.py
+    custom_components/kostal_kore/binary_sensor.py
+    custom_components/kostal_kore/modbus_button.py
+    custom_components/kostal_kore/modbus_number.py
+    custom_components/kostal_kore/modbus_test.py
+    custom_components/kostal_kore/mqtt_bridge.py
+    custom_components/kostal_kore/modbus_proxy.py
+    custom_components/kostal_kore/battery_test.py
+    custom_components/kostal_kore/battery_soc_controller.py
+    custom_components/kostal_kore/soc_controller_entities.py
+    custom_components/kostal_kore/charge_block_switch.py
+    custom_components/kostal_kore/grid_charge_limiter.py
+    custom_components/kostal_kore/button.py
+    custom_components/kostal_kore/config_flow.py
+    custom_components/kostal_kore/legacy_migration.py
+    custom_components/kostal_kore/power_limits.py
 
 [report]
 show_missing = True

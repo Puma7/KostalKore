@@ -3,7 +3,7 @@
 ## Cursor Cloud specific instructions
 
 ### Project overview
-Home Assistant custom integration for Kostal Plenticore solar inverters (`kostal_plenticore/`). Pure Python, no Docker/DB/external services needed. All hardware interactions are mocked in tests.
+Home Assistant custom integration for Kostal solar inverters (`kostal_kore/` package mapped from `custom_components/kostal_kore/`). Pure Python, no Docker/DB/external services needed. All hardware interactions are mocked in tests.
 
 ### Test directory case sensitivity
 The test directory is `Tests/` (uppercase T) but `pytest.ini` references `testpaths = tests` (lowercase). On Linux (case-sensitive) a symlink `tests -> Tests` must exist at the workspace root. The update script creates this automatically.
@@ -13,12 +13,12 @@ The test directory is `Tests/` (uppercase T) but `pytest.ini` references `testpa
 source .venv/bin/activate
 python -m pytest Tests/ -v --timeout=60
 ```
-375 tests should pass with 100% coverage. 3 known errors in `test_modbus_integration.py` (`test_setup_entry_modbus_enabled_success`, `test_setup_entry_modbus_auto_endianness`, `test_setup_entry_mqtt_bridge_enabled`) are pre-existing "Lingering timer" fixture teardown issues. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list).
+The suite currently collects about 412 tests. 3 known errors in `test_modbus_integration.py` (`test_setup_entry_modbus_enabled_success`, `test_setup_entry_modbus_auto_endianness`, `test_setup_entry_mqtt_bridge_enabled`) are pre-existing "Lingering timer" fixture teardown issues. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list).
 
 ### Type checking
 ```bash
 source .venv/bin/activate
-python -m mypy kostal_plenticore/
+python -m mypy custom_components/kostal_kore/
 ```
 Uses strict mode per `mypy.ini`. Should report zero issues.
 

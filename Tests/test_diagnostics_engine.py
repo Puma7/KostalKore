@@ -59,6 +59,12 @@ class TestACDiagnostics:
         d = e.diagnose_ac_grid()
         assert d.status == DiagStatus.KRITISCH
 
+    def test_ac_ok_60hz_profile(self) -> None:
+        e = _make_engine()
+        e._health.update_from_modbus({"grid_frequency": 60.1})
+        d = e.diagnose_ac_grid()
+        assert d.status == DiagStatus.OK
+
     def test_ac_warnung_voltage(self) -> None:
         e = _make_engine()
         e._health.update_from_modbus({"phase1_voltage": 262.0, "phase2_voltage": 230.0, "phase3_voltage": 230.0})
@@ -70,6 +76,14 @@ class TestACDiagnostics:
         e._health.update_from_modbus({"phase1_voltage": 254.0, "phase2_voltage": 230.0, "phase3_voltage": 230.0})
         d = e.diagnose_ac_grid()
         assert d.status == DiagStatus.HINWEIS
+
+    def test_ac_ok_120v_profile(self) -> None:
+        e = _make_engine()
+        e._health.update_from_modbus(
+            {"phase1_voltage": 120.0, "phase2_voltage": 122.0, "phase3_voltage": 119.0}
+        )
+        d = e.diagnose_ac_grid()
+        assert d.status == DiagStatus.OK
 
 
 class TestBatteryDiagnostics:

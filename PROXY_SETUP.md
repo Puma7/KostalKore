@@ -1,11 +1,11 @@
-# Kostal Plenticore Proxy – evcc & externe Systeme anbinden
+# KOSTAL KORE Proxy – evcc & externe Systeme anbinden
 
 ## Architektur
 
 ```
                              ┌─── Home Assistant (HA entities)
                              │
-Kostal Inverter ◄──Modbus TCP (exklusiv)──► Kostal Plenticore Integration
+Kostal Inverter ◄──Modbus TCP (exklusiv)──► KOSTAL KORE Integration
   (port 1502)                                  │
                                 ┌──────────────┼──────────────┐
                                 │              │              │
@@ -32,6 +32,8 @@ keine Custom-Meter-Konfiguration nötig.
 - Modbus in der Integration aktiviert (Einstellungen → Geräte → Kostal → Konfigurieren)
 - **Modbus-Proxy aktiviert** in der gleichen Konfiguration
 - Proxy-Port: Standard 5502 (frei wählbar)
+- Proxy-Bind-Adresse: Standard `127.0.0.1` (empfohlen), nur bei Bedarf auf LAN-IP/`0.0.0.0` setzen
+- Für Batterie-Schreibzugriffe ist ein hinterlegter Installer-/Service-Code erforderlich
 
 ### 2. evcc konfigurieren
 
@@ -108,6 +110,7 @@ Steuerungsbefehle über MQTT.
 - MQTT Broker (z.B. Mosquitto)
 - MQTT Integration in Home Assistant konfiguriert
 - Modbus aktiviert + MQTT Bridge aktiviert in den Integrationsoptionen
+- Für Batterie-Schreibzugriffe ist ein hinterlegter Installer-/Service-Code erforderlich
 
 ### 2. evcc mit MQTT konfigurieren (Alternative)
 
@@ -119,32 +122,32 @@ meters:
   type: custom
   power:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/pv_power
+    topic: kostal_kore/{SERIAL}/proxy/pv_power
   energy:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/modbus/register/total_yield
+    topic: kostal_kore/{SERIAL}/modbus/register/total_yield
     scale: 0.001  # Wh → kWh
 
 - name: grid
   type: custom
   power:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/grid_power
+    topic: kostal_kore/{SERIAL}/proxy/grid_power
 
 - name: battery
   type: custom
   power:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/battery_power
+    topic: kostal_kore/{SERIAL}/proxy/battery_power
   soc:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/battery_soc
+    topic: kostal_kore/{SERIAL}/proxy/battery_soc
   batterymode:
     source: watchdog
     timeout: 60s
     set:
       source: mqtt
-      topic: kostal_plenticore/{SERIAL}/proxy/command/battery_charge
+      topic: kostal_kore/{SERIAL}/proxy/command/battery_charge
 ```
 
 `{SERIAL}` durch die Seriennummer des Wechselrichters ersetzen.
@@ -154,15 +157,15 @@ meters:
 MQTT Adapter subscriben auf:
 
 ```
-kostal_plenticore/{SERIAL}/proxy/#     → vereinfachte Werte
-kostal_plenticore/{SERIAL}/modbus/#    → alle Register-Werte
+kostal_kore/{SERIAL}/proxy/#     → vereinfachte Werte
+kostal_kore/{SERIAL}/modbus/#    → alle Register-Werte
 ```
 
 Steuerbefehle schreiben:
 ```
-kostal_plenticore/{SERIAL}/proxy/command/battery_charge    → Ladeleistung (W)
-kostal_plenticore/{SERIAL}/proxy/command/battery_min_soc   → Min SoC (%)
-kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
+kostal_kore/{SERIAL}/proxy/command/battery_charge    → Ladeleistung (W)
+kostal_kore/{SERIAL}/proxy/command/battery_min_soc   → Min SoC (%)
+kostal_kore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 ```
 
 ## MQTT Topic Reference
@@ -204,6 +207,7 @@ kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 | **Command serialization** | Async lock prevents concurrent Modbus writes |
 | **Source tracking** | Every command logged with origin (proxy/evcc, mqtt/command) |
 | **Admin protection** | `modbus_enable`, `unit_id`, `byte_order` read-only via MQTT |
+| **Installer protection** | Batterie-Schreibregister nur mit Service-Code |
 | **NaN/Infinity guard** | Rejected at MQTT, coordinator, and client layers |
 | **Value validation** | Type check + numeric conversion before write |
 | **Write-Arbitration** | Batterie-Register blockiert wenn SoC-Controller aktiv |
@@ -234,7 +238,7 @@ evcc schreibt REG 1034 ──► Proxy
 ## Troubleshooting
 
 ### evcc zeigt keine Daten
-- Proxy aktiv? → HA-Logs: `Modbus TCP proxy started on port 5502`
+- Proxy aktiv? → HA-Logs: `Modbus TCP proxy started on 127.0.0.1:5502` (oder konfigurierter Bind/Port)
 - evcc zeigt auf HA-IP:5502 (nicht auf Wechselrichter-IP:1502)?
 - "not a SunSpec device" → Proxy leitet SunSpec-Register (40000+) weiter, prüfe Verbindung
 
@@ -244,7 +248,7 @@ evcc schreibt REG 1034 ──► Proxy
 
 ### MQTT Bridge zeigt keine Daten
 - Prüfe ob MQTT Bridge in den Integrationsoptionen aktiviert ist
-- `kostal_plenticore/{SERIAL}/modbus/available` → `online`?
+- `kostal_kore/{SERIAL}/modbus/available` → `online`?
 - MQTT Broker erreichbar von HA und evcc?
 
 ### Batterie reagiert nicht auf Steuerbefehle

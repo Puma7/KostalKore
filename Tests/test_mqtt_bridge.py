@@ -204,7 +204,7 @@ class TestCommandHandling:
     async def test_handle_command_json_payload(self) -> None:
         hass = _mock_hass()
         coord = _mock_coordinator()
-        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
         bridge._started = True
 
         msg = MagicMock()
@@ -216,6 +216,20 @@ class TestCommandHandling:
         coord.async_write_register.assert_called_once()
         call_args = coord.async_write_register.call_args
         assert call_args[0][1] == 15.0
+
+    @pytest.mark.asyncio
+    async def test_handle_command_rejects_battery_write_without_installer_access(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=False)
+        bridge._started = True
+
+        msg = MagicMock()
+        msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/bat_min_soc"
+        msg.payload = json.dumps(15.0)
+
+        await bridge._handle_command(msg)
+        coord.async_write_register.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handle_command_malformed_topic(self) -> None:
@@ -321,7 +335,7 @@ class TestProxyCommands:
     async def test_proxy_battery_charge_command(self) -> None:
         hass = _mock_hass()
         coord = _mock_coordinator()
-        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
         bridge._started = True
 
         msg = MagicMock()
@@ -359,7 +373,7 @@ class TestProxyCommands:
     async def test_execute_write_serialized(self) -> None:
         hass = _mock_hass()
         coord = _mock_coordinator()
-        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
 
         from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
         await bridge._execute_write(REG_BAT_MIN_SOC, "50", source="test")

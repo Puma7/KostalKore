@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Markdown documentation sweep**: Synced all maintained `.md` files with current `kostal_kore` naming, migration flow, and access model.
+- **Developer docs refresh**: Updated `QUICK_REFERENCE.md`, `AI_DOCUMENTATION.md`, and `ENTITY_REFERENCE.md` to remove stale paths/versions and align with optional Modbus/MQTT architecture.
+- **Agent runbook refresh**: Updated `AGENTS.md` test-count guidance and mypy path to current repository layout.
+- **Obsolete guide cleanup**: Removed untracked/ignored `custom_components/kostal_kore/DEVELOPMENT_GUIDE.md` and consolidated references to maintained docs.
+
+## [2.16.0-alpha.4] - 2026-03-01
+
+### Added
+- **Two-step legacy migration flow**: New button actions for (1) import/migrate and (2) delayed cleanup.
+- **Registry migration routine**: Added migration logic to rebind entity/device registry records from old entry to new entry.
+- **Migration tests**: Added dedicated tests for legacy migration behavior and button setup coverage.
+
+### Changed
+- **Button platform scope**: Button platform now loads for every entry (migration button always available), while Modbus-only buttons remain conditional.
+- **Docs**: README now includes two-step migration guidance from old plugin.
+- **Docs / provenance**: Added explicit credits and transparency disclosure (thanks to `@stegm`, AI-assisted coding disclosure, manual validation note by `@Puma7`).
+- **Docs / MQTT examples**: Updated `PROXY_SETUP.md` example topic prefix from `kostal_plenticore/...` to `kostal_kore/...`.
+
+## [2.16.0-alpha.2] - 2026-03-01
+
+### Added
+- **First-run setup wizard**: Initial setup now includes a second guided step to directly enable Modbus TCP, MQTT bridge, and Modbus proxy.
+- **Best-effort auto-discovery**: If host/IP is left empty, setup now probes local IPv4 networks for reachable inverter candidates.
+- **Access profile detection**: Setup now stores detected account role and installer-write capability (`access_role`, `installer_access`).
+- **Plugin logo asset**: Added `docs/assets/kostal_kore_logo.svg` and integrated it into `README.md`.
+
+### Changed
+- **Installer gating basis**: Write permission checks now prioritize detected installer access, with service-code fallback for legacy entries.
+- **Integration domain/path branding**: Switched release metadata and package domain to `kostal_kore` and `custom_components/kostal_kore`.
+- **MQTT topic prefix / notifications**: Prefix moved from `kostal_plenticore` to `kostal_kore`.
+
+### Fixed
+- Setup UX now supports both manual host entry and discovery fallback without forcing the user into separate flows.
+- Initial setup can activate Modbus/MQTT/proxy immediately, instead of requiring a post-install options roundtrip.
+
+## [2.16.0-alpha.1] - 2026-03-01
+
+### Added
+- **HACS Alpha Release Metadata**: `hacs.json`, explicit `LICENSE`, updated manifest links (`documentation`, `issue_tracker`) and minimum Home Assistant version metadata.
+- **Proxy Security Hardening**:
+  - New option `modbus_proxy_bind` (default `127.0.0.1`) to avoid accidental network-wide exposure.
+  - Installer access is now required for battery-control writes via Modbus proxy and MQTT bridge.
+- **Worldwide Grid Profile Adaptation**:
+  - Fire safety, health monitor and diagnostics now adapt thresholds to detected **50/60Hz** and **120/230V** profiles.
+- **Inverter-size-aware control limits**:
+  - New `power_limits.py` helper to derive safe limits from `inverter_max_power` instead of fixed 20kW assumptions.
+
+### Changed
+- **SoC Controller / charge blocking / feed-in optimizer** now clamp and restore power limits based on inverter capabilities.
+- **Modbus device info polling** now includes `num_bidirectional` for better DC3/battery topology handling.
+- **Version** bumped from `2.15.0` to experimental `2.16.0-alpha.1`.
+
+### Fixed
+- Removed fixed 20kW restore values in several control paths that could conflict with small inverters (e.g. 1kW/3kW/5kW systems).
+- Modbus proxy FC16 arbitration now checks range overlap for protected battery registers (not only start address).
+
 ## [2.15.0] - 2026-03-01
 
 ### Added
