@@ -9,7 +9,7 @@ from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_SERVICE_CODE
+from .const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE
 from .const_ids import SettingId
 from .repairs import clear_issue, create_installer_required_issue
 
@@ -428,7 +428,13 @@ def ensure_installer_access(
     if not requires_installer:
         return True
 
-    if entry.data.get(CONF_SERVICE_CODE) is None:
+    installer_access = bool(
+        entry.data.get(
+            CONF_INSTALLER_ACCESS,
+            bool(entry.data.get(CONF_SERVICE_CODE)),
+        )
+    )
+    if not installer_access:
         log_fn = getattr(_LOGGER, log_level, _LOGGER.warning)
         log_fn(
             "Installer service code required for %s on %s/%s",

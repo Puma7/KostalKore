@@ -1,4 +1,4 @@
-"""Fixtures for Kostal Plenticore tests."""
+"""Fixtures for KOSTAL KORE tests."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import threading
 import sys
 import os
+from pathlib import Path
 from datetime import timedelta
 from collections.abc import Generator, Iterable
 import copy
@@ -39,30 +40,34 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# Pre-load local kostal_plenticore (Platinum version)
+# Pre-load local integration package and map HA component aliases.
 try:
-    import kostal_plenticore
-    import kostal_plenticore.binary_sensor
-    import kostal_plenticore.button
-    import kostal_plenticore.config_flow
-    import kostal_plenticore.const
-    import kostal_plenticore.coordinator
-    import kostal_plenticore.health_monitor
-    import kostal_plenticore.health_sensor
-    import kostal_plenticore.health_binary_sensor
-    
-    # Patch sys.modules to point 'homeassistant.components.kostal_plenticore' to local version
-    _ha_prefix = "homeassistant.components.kostal_plenticore"
-    sys.modules[_ha_prefix] = kostal_plenticore
+    import custom_components.kostal_kore as kostal_kore
+    import custom_components.kostal_kore.binary_sensor
+    import custom_components.kostal_kore.button
+    import custom_components.kostal_kore.config_flow
+    import custom_components.kostal_kore.const
+    import custom_components.kostal_kore.coordinator
+    import custom_components.kostal_kore.health_monitor
+    import custom_components.kostal_kore.health_sensor
+    import custom_components.kostal_kore.health_binary_sensor
+
+    # Primary component path for new domain.
+    _ha_prefix = "homeassistant.components.kostal_kore"
+    sys.modules[_ha_prefix] = kostal_kore
+    # Backward-compat alias used by legacy tests.
+    sys.modules["homeassistant.components.kostal_plenticore"] = kostal_kore
     for _sub in (
         "binary_sensor", "button", "config_flow", "const", "coordinator",
         "health_monitor", "health_sensor", "health_binary_sensor",
     ):
-        sys.modules[f"{_ha_prefix}.{_sub}"] = getattr(kostal_plenticore, _sub)
-    
+        module = getattr(kostal_kore, _sub)
+        sys.modules[f"{_ha_prefix}.{_sub}"] = module
+        sys.modules[f"homeassistant.components.kostal_plenticore.{_sub}"] = module
+
 except ImportError as e:
     print(f"Warning: Could not import Platinum version: {e}")
-    import kostal_plenticore
+    import custom_components.kostal_kore as kostal_kore
 
 import pytest_socket
 
@@ -71,14 +76,14 @@ pytest_socket.disable_socket = lambda *args, **kwargs: None
 pytest_socket.socket_allow_hosts = lambda *args, **kwargs: None
 pytest_socket.enable_socket()
 
-from kostal_plenticore import coordinator
-from kostal_plenticore.const import DOMAIN
+from custom_components.kostal_kore import coordinator
+from custom_components.kostal_kore.const import DOMAIN
 
 @pytest.fixture
 def mock_performance_coordinator():
     """Mock performance-optimized coordinator."""
     try:
-        from kostal_plenticore.coordinator import PlenticoreUpdateCoordinator
+        from custom_components.kostal_kore.coordinator import PlenticoreUpdateCoordinator
         coordinator = MagicMock(spec=PlenticoreUpdateCoordinator)
         coordinator._fetch = {}
         return coordinator
@@ -89,8 +94,8 @@ def mock_performance_coordinator():
 def mock_device_scanner():
     """Mock KostalDeviceScanner for Platinum discovery features."""
     try:
-        from kostal_plenticore.discovery import KostalDeviceScanner
-        return MagicMock(spec=KostalDeviceScanner)
+        from custom_components.kostal_kore.config_flow import discover_inverter_hosts
+        return MagicMock(spec=discover_inverter_hosts)
     except ImportError:
         # Fallback for older version
         return MagicMock()
@@ -121,7 +126,19 @@ def event_loop():
     asyncio.set_event_loop(None)
 
 @pytest.fixture(autouse=True)
-def enable_custom_integrations(enable_custom_integrations):
+def auto_enable_custom_integrations(enable_custom_integrations):
+    yield
+
+
+@pytest.fixture(autouse=True)
+def expose_kostal_kore_custom_component(hass: HomeAssistant):
+    """Expose the local integration in the temporary HA config directory."""
+    source = Path(__file__).resolve().parents[1] / "custom_components" / "kostal_kore"
+    custom_components_dir = Path(hass.config.path("custom_components"))
+    custom_components_dir.mkdir(parents=True, exist_ok=True)
+    target = custom_components_dir / "kostal_kore"
+    if not target.exists():
+        target.symlink_to(source, target_is_directory=True)
     yield
 
 
@@ -139,8 +156,8 @@ def immediate_async_call_later(hass: HomeAssistant):
 
     with (
         patch("homeassistant.helpers.event.async_call_later", side_effect=_immediate_call_later),
-        patch("kostal_plenticore.coordinator.async_call_later", side_effect=_immediate_call_later),
-        patch("kostal_plenticore.number.async_call_later", side_effect=_immediate_call_later),
+        patch("custom_components.kostal_kore.coordinator.async_call_later", side_effect=_immediate_call_later),
+        patch("custom_components.kostal_kore.number.async_call_later", side_effect=_immediate_call_later),
     ):
         yield
 
@@ -271,7 +288,7 @@ def mock_config_entry() -> MockConfigEntry:
     return MockConfigEntry(
         entry_id="2ab8dd92a62787ddfe213a67e09406bd",
         title="scb",
-        domain="kostal_plenticore",
+        domain=DOMAIN,
         data={"host": "192.168.1.2", "password": "SecretPassword"},
     )
 
@@ -282,7 +299,7 @@ def mock_installer_config_entry() -> MockConfigEntry:
     return MockConfigEntry(
         entry_id="2ab8dd92a62787ddfe213a67e09406bd",
         title="scb",
-        domain="kostal_plenticore",
+        domain=DOMAIN,
         data={
             "host": "192.168.1.2",
             "password": "secret_password",

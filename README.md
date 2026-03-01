@@ -7,6 +7,8 @@
 
 KOSTAL KORE is a custom Home Assistant integration for monitoring and controlling Kostal Plenticore inverters using local interfaces (REST + optional Modbus tooling).
 
+![KOSTAL KORE plugin logo](docs/assets/kostal_kore_logo.svg)
+
 ## Overview
 
 This integration provides comprehensive monitoring and control capabilities for Kostal Plenticore solar inverters, allowing you to:
@@ -44,7 +46,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - **Select Entities**: Operating mode selection (e.g., battery management modes)
 - **Switch Entities**: Enable/disable various inverter functions
 - **G3 Battery Limitation**: Max charge/discharge power limits are re-applied cyclically to keep them active (per vendor requirement)
-- **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `kostal_plenticore/QUICK_REFERENCE.md` for full lists)
+- **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `custom_components/kostal_kore/QUICK_REFERENCE.md` for full lists)
 
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting
@@ -92,7 +94,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 8. If shown, allow pre-release/alpha updates in HACS update settings
 
 ### Method 2: Manual Installation
-1. Copy `custom_components/kostal_plenticore` to `config/custom_components/kostal_plenticore`
+1. Copy `custom_components/kostal_kore` to `config/custom_components/kostal_kore`
 2. Restart Home Assistant
 3. The integration will be available for configuration
 
@@ -111,16 +113,21 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 ### Initial Setup
 1. In Home Assistant, go to **Settings > Devices & Services**
 2. Click **+ Add Integration**
-3. Search for "Kostal Plenticore Solar Inverter"
+3. Search for "KOSTAL KORE (Experimental Alpha)"
 4. Enter the required information:
-   - **Host**: IP address or hostname of your inverter
+   - **Host**: Optional. Leave empty for auto-discovery or enter IP/hostname manually
    - **Password**: Inverter web interface password
-   - **Service Code**: (Optional) Service code for advanced features
+   - **Service Code**: Optional for installer-level features
+5. In step 2 of the wizard, directly enable:
+   - Modbus TCP
+   - MQTT Bridge
+   - Modbus Proxy
+6. The wizard shows detected access role (user vs installer) and whether write access is enabled
 
 ### Configuration Parameters
-- **Host**: The network address of your Kostal inverter (e.g., `192.168.1.100`)
+- **Host**: Optional. If empty, setup tries local-network auto-discovery first
 - **Password**: Password for accessing the inverter's web interface
-- **Service Code**: Optional service code for accessing advanced settings (typically used by installers)
+- **Service Code**: Optional service code. Actual write permissions are validated from detected account role.
 
 ## Data Update
 
@@ -138,7 +145,7 @@ The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from
 
 ## Known Limitations
 
-- **No auto-discovery**: Kostal Plenticore inverters do not broadcast via mDNS/SSDP/DHCP. The inverter IP must be entered manually.
+- **Auto-discovery is best-effort**: The wizard scans likely local IPv4 hosts when host is empty. If discovery fails, enter inverter host/IP manually.
 - **DC string count**: The number of DC inputs (PV strings) is detected automatically on first setup. Changes require re-adding the integration.
 - **Firmware dependency**: Some advanced settings (G3 battery controls, external control registers) are only available on specific firmware versions.
 - **Installer access**: Certain controls require the installer/service code. Without it, these entities remain disabled.
@@ -150,7 +157,7 @@ The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from
 
 ### File Structure
 ```
-custom_components/kostal_plenticore/
+custom_components/kostal_kore/
 ├── __init__.py          # Integration entry point and setup
 ├── manifest.json        # Integration metadata and dependencies
 ├── config_flow.py       # Configuration flow and user interface
@@ -279,7 +286,7 @@ logger:
   default: info
   logs:
     pykoplenti: debug
-    custom_components.kostal_plenticore: debug
+    custom_components.kostal_kore: debug
 ```
 
 ## Security Considerations
@@ -422,7 +429,7 @@ Contributions are welcome! Please:
 
 ## Version History
 
-- **Current**: `v2.16.0-alpha.1` (experimental release channel)
+- **Current**: `v2.16.0-alpha.2` (experimental release channel)
 - **Compatibility**: Home Assistant 2024.1+
 - **API Support**: Kostal Plenticore local API
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history

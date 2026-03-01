@@ -2,7 +2,7 @@
 
 ## HACS publication checklist
 
-- [x] Repository structure uses `custom_components/kostal_plenticore`.
+- [x] Repository structure uses `custom_components/kostal_kore`.
 - [x] Root `hacs.json` exists.
 - [x] Integration `manifest.json` contains `domain`, `name`, `version`, `documentation`, `issue_tracker`, `codeowners`.
 - [x] `LICENSE` file is present (MIT).

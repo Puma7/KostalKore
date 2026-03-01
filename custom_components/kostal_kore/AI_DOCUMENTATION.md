@@ -3,7 +3,7 @@
 ## 1. Project Overview
 **Name**: Kostal Plenticore Solar Inverter Integration
 **Type**: Custom Home Assistant Integration
-**Working Directory**: `kostal_plenticore` (Root of the integration package)
+**Working Directory**: `kostal_kore` (Root of the integration package)
 **Core Library**: `pykoplenti` (v1.5.0rc1)
 
 This integration allows Home Assistant to monitor and control Kostal Plenticore inverters via their local network API (HTTP/Modbus-TCP wrapper). It is designed to be robust, safe, and efficient, using Home Assistant's `DataUpdateCoordinator` pattern.
@@ -64,11 +64,11 @@ graph TD
 ## 3. Directory Structure & File map
 
 ```text
-kostal_plenticore/
+kostal_kore/
 ├── __init__.py           # Integration entry point. Sets up the Plenticore instance.
 ├── manifest.json         # Metadata (version, dependencies, codeowners).
 ├── config_flow.py        # UI logic for adding the integration.
-├── const.py              # Constants (DOMAIN="kostal_plenticore").
+├── const.py              # Constants (DOMAIN="kostal_kore").
 ├── coordinator.py        # CORE LOGIC: API Client & Data Coordinators.
 ├── helper.py             # UTILS: Data formatting & type conversion.
 ├── sensor.py             # Read-only entities (Process Data).

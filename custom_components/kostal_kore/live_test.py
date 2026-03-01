@@ -6,9 +6,9 @@ Run this BEFORE enabling Modbus in the HA integration to verify
 that everything works correctly with your specific inverter.
 
 Usage:
-    python -m kostal_plenticore.live_test --host 192.168.1.2
-    python -m kostal_plenticore.live_test --host 192.168.1.2 --port 1502 --unit-id 71
-    python -m kostal_plenticore.live_test --host 192.168.1.2 --output report.json
+    python -m kostal_kore.live_test --host 192.168.1.2
+    python -m kostal_kore.live_test --host 192.168.1.2 --port 1502 --unit-id 71
+    python -m kostal_kore.live_test --host 192.168.1.2 --output report.json
 
 The script will:
 1. Connect to the inverter via Modbus TCP
@@ -326,9 +326,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m kostal_plenticore.live_test --host 192.168.1.2
-  python -m kostal_plenticore.live_test --host 192.168.1.2 --port 1502 --unit-id 71
-  python -m kostal_plenticore.live_test --host 192.168.1.2 --output my_report.json
+  python -m kostal_kore.live_test --host 192.168.1.2
+  python -m kostal_kore.live_test --host 192.168.1.2 --port 1502 --unit-id 71
+  python -m kostal_kore.live_test --host 192.168.1.2 --output my_report.json
 
 The tool is 100% read-only and will NEVER write to the inverter.
 Run this before enabling Modbus in the Home Assistant integration.

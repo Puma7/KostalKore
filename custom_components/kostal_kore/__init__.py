@@ -27,6 +27,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    CONF_ACCESS_ROLE,
+    CONF_INSTALLER_ACCESS,
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
@@ -154,7 +156,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     mqtt_bridge = None
     modbus_proxy = None
     soc_controller = None
-    installer_access = bool(entry.data.get(CONF_SERVICE_CODE))
+    installer_access = bool(
+        entry.data.get(
+            CONF_INSTALLER_ACCESS,
+            bool(entry.data.get(CONF_SERVICE_CODE)),
+        )
+    )
+    access_role = str(entry.data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
+    _LOGGER.info(
+        "Authenticated inverter access role: %s (installer writes: %s)",
+        access_role,
+        installer_access,
+    )
     if entry.options.get(CONF_MODBUS_ENABLED, False):
         host = entry.data[CONF_HOST]
         port = entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)

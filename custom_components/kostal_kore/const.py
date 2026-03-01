@@ -6,8 +6,10 @@ from typing import Final, TYPE_CHECKING
 
 from homeassistant.const import CONF_HOST, CONF_PASSWORD
 
-DOMAIN: Final[str] = "kostal_plenticore"
+DOMAIN: Final[str] = "kostal_kore"
 CONF_SERVICE_CODE: Final[str] = "service_code"
+CONF_ACCESS_ROLE: Final[str] = "access_role"
+CONF_INSTALLER_ACCESS: Final[str] = "installer_access"
 
 # Modbus configuration keys
 CONF_MODBUS_ENABLED: Final[str] = "modbus_enabled"
@@ -43,7 +45,9 @@ else:
 
 __all__ = [
     "AddConfigEntryEntitiesCallback",
+    "CONF_ACCESS_ROLE",
     "CONF_HOST",
+    "CONF_INSTALLER_ACCESS",
     "CONF_MODBUS_ENABLED",
     "CONF_MODBUS_ENDIANNESS",
     "CONF_MODBUS_PORT",

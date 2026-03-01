@@ -1,41 +1,41 @@
 [run]
 branch = True
-source = kostal_plenticore
+source = kostal_kore
 omit =
-    kostal_plenticore/coordinator.py
-    kostal_plenticore/number.py
-    kostal_plenticore/sensor.py
-    kostal_plenticore/switch.py
-    kostal_plenticore/modbus_client.py
-    kostal_plenticore/modbus_coordinator.py
-    kostal_plenticore/health_monitor.py
-    kostal_plenticore/health_sensor.py
-    kostal_plenticore/health_binary_sensor.py
-    kostal_plenticore/fire_safety.py
-    kostal_plenticore/fire_safety_entities.py
-    kostal_plenticore/diagnostics_engine.py
-    kostal_plenticore/diagnostic_entities.py
-    kostal_plenticore/battery_chemistry.py
-    kostal_plenticore/longevity_advisor.py
-    kostal_plenticore/longevity_entities.py
-    kostal_plenticore/live_test.py
-    kostal_plenticore/notifications.py
-    kostal_plenticore/degradation_tracker.py
-    kostal_plenticore/degradation_entities.py
-    kostal_plenticore/request_scheduler.py
-    kostal_plenticore/scheduled_session.py
-    kostal_plenticore/binary_sensor.py
-    kostal_plenticore/modbus_button.py
-    kostal_plenticore/modbus_number.py
-    kostal_plenticore/modbus_test.py
-    kostal_plenticore/mqtt_bridge.py
-    kostal_plenticore/modbus_proxy.py
-    kostal_plenticore/battery_test.py
-    kostal_plenticore/battery_soc_controller.py
-    kostal_plenticore/soc_controller_entities.py
-    kostal_plenticore/charge_block_switch.py
-    kostal_plenticore/grid_charge_limiter.py
-    kostal_plenticore/button.py
+    kostal_kore/coordinator.py
+    kostal_kore/number.py
+    kostal_kore/sensor.py
+    kostal_kore/switch.py
+    kostal_kore/modbus_client.py
+    kostal_kore/modbus_coordinator.py
+    kostal_kore/health_monitor.py
+    kostal_kore/health_sensor.py
+    kostal_kore/health_binary_sensor.py
+    kostal_kore/fire_safety.py
+    kostal_kore/fire_safety_entities.py
+    kostal_kore/diagnostics_engine.py
+    kostal_kore/diagnostic_entities.py
+    kostal_kore/battery_chemistry.py
+    kostal_kore/longevity_advisor.py
+    kostal_kore/longevity_entities.py
+    kostal_kore/live_test.py
+    kostal_kore/notifications.py
+    kostal_kore/degradation_tracker.py
+    kostal_kore/degradation_entities.py
+    kostal_kore/request_scheduler.py
+    kostal_kore/scheduled_session.py
+    kostal_kore/binary_sensor.py
+    kostal_kore/modbus_button.py
+    kostal_kore/modbus_number.py
+    kostal_kore/modbus_test.py
+    kostal_kore/mqtt_bridge.py
+    kostal_kore/modbus_proxy.py
+    kostal_kore/battery_test.py
+    kostal_kore/battery_soc_controller.py
+    kostal_kore/soc_controller_entities.py
+    kostal_kore/charge_block_switch.py
+    kostal_kore/grid_charge_limiter.py
+    kostal_kore/button.py
 
 [report]
 show_missing = True

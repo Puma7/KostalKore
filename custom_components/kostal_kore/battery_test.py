@@ -25,7 +25,7 @@ Read conventions:
     REG 252 (pm_total_active):   negative=grid export, positive=grid import
       (depends on sensor position — position 2/grid: positive=import)
 
-Debug log written to: custom_components/kostal_plenticore/battery_test_debug.log
+Debug log written to: custom_components/kostal_kore/battery_test_debug.log
 """
 
 from __future__ import annotations

@@ -30,7 +30,12 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from homeassistant.helpers.event import async_call_later
 
-from .const import CONF_SERVICE_CODE, DOMAIN, AddConfigEntryEntitiesCallback
+from .const import (
+    CONF_INSTALLER_ACCESS,
+    CONF_SERVICE_CODE,
+    DOMAIN,
+    AddConfigEntryEntitiesCallback,
+)
 from .const_ids import ModuleId, SettingId
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import (
@@ -1755,7 +1760,13 @@ class PlenticoreDataNumber(
             # Log all battery control operations for safety audit
             user_type = (
                 "installer"
-                if requires_installer and entry.data.get(CONF_SERVICE_CODE)
+                if requires_installer
+                and (
+                    entry.data.get(
+                        CONF_INSTALLER_ACCESS,
+                        bool(entry.data.get(CONF_SERVICE_CODE)),
+                    )
+                )
                 else "user"
             )
             _LOGGER.info(

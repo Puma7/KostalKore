@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0-alpha.2] - 2026-03-01
+
+### Added
+- **First-run setup wizard**: Initial setup now includes a second guided step to directly enable Modbus TCP, MQTT bridge, and Modbus proxy.
+- **Best-effort auto-discovery**: If host/IP is left empty, setup now probes local IPv4 networks for reachable inverter candidates.
+- **Access profile detection**: Setup now stores detected account role and installer-write capability (`access_role`, `installer_access`).
+- **Plugin logo asset**: Added `docs/assets/kostal_kore_logo.svg` and integrated it into `README.md`.
+
+### Changed
+- **Installer gating basis**: Write permission checks now prioritize detected installer access, with service-code fallback for legacy entries.
+- **Integration domain/path branding**: Switched release metadata and package domain to `kostal_kore` and `custom_components/kostal_kore`.
+- **MQTT topic prefix / notifications**: Prefix moved from `kostal_plenticore` to `kostal_kore`.
+
+### Fixed
+- Setup UX now supports both manual host entry and discovery fallback without forcing the user into separate flows.
+- Initial setup can activate Modbus/MQTT/proxy immediately, instead of requiring a post-install options roundtrip.
+
 ## [2.16.0-alpha.1] - 2026-03-01
 
 ### Added

@@ -3,7 +3,7 @@
 ## Cursor Cloud specific instructions
 
 ### Project overview
-Home Assistant custom integration for Kostal Plenticore solar inverters (`kostal_plenticore/`). Pure Python, no Docker/DB/external services needed. All hardware interactions are mocked in tests.
+Home Assistant custom integration for Kostal solar inverters (`kostal_kore/` package mapped from `custom_components/kostal_kore/`). Pure Python, no Docker/DB/external services needed. All hardware interactions are mocked in tests.
 
 ### Test directory case sensitivity
 The test directory is `Tests/` (uppercase T) but `pytest.ini` references `testpaths = tests` (lowercase). On Linux (case-sensitive) a symlink `tests -> Tests` must exist at the workspace root. The update script creates this automatically.
@@ -18,7 +18,7 @@ python -m pytest Tests/ -v --timeout=60
 ### Type checking
 ```bash
 source .venv/bin/activate
-python -m mypy kostal_plenticore/
+python -m mypy kostal_kore/
 ```
 Uses strict mode per `mypy.ini`. Should report zero issues.
 

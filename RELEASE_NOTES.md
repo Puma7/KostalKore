@@ -1,5 +1,17 @@
 # Release Notes
 
+## v2.16.0-alpha.2 (Experimental)
+
+This alpha update focuses on setup UX, access control clarity, and branding alignment.
+
+- Added a first-run setup wizard step to directly enable Modbus TCP, MQTT bridge, and Modbus proxy.
+- Added best-effort local auto-discovery when host/IP is left empty during setup.
+- Added account-role detection and explicit installer-write capability handling.
+- Switched integration release domain/path branding to `kostal_kore`.
+- Added plugin logo asset and integrated it into README.
+
+> Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
+
 ## v2.16.0-alpha.1 (Experimental)
 
 This is the first **experimental alpha release** for HACS rollout preparation.

@@ -9,16 +9,16 @@ from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiClient, ApiException, ExtendedApiClient, SettingsData
 import pytest
 
-from homeassistant.components.kostal_plenticore.const import DOMAIN
+from custom_components.kostal_kore.const import DOMAIN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
-from kostal_plenticore import coordinator
-from kostal_plenticore.const import CONF_SERVICE_CODE
-from kostal_plenticore.helper import (
+from custom_components.kostal_kore import coordinator
+from custom_components.kostal_kore.const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE
+from custom_components.kostal_kore.helper import (
     ModbusException,
     ModbusIllegalFunctionError,
     ModbusIllegalDataAddressError,
@@ -167,6 +167,19 @@ def test_ensure_installer_access() -> None:
     assert ensure_installer_access(entry, True, "devices:local", "Battery:MinSocRel", "setting") is False
     entry_with_code = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"})
     assert ensure_installer_access(entry_with_code, True, "devices:local", "Battery:MinSocRel", "setting") is True
+    entry_with_service_but_user = SimpleNamespace(
+        data={CONF_SERVICE_CODE: "1234", CONF_INSTALLER_ACCESS: False}
+    )
+    assert (
+        ensure_installer_access(
+            entry_with_service_but_user,
+            True,
+            "devices:local",
+            "Battery:MinSocRel",
+            "setting",
+        )
+        is False
+    )
 
 
 def test_parse_modbus_exception_variants() -> None:

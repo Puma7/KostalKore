@@ -3,7 +3,7 @@
     "step": {
       "init": {
         "title": "Modbus & MQTT Bridge Settings",
-        "description": "Enable direct Modbus TCP access to the inverter. This allows battery charge/discharge control and shares data via MQTT with external systems (evcc, iobroker). Security note: The Modbus proxy should stay on 127.0.0.1 unless you explicitly need remote access.",
+        "description": "Enable direct Modbus TCP access to the inverter. This allows battery charge/discharge control and shares data via MQTT with external systems (evcc, iobroker). Security note: The Modbus proxy should stay on 127.0.0.1 unless you explicitly need remote access.\n\nDetected access role: {access_role}\nWrite access: {write_access}",
         "data": {
           "modbus_enabled": "Enable Modbus TCP",
           "modbus_port": "Modbus TCP Port",
@@ -33,6 +33,7 @@
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "no_discovered_inverter": "No inverter found automatically. Enter the host/IP manually.",
       "timeout": "[%key:common::config_flow::error::cannot_connect%]",
       "unknown": "[%key:common::config_flow::error::unknown%]",
       "invalid_inverter_model": "Inverter model not supported or incompatible",
@@ -42,24 +43,44 @@
     "step": {
       "reauth_confirm": {
         "data": {
-          "host": "[%key:common::config_flow::data::host%]",
+          "host": "Host/IP (optional for auto-discovery)",
           "password": "[%key:common::config_flow::data::password%]",
-          "service_code": "[%key:component::kostal_plenticore::config::step::user::data::service_code%]"
+          "service_code": "[%key:component::kostal_kore::config::step::user::data::service_code%]"
         }
       },
       "reconfigure": {
+        "description": "Use a manual host/IP or leave host empty to auto-discover in local networks.",
         "data": {
-          "host": "[%key:common::config_flow::data::host%]",
+          "host": "Host/IP (optional for auto-discovery)",
           "password": "[%key:common::config_flow::data::password%]",
-          "service_code": "[%key:component::kostal_plenticore::config::step::user::data::service_code%]"
+          "service_code": "[%key:component::kostal_kore::config::step::user::data::service_code%]"
         }
       },
       "user": {
+        "description": "Enter inverter credentials. Leave host empty to auto-discover the inverter IP in your local network.",
         "data": {
-          "host": "[%key:common::config_flow::data::host%]",
+          "host": "Host/IP (optional for auto-discovery)",
           "password": "[%key:common::config_flow::data::password%]",
           "service_code": "Service code"
         }
+      },
+      "setup_options": {
+        "title": "First-time Setup Wizard",
+        "description": "Host: {detected_host}\nDetected access role: {access_role}\nWrite access: {write_access}\n\nSelect which optional features should be enabled immediately.",
+        "data": {
+          "modbus_enabled": "Enable Modbus TCP",
+          "modbus_port": "Modbus TCP Port",
+          "modbus_unit_id": "Modbus Unit ID",
+          "modbus_endianness": "Byte Order (Endianness)",
+          "mqtt_bridge_enabled": "Enable MQTT Bridge",
+          "modbus_proxy_enabled": "Enable Modbus Proxy Server",
+          "modbus_proxy_port": "Modbus Proxy Port",
+          "modbus_proxy_bind": "Modbus Proxy Bind Address (default: 127.0.0.1)"
+        }
+      },
+      "setup_modbus_test": {
+        "title": "Modbus Connection Test",
+        "description": "Connection test result:\n\n{test_result}\n"
       }
     }
   },

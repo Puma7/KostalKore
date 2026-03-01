@@ -68,7 +68,7 @@ SAFE_WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
     r for r in WRITABLE_REGISTERS if r.name not in _MQTT_EXCLUDED_NAMES
 )
 
-TOPIC_PREFIX: Final[str] = "kostal_plenticore"
+TOPIC_PREFIX: Final[str] = "kostal_kore"
 QOS: Final[int] = 1
 
 RATE_LIMIT_SECONDS: Final[float] = 1.0

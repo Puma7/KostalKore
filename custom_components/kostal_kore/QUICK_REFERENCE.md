@@ -11,8 +11,8 @@
 
 ### 2. Add to number.py (for numeric controls)
 ```python
-from kostal_plenticore.const_ids import ModuleId, SettingId
-from kostal_plenticore.helper import ensure_installer_access
+from kostal_kore.const_ids import ModuleId, SettingId
+from kostal_kore.helper import ensure_installer_access
 
 PlenticoreNumberEntityDescription(
     key="battery_feature_name",
@@ -317,7 +317,7 @@ data:
 4. ✅ Clear `__pycache__` folders
 5. ✅ Full Home Assistant restart
 6. ✅ Check `manifest.json` has `version` field
-7. ✅ Verify folder structure: `custom_components/kostal_plenticore/`
+7. ✅ Verify folder structure: `custom_components/kostal_kore/`
 
 ---
 

@@ -93,11 +93,11 @@ rules:
     status: done
     comment: "diagnostics.py provides async_get_config_entry_diagnostics."
   discovery:
-    status: exempt
-    comment: "Kostal Plenticore inverters do not broadcast mDNS/SSDP/DHCP. Manual host entry required."
+    status: done
+    comment: "Config flow supports manual host entry and best-effort local IPv4 auto-discovery."
   discovery-update-info:
-    status: exempt
-    comment: "No discovery available; N/A."
+    status: done
+    comment: "Auto-discovery is attempted when host is left empty in the setup wizard."
   docs-data-update:
     status: done
     comment: "README.md documents update intervals and coordinator behaviour."

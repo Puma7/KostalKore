@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-NOTIFICATION_PREFIX: Final[str] = "kostal_plenticore"
+NOTIFICATION_PREFIX: Final[str] = "kostal_kore"
 
 
 async def notify(
