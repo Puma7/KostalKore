@@ -96,7 +96,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 1. Open HACS in Home Assistant
 2. Navigate to Integrations
 3. Open the menu (top right) and select **Custom repositories**
-4. Add repository URL: `https://github.com/Puma7/Kostal`
+4. Add repository URL: `https://github.com/Puma7/KostalKore`
 5. Category: **Integration**
 6. Install **KOSTAL KORE (Experimental Alpha)**
 7. Restart Home Assistant
