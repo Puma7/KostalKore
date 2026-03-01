@@ -118,6 +118,8 @@ If you previously used the old `kostal_plenticore` integration:
 
 This split flow lets you migrate first, test in production for a few weeks, and only then finalize cleanup.
 
+Detailed step-by-step guide: see `migration.md`.
+
 ## Development
 
 ### Branches
@@ -130,6 +132,7 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 
 ### Documentation map
 - `README.md`: User-facing install/setup/operations overview.
+- `migration.md`: Step-by-step migration guide from `kostal_plenticore` to `kostal_kore`.
 - `PROXY_SETUP.md`: Modbus proxy + MQTT bridge integration examples (evcc/iobroker).
 - `ENTITY_REFERENCE.md`: Entity/register and threshold reference.
 - `custom_components/kostal_kore/QUICK_REFERENCE.md`: Fast maintainer cheat sheet.
