@@ -151,6 +151,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     modbus_coordinator = None
     mqtt_bridge = None
     modbus_proxy = None
+    soc_controller = None
     if entry.options.get(CONF_MODBUS_ENABLED, False):
         host = entry.data[CONF_HOST]
         port = entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)
@@ -187,6 +188,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             )
             await mqtt_bridge.async_start()
 
+        # SoC Controller (must be created before proxy for arbitration)
+        if modbus_coordinator is not None:  # pragma: no cover
+            from .battery_soc_controller import BatterySocController
+            soc_controller = BatterySocController(modbus_coordinator, hass=hass)
+
         if modbus_coordinator and entry.options.get(  # pragma: no cover
             CONF_MODBUS_PROXY_ENABLED, False
         ):
@@ -201,6 +207,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 port=int(proxy_port),
                 unit_id=int(entry.options.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID)),
                 endianness=endianness,
+                soc_controller=soc_controller,
             )
             try:
                 await modbus_proxy.start()
@@ -261,12 +268,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         bat_thresholds = detect_chemistry(bat_type_int)
         longevity_advisor = LongevityAdvisor(health_monitor, bat_thresholds)
         _LOGGER.info("Battery chemistry: %s (%s)", bat_thresholds.chemistry, bat_thresholds.chemistry_full)
-
-    # SoC Controller (auto charge/discharge to target SoC)
-    soc_controller = None
-    if modbus_coordinator is not None:  # pragma: no cover
-        from .battery_soc_controller import BatterySocController
-        soc_controller = BatterySocController(modbus_coordinator, hass=hass)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,

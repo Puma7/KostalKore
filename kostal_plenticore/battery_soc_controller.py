@@ -32,11 +32,10 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 KEEPALIVE_INTERVAL: Final[float] = 15.0
 POLL_INTERVAL: Final[float] = 10.0
-SOC_TOLERANCE: Final[float] = 1.0
 DEFAULT_MAX_CHARGE_W: Final[float] = 5000.0
 DEFAULT_MAX_DISCHARGE_W: Final[float] = 5000.0
-MIN_SOC: Final[float] = 5.0
-MAX_SOC: Final[float] = 100.0
+SAFE_MIN_SOC: Final[float] = 10.0
+SAFE_MAX_SOC: Final[float] = 95.0
 MAX_BATTERY_TEMP_C: Final[float] = 48.0
 
 
@@ -86,11 +85,14 @@ class BatterySocController:
         _LOGGER.info("SoC Controller: max discharge power = %.0f W", self._max_discharge_w)
 
     async def set_target(self, soc: float | None) -> None:
-        """Set target SoC. None or 0 = stop controller."""
-        if soc is not None and soc < MIN_SOC:
+        """Set target SoC. None or <SAFE_MIN_SOC = stop controller.
+
+        Values are clamped to SAFE_MIN_SOC..SAFE_MAX_SOC (10-95%).
+        """
+        if soc is not None and soc < SAFE_MIN_SOC:
             soc = None
         if soc is not None:
-            soc = min(MAX_SOC, soc)
+            soc = max(SAFE_MIN_SOC, min(SAFE_MAX_SOC, soc))
 
         self._target_soc = soc
 
@@ -101,7 +103,8 @@ class BatterySocController:
         _LOGGER.info("SoC Controller: target = %.0f%%", soc)
         await self._notify(
             "Ziel-SoC gesetzt",
-            f"Batterie wird auf {soc:.0f}% gesteuert.\n"
+            f"Batterie wird auf {soc:.0f}% gesteuert "
+            f"(Bereich: {SAFE_MIN_SOC:.0f}-{SAFE_MAX_SOC:.0f}%).\n"
             f"Max. Laden: {self._max_charge_w:.0f} W\n"
             f"Max. Entladen: {self._max_discharge_w:.0f} W",
         )
@@ -132,7 +135,15 @@ class BatterySocController:
     # ------------------------------------------------------------------
 
     async def _run_loop(self) -> None:
-        """Main loop: monitor SoC and control battery until target reached."""
+        """Main loop: monitor SoC and control battery until target reached.
+
+        Stop logic handles Pylontech SoC jumps (e.g. 18% → 9%):
+            Charging:    stop if current_soc >= target  (at or above)
+            Discharging: stop if current_soc <= target  (at or below)
+        This ensures we NEVER overshoot in either direction, even if
+        the BMS reports a stale value that suddenly jumps past the target.
+        """
+        was_charging = False
         try:
             while self._target_soc is not None:
                 current_soc = await self._read_soc()
@@ -142,10 +153,21 @@ class BatterySocController:
                     continue
 
                 target = self._target_soc
-                diff = target - current_soc
+                need_charge = current_soc < target
+                need_discharge = current_soc > target
 
-                # Target reached?
-                if abs(diff) <= SOC_TOLERANCE:
+                # ── SAFE STOP: directional, handles SoC jumps ──
+                # If we were charging and SoC is now AT or ABOVE target → done
+                # If we were discharging and SoC is now AT or BELOW target → done
+                target_reached = False
+                if need_charge is False and need_discharge is False:
+                    target_reached = True
+                elif was_charging and current_soc >= target:
+                    target_reached = True
+                elif not was_charging and need_discharge is False and current_soc <= target:
+                    target_reached = True
+
+                if target_reached:
                     self._status = f"target_reached ({current_soc:.0f}%)"
                     _LOGGER.info(
                         "SoC Controller: Ziel erreicht! SoC=%.0f%% (Ziel=%.0f%%)",
@@ -154,14 +176,14 @@ class BatterySocController:
                     await self._write_normal()
                     await self._notify(
                         "Ziel-SoC erreicht",
-                        f"Batterie hat {current_soc:.0f}% erreicht (Ziel: {target:.0f}%).\n"
+                        f"Batterie bei {current_soc:.0f}% (Ziel: {target:.0f}%).\n"
                         f"Automatik-Modus wiederhergestellt.",
                     )
                     self._target_soc = None
                     self._status = "idle"
                     return
 
-                # Safety checks
+                # ── SAFETY CHECKS ──
                 temp = await self._read_temp()
                 if temp is not None and temp > MAX_BATTERY_TEMP_C:
                     self._status = f"paused: Temperatur {temp:.0f}°C"
@@ -175,19 +197,21 @@ class BatterySocController:
                     await asyncio.sleep(POLL_INTERVAL)
                     continue
 
-                # Charge or discharge
-                if diff > 0:
+                # ── CONTROL ──
+                if need_charge:
+                    was_charging = True
                     power = self._max_charge_w
                     self._status = f"charging ({current_soc:.0f}% → {target:.0f}%)"
                     await self._write_charge(power)
-                else:
+                elif need_discharge:
+                    was_charging = False
                     power = self._max_discharge_w
                     self._status = f"discharging ({current_soc:.0f}% → {target:.0f}%)"
                     await self._write_discharge(power)
 
                 # Wait, but don't exceed keepalive interval
-                elapsed_since_write = time.monotonic() - self._last_write
-                sleep = min(POLL_INTERVAL, KEEPALIVE_INTERVAL - elapsed_since_write - 1)
+                elapsed = time.monotonic() - self._last_write
+                sleep = min(POLL_INTERVAL, KEEPALIVE_INTERVAL - elapsed - 1)
                 await asyncio.sleep(max(1.0, sleep))
 
         except asyncio.CancelledError:
