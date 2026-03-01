@@ -9,6 +9,15 @@ KOSTAL KORE is a custom Home Assistant integration for monitoring and controllin
 
 ![KOSTAL KORE plugin logo](docs/assets/kostal_kore_logo.svg)
 
+## Credits & Transparency
+
+- **Thank you to the original author**: This project builds on years of groundwork by `@stegm`, especially the foundational `pykoplenti` repository: <https://github.com/stegm/pykoplenti>.
+- **Why this exists as a separate line**: Scope and architecture changed heavily over time, so a clean merge back into the original repository was not feasible.
+- **Stability disclosure**: This integration is heavily vibe-coded and is **not considered 100% stable**.
+- **Real-world usage disclaimer**: It runs in `@Puma7`'s own setup (Kostal Plenticore G3 L 20kW), but that does **not** guarantee identical behavior on all hardware, firmware, or regional setups.
+- **AI disclosure**: Large parts of this codebase were generated with **Claude Opus** and **OpenAI Codex**.
+- **Human validation**: Manual checks were performed by `@Puma7`.
+
 ## Overview
 
 This integration provides comprehensive monitoring and control capabilities for Kostal Plenticore solar inverters, allowing you to:
@@ -98,7 +107,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 2. Restart Home Assistant
 3. The integration will be available for configuration
 
-## Migration from old `kostal_plenticore` plugin (one-click)
+## Migration from old `kostal_plenticore` plugin (two-step flow)
 
 If you previously used the old `kostal_plenticore` integration:
 

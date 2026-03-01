@@ -1,4 +1,4 @@
-"""Tests for one-click legacy migration from kostal_plenticore."""
+"""Tests for two-step legacy migration from kostal_plenticore."""
 
 from __future__ import annotations
 

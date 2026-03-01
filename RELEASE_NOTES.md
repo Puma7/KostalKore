@@ -7,6 +7,7 @@ This alpha update adds two-step migration support from the legacy plugin.
 - Added **Import Legacy Plenticore Data** and **Finalize Legacy Cleanup** buttons.
 - Added registry migration logic to preserve existing entity IDs/history where possible.
 - Added migration test coverage (data/options import, host matching, duplicate handling).
+- Added explicit project provenance and transparency notes in README (credits to `@stegm`, AI-assisted development disclosure, manual checks by `@Puma7`).
 
 > Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
 

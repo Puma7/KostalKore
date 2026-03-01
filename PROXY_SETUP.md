@@ -1,11 +1,11 @@
-# Kostal Plenticore Proxy – evcc & externe Systeme anbinden
+# KOSTAL KORE Proxy – evcc & externe Systeme anbinden
 
 ## Architektur
 
 ```
                              ┌─── Home Assistant (HA entities)
                              │
-Kostal Inverter ◄──Modbus TCP (exklusiv)──► Kostal Plenticore Integration
+Kostal Inverter ◄──Modbus TCP (exklusiv)──► KOSTAL KORE Integration
   (port 1502)                                  │
                                 ┌──────────────┼──────────────┐
                                 │              │              │
@@ -122,32 +122,32 @@ meters:
   type: custom
   power:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/pv_power
+    topic: kostal_kore/{SERIAL}/proxy/pv_power
   energy:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/modbus/register/total_yield
+    topic: kostal_kore/{SERIAL}/modbus/register/total_yield
     scale: 0.001  # Wh → kWh
 
 - name: grid
   type: custom
   power:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/grid_power
+    topic: kostal_kore/{SERIAL}/proxy/grid_power
 
 - name: battery
   type: custom
   power:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/battery_power
+    topic: kostal_kore/{SERIAL}/proxy/battery_power
   soc:
     source: mqtt
-    topic: kostal_plenticore/{SERIAL}/proxy/battery_soc
+    topic: kostal_kore/{SERIAL}/proxy/battery_soc
   batterymode:
     source: watchdog
     timeout: 60s
     set:
       source: mqtt
-      topic: kostal_plenticore/{SERIAL}/proxy/command/battery_charge
+      topic: kostal_kore/{SERIAL}/proxy/command/battery_charge
 ```
 
 `{SERIAL}` durch die Seriennummer des Wechselrichters ersetzen.
@@ -157,15 +157,15 @@ meters:
 MQTT Adapter subscriben auf:
 
 ```
-kostal_plenticore/{SERIAL}/proxy/#     → vereinfachte Werte
-kostal_plenticore/{SERIAL}/modbus/#    → alle Register-Werte
+kostal_kore/{SERIAL}/proxy/#     → vereinfachte Werte
+kostal_kore/{SERIAL}/modbus/#    → alle Register-Werte
 ```
 
 Steuerbefehle schreiben:
 ```
-kostal_plenticore/{SERIAL}/proxy/command/battery_charge    → Ladeleistung (W)
-kostal_plenticore/{SERIAL}/proxy/command/battery_min_soc   → Min SoC (%)
-kostal_plenticore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
+kostal_kore/{SERIAL}/proxy/command/battery_charge    → Ladeleistung (W)
+kostal_kore/{SERIAL}/proxy/command/battery_min_soc   → Min SoC (%)
+kostal_kore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 ```
 
 ## MQTT Topic Reference
@@ -248,7 +248,7 @@ evcc schreibt REG 1034 ──► Proxy
 
 ### MQTT Bridge zeigt keine Daten
 - Prüfe ob MQTT Bridge in den Integrationsoptionen aktiviert ist
-- `kostal_plenticore/{SERIAL}/modbus/available` → `online`?
+- `kostal_kore/{SERIAL}/modbus/available` → `online`?
 - MQTT Broker erreichbar von HA und evcc?
 
 ### Batterie reagiert nicht auf Steuerbefehle

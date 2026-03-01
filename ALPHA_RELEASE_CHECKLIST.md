@@ -8,6 +8,7 @@
 - [x] `LICENSE` file is present (MIT).
 - [x] README includes HACS custom-repository installation flow.
 - [x] README includes clear alpha warning and issue-reporting path.
+- [x] README includes explicit project provenance/transparency notes (origin credits, AI-assisted coding disclosure, manual check responsibility).
 - [x] CI workflows exist for HACS validation and test/type checks.
 
 ## Home Assistant quality/platinum self-check

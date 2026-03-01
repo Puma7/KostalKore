@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Button platform scope**: Button platform now loads for every entry (migration button always available), while Modbus-only buttons remain conditional.
-- **Docs**: README now includes one-click migration steps from old plugin.
+- **Docs**: README now includes two-step migration guidance from old plugin.
+- **Docs / provenance**: Added explicit credits and transparency disclosure (thanks to `@stegm`, AI-assisted coding disclosure, manual validation note by `@Puma7`).
+- **Docs / MQTT examples**: Updated `PROXY_SETUP.md` example topic prefix from `kostal_plenticore/...` to `kostal_kore/...`.
 
 ## [2.16.0-alpha.2] - 2026-03-01
 

@@ -19,7 +19,7 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 class LegacyMigrationButton(ButtonEntity):
-    """One-click import from legacy ``kostal_plenticore`` config entry."""
+    """Step-1 import from legacy ``kostal_plenticore`` config entry."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
