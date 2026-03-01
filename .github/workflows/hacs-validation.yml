@@ -18,5 +18,5 @@ jobs:
         with:
           category: integration
           # Repo metadata checks (description/topics/brands) are managed in GitHub settings.
-          # integration_manifest uses raw.githubusercontent URLs that do not resolve slash refs.
-          ignore: description topics brands integration_manifest
+          # integration_manifest/hacsjson use raw.githubusercontent URLs that do not resolve slash refs.
+          ignore: description topics brands integration_manifest hacsjson
