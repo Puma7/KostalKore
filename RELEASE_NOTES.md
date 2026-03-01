@@ -1,5 +1,11 @@
 # Release Notes
 
+## Documentation sync update (post v2.16.0-alpha.4)
+
+- Reviewed and updated all maintained Markdown docs for current `kostal_kore` naming and behavior.
+- Corrected stale setup/developer paths and outdated architecture notes.
+- Aligned developer docs with current optional Modbus/MQTT/proxy capabilities and installer-access model.
+
 ## v2.16.0-alpha.4 (Experimental)
 
 This alpha update adds two-step migration support from the legacy plugin.

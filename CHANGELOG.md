@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Markdown documentation sweep**: Synced all maintained `.md` files with current `kostal_kore` naming, migration flow, and access model.
+- **Developer docs refresh**: Updated `QUICK_REFERENCE.md`, `AI_DOCUMENTATION.md`, and `ENTITY_REFERENCE.md` to remove stale paths/versions and align with optional Modbus/MQTT architecture.
+- **Agent runbook refresh**: Updated `AGENTS.md` test-count guidance and mypy path to current repository layout.
+- **Obsolete guide cleanup**: Removed untracked/ignored `custom_components/kostal_kore/DEVELOPMENT_GUIDE.md` and consolidated references to maintained docs.
+
 ## [2.16.0-alpha.4] - 2026-03-01
 
 ### Added

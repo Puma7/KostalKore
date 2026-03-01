@@ -1,10 +1,10 @@
 # AI Context & Documentation - Kostal Inverter HA
 
 ## 1. Project Overview
-**Name**: Kostal Plenticore Solar Inverter Integration
+**Name**: KOSTAL KORE (Kostal Plenticore Solar Inverter Integration)
 **Type**: Custom Home Assistant Integration
-**Working Directory**: `kostal_kore` (Root of the integration package)
-**Core Library**: `pykoplenti` (v1.5.0rc1)
+**Working Directory**: `custom_components/kostal_kore`
+**Core Library**: `pykoplenti` (v1.5.0)
 
 This integration allows Home Assistant to monitor and control Kostal Plenticore inverters via their local network API (HTTP/Modbus-TCP wrapper). It is designed to be robust, safe, and efficient, using Home Assistant's `DataUpdateCoordinator` pattern.
 
@@ -57,14 +57,19 @@ graph TD
 4.  **`const_ids.py`**:
     *   Centralized identifiers for module IDs and common setting IDs.
 
-4.  **`config_flow.py`**:
-    *   Handles the setup UI: Host IP, Password, and optional Service Code.
-    *   Validates connection before creating the standard config entry.
+5.  **`config_flow.py`**:
+    *   Handles the two-step setup UI: connection/auth first, then first-run options (Modbus, MQTT bridge, proxy).
+    *   Supports best-effort host auto-discovery when host is left empty.
+    *   Stores detected access profile (`access_role`, `installer_access`) in entry data.
+
+6.  **Modbus/MQTT extensions**:
+    *   **`modbus_client.py` / `modbus_proxy.py`**: Optional Modbus TCP integration + proxy for external systems.
+    *   **`mqtt_bridge.py`**: Optional publish/command bridge for Modbus register values.
 
 ## 3. Directory Structure & File map
 
 ```text
-kostal_kore/
+custom_components/kostal_kore/
 ├── __init__.py           # Integration entry point. Sets up the Plenticore instance.
 ├── manifest.json         # Metadata (version, dependencies, codeowners).
 ├── config_flow.py        # UI logic for adding the integration.
@@ -75,6 +80,9 @@ kostal_kore/
 ├── number.py             # Writable numeric entities (Settings).
 ├── select.py             # Writable choice entities (Settings).
 ├── switch.py             # Writable boolean entities (Settings).
+├── modbus_client.py      # Optional Modbus TCP client.
+├── modbus_proxy.py       # Optional Modbus TCP proxy for external tools.
+├── mqtt_bridge.py        # Optional MQTT bridge for register data and commands.
 ├── diagnostics.py        # Logic for downloading debug data.
 └── strings.json          # Translation strings for UI.
 ```
@@ -114,7 +122,7 @@ To add a writable setting:
 ### C. Safety & Error Handling
 *   **Authentication**: The integration handles login/logout automatically. Do not manually instantiate `ExtendedApiClient` outside of the provided structures.
 *   **Modbus Errors**: Catch `ApiException` and use `parse_modbus_exception`.
-*   **Service Code**: Use `ensure_installer_access(...)` before writes that require installer access.
+*   **Installer Access**: Use `ensure_installer_access(...)` before writes that require installer-level privileges.
 
 ## 5. Critical Technical Constraints
 *   **Polling Interval**: Logic is sensitive to polling frequency. Do not decrease intervals below 10s to avoid overwhelming the inverter's single-threaded web server.
@@ -128,4 +136,4 @@ To add a writable setting:
 *   **Legacy Battery IDs**: Some firmware exposes `Battery:MinSoc` and `Battery:MinHomeComsumption` (typo). The integration auto-falls back to those IDs.
 
 ---
-*Last Updated: 2026-01-17*
+*Last Updated: 2026-03-01*

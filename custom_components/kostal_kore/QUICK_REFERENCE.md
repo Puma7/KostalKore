@@ -1,18 +1,18 @@
-# Kostal Plenticore Integration - Quick Reference
+# KOSTAL KORE Integration - Quick Reference
 
 ## 🚀 Quick Start: Adding a New Battery Feature
 
 ### 1. Check if Feature Exists
 ```python
 # In Home Assistant, check diagnostics:
-# Settings → Integrations → Kostal Plenticore → Diagnostics
+# Settings → Integrations → KOSTAL KORE → Diagnostics
 # Look for "available_settings_data" → "devices:local"
 ```
 
 ### 2. Add to number.py (for numeric controls)
 ```python
-from kostal_kore.const_ids import ModuleId, SettingId
-from kostal_kore.helper import ensure_installer_access
+from custom_components.kostal_kore.const_ids import ModuleId, SettingId
+from custom_components.kostal_kore.helper import ensure_installer_access
 
 PlenticoreNumberEntityDescription(
     key="battery_feature_name",
@@ -39,12 +39,12 @@ PlenticoreNumberEntityDescription(
 
 ## ⚠️ Critical Safety Rules
 
-1. **Advanced controls require installer service code**
+1. **Advanced controls require installer-level access**
    ```python
    if not ensure_installer_access(entry, requires_installer, self.module_id, self.data_id, "battery control"):
        return  # Block operation
    ```
-   - Missing service code triggers a Home Assistant repair issue (`installer_required`).
+   - Missing installer access triggers a Home Assistant repair issue (`installer_required`).
 
 2. **Always validate values**
    ```python
@@ -265,7 +265,7 @@ except ApiException as err:
 
 ## 🔐 Safety Checklist
 
-- [ ] Advanced controls require installer service code
+- [ ] Advanced controls require installer-level access
 - [ ] Value ranges validated before sending
 - [ ] All operations logged for audit
 - [ ] Errors handled gracefully (no crashes)
@@ -325,10 +325,12 @@ data:
 
 These are created under `_calc_` in `sensor.py`:
 
-- **Battery Efficiency**: `(EnergyDischarge) / (EnergyChargePv + EnergyChargeGrid)`
-- **Battery Efficiency PV Only**: `(EnergyDischarge) / (EnergyChargePv)` when grid charge is 0
-- **Grid → Battery Efficiency**: `(EnergyChargeGrid) / (EnergyChargeInvIn)`
-- **Battery → Grid Efficiency**: `(EnergyDischargeGrid) / (EnergyDischarge)`
+- **Total Grid Consumption**: `Grid→Home + Grid→Battery` (Day/Month/Year/Total)
+- **Battery Discharge Total**: `HomeBat + DischargeGrid` (Day/Month/Year/Total)
+- **Battery Charge Total**: charge-energy totals (Day/Month/Year/Total)
+- **Battery Efficiency**: discharge relative to charge input (Day/Month/Year/Total)
+- **Battery Net Efficiency**: AC-side/net efficiency metric (Day/Month/Year/Total)
+- **Inverter Discharge Efficiency**: inverter-side discharge efficiency (Day/Month/Year/Total)
 
 ---
 
@@ -336,7 +338,7 @@ These are created under `_calc_` in `sensor.py`:
 
 ### Prerequisites
 
-1. **Enable Modbus** in the integration options (Settings → Integrations → Kostal Plenticore → Configure → Enable Modbus)
+1. **Enable Modbus** in the integration options (Settings → Integrations → KOSTAL KORE → Configure → Enable Modbus)
 2. **Battery Management Mode** must be set to allow external control on the inverter itself (register 1080). Check this in the Modbus diagnostic report (`battery_mgmt_mode`).
 
 ### Available Control Entities (via Modbus)
@@ -345,7 +347,7 @@ When Modbus is enabled, these `number` entities are created automatically:
 
 | Entity | Register | Unit | Description |
 |--------|----------|------|-------------|
-| **Battery Charge Power (Modbus)** | 1034 | W | Set absolute DC charge/discharge power. Positive = charge, negative = discharge. |
+| **Battery Charge Power (Modbus)** | 1034 | W | Set absolute DC charge/discharge power. **Negative = charge**, **positive = discharge**. |
 | **Battery Max Charge Limit (Modbus)** | 1038 | W | Maximum allowed charge power. |
 | **Battery Max Discharge Limit (Modbus)** | 1040 | W | Maximum allowed discharge power. |
 | **Battery Min SoC (Modbus)** | 1042 | % | Minimum state of charge (battery won't discharge below this). |
@@ -357,8 +359,8 @@ When Modbus is enabled, these `number` entities are created automatically:
 
 **Method 1: Direct power control (Register 1034)**
 - Use `number.set_value` on "Battery Charge Power (Modbus)"
-- **Positive value** → force charge at specified power (e.g., 2000 W)
-- **Negative value** → force discharge at specified power (e.g., -2000 W)
+- **Negative value** → force charge at specified power (e.g., -2000 W)
+- **Positive value** → force discharge at specified power (e.g., 2000 W)
 - **Zero** → normal automatic operation
 
 **Method 2: G3 power limits (Registers 1280/1282)** — recommended for G3 inverters
@@ -402,7 +404,7 @@ data:
 | Battery SoC | 514 | % | Current state of charge |
 | Battery Temperature | 214 | °C | Current battery temperature |
 | Battery Voltage | 216 | V | Current battery voltage |
-| Battery Charge/Discharge Power | 582 | W | Actual power (+ = charging, - = discharging) |
+| Battery Charge/Discharge Power | 582 | W | Actual power (- = charging, + = discharging) |
 | Battery Cycles | 194 | cycles | Total charge/discharge cycles |
 | Battery Max Charge (HW) | 1076 | W | Hardware-reported max charge power |
 | Battery Max Discharge (HW) | 1078 | W | Hardware-reported max discharge power |
@@ -459,5 +461,7 @@ Wenn der SoC-Controller aktiv ist, werden externe Batterie-Writes (z.B. von evcc
 
 ---
 
-*For detailed information, see `DEVELOPMENT_GUIDE.md`*
+*For detailed information, see root `README.md`, `ENTITY_REFERENCE.md`, and `PROXY_SETUP.md`.*
+  
+*Last Updated: 2026-03-01*
 

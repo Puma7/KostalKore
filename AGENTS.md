@@ -13,12 +13,12 @@ The test directory is `Tests/` (uppercase T) but `pytest.ini` references `testpa
 source .venv/bin/activate
 python -m pytest Tests/ -v --timeout=60
 ```
-375 tests should pass with 100% coverage. 3 known errors in `test_modbus_integration.py` (`test_setup_entry_modbus_enabled_success`, `test_setup_entry_modbus_auto_endianness`, `test_setup_entry_mqtt_bridge_enabled`) are pre-existing "Lingering timer" fixture teardown issues. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list).
+The suite currently collects about 412 tests. 3 known errors in `test_modbus_integration.py` (`test_setup_entry_modbus_enabled_success`, `test_setup_entry_modbus_auto_endianness`, `test_setup_entry_mqtt_bridge_enabled`) are pre-existing "Lingering timer" fixture teardown issues. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list).
 
 ### Type checking
 ```bash
 source .venv/bin/activate
-python -m mypy kostal_kore/
+python -m mypy custom_components/kostal_kore/
 ```
 Uses strict mode per `mypy.ini`. Should report zero issues.
 

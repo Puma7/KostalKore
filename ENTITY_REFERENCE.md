@@ -1,6 +1,7 @@
-# Entity-Referenz: Kostal Plenticore Integration
+# Entity-Referenz: KOSTAL KORE (Kostal Plenticore)
 
 Vollständige Dokumentation aller Entities, Werte, Einheiten und deren Bedeutung.
+Hinweis: Verfügbarkeit einzelner Entities hängt von Inverter-Generation/Firmware sowie Zugriffsprofil (User/Installer) ab.
 
 ---
 
@@ -234,6 +235,8 @@ Vollständige Dokumentation aller Entities, Werte, Einheiten und deren Bedeutung
 
 | Entity | Typ | Beschreibung |
 |---|---|---|
+| **Import Legacy Plenticore Data** | Button | Schritt 1 der Legacy-Migration: Importiert alte Entry-Daten und migriert Registry-Bindings, ohne die Legacy-Entry sofort zu entfernen. |
+| **Finalize Legacy Cleanup** | Button | Schritt 2 der Legacy-Migration: Entfernt verbleibende Legacy-Entities/-Geräteverknüpfungen und löscht anschließend die alte Legacy-Entry. |
 | **Reset Modbus Registers** | Button | Setzt alle temporär deaktivierten Register zurück. Nach Firmware-Update oder Inverterwechsel drücken, damit neue Register erkannt werden. |
 | **Run Modbus Diagnostics** | Button | Liest alle Register und erstellt einen ausführlichen Diagnosebericht als HA Persistent Notification. 100% read-only, kein Schreibzugriff. |
 
@@ -272,3 +275,7 @@ Vollständige Dokumentation aller Entities, Werte, Einheiten und deren Bedeutung
 | SoH | < 90% | < 80% | < 60% |
 | Zyklen (LFP) | > 4000 | > 6000 | > 8000 |
 | Zyklen (NMC) | > 3000 | > 4000 | > 6000 |
+
+---
+
+*Last Updated: 2026-03-01*
