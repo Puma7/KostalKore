@@ -118,3 +118,38 @@
 | Modbus Register | 90+ |
 | HA Entities (Modbus) | 8 Number + 3 Button + 3 SoC Controller + 10 Health + 11 Binary + 5 Diagnose + 3 Longevity + 2 Fire Safety + 4 Fire Safety Binary |
 | Safety Fixes | 5 CRITICAL + 5 HIGH |
+
+### Zukunfts-Option: EEBUS-Unterstützung
+
+**Was ist EEBUS?** Ein standardisiertes Kommunikationsprotokoll für die netzfreundliche Steuerung
+von Energiegeräten. Der Netzbetreiber kann über EEBUS (via Smart Meter Gateway) dem Wechselrichter
+Einspeise- und Leistungsgrenzen signalisieren — als Alternative zur starren 60%-Regelung.
+
+**Warum relevant für diese Integration?**
+- §14a EnWG (Deutschland): Ab 2024 können steuerbare Verbraucher (Wallboxen, Wärmepumpen)
+  vom Netzbetreiber gedimmt werden. EEBUS ist der geplante Kommunikationsstandard.
+- Kostal Plenticore G3 hat EEBUS-Unterstützung ab Firmware 3.06.xx.
+- Die Integration könnte EEBUS-Signale empfangen und als HA-Sensoren/Trigger bereitstellen.
+
+**Mögliche Implementierung:**
+1. **EEBUS Discovery** — mDNS-basierte Erkennung des Smart Meter Gateways
+2. **EEBUS SPINE/SHIP Protokoll** — Websocket-basierte Kommunikation (TLS)
+3. **Use Case Models:**
+   - LPC (Limitation of Power Consumption) — Einspeisebegrenzung vom Netzbetreiber
+   - LPP (Limitation of Power Production) — PV-Abregelung
+   - MGCP (Monitoring of Grid Connection Point) — Netzanschlusspunkt-Überwachung
+4. **HA-Integration:**
+   - Sensor: Aktuelle Netzanforderung (Limit in W oder %)
+   - Automation-Trigger: "Netzbetreiber fordert Abregelung"
+   - Automatische Anpassung der Batterie-Ladeleistung basierend auf EEBUS-Signal
+
+**Hürden:**
+- EEBUS-Zertifizierung erforderlich (kostenpflichtig)
+- Smart Meter Gateway muss installiert sein
+- Kostal muss EEBUS-Pairing im WR freischalten
+- Protokoll-Komplexität: SHIP (TLS-Websocket) + SPINE (XML-basiert)
+
+**Referenzen:**
+- https://www.eebus.org/
+- https://github.com/enbility/eebus-go (Go-Referenzimplementierung)
+- https://github.com/enbility/spine-go (SPINE Protokoll)

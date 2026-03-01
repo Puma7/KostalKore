@@ -865,6 +865,12 @@ async def async_setup_entry(
             entities.append(BatteryChargeBlockSwitch(
                 modbus_coord, entry.entry_id, plenticore.device_info, hass=hass,
             ))
+            from .grid_charge_limiter import GridFeedInLimiterSwitch
+            limiter_switch = GridFeedInLimiterSwitch(
+                modbus_coord, entry.entry_id, plenticore.device_info, hass=hass,
+            )
+            entities.append(limiter_switch)
+            entry_data["grid_feedin_limiter"] = limiter_switch
     except Exception:
         pass
 

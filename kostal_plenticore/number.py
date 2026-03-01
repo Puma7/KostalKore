@@ -1503,6 +1503,16 @@ async def async_setup_entry(
                 async_add_entities(soc_entities)
                 _LOGGER.info("Added %d SoC controller entities", len(soc_entities))
 
+        # Grid Feed-In Limit number entity
+        limiter = modbus_data.get("grid_feedin_limiter")
+        if limiter is not None:  # pragma: no cover
+            from .grid_charge_limiter import FeedInLimitNumber
+
+            async_add_entities([
+                FeedInLimitNumber(limiter, entry.entry_id, plenticore.device_info),
+            ])
+            _LOGGER.info("Added Grid Feed-In Limit number entity")
+
 
 class PlenticoreDataNumber(
     CoordinatorEntity[SettingDataUpdateCoordinator], NumberEntity
