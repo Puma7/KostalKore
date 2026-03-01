@@ -262,6 +262,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         longevity_advisor = LongevityAdvisor(health_monitor, bat_thresholds)
         _LOGGER.info("Battery chemistry: %s (%s)", bat_thresholds.chemistry, bat_thresholds.chemistry_full)
 
+    # SoC Controller (auto charge/discharge to target SoC)
+    soc_controller = None
+    if modbus_coordinator is not None:  # pragma: no cover
+        from .battery_soc_controller import BatterySocController
+        soc_controller = BatterySocController(modbus_coordinator, hass=hass)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,
         "mqtt_bridge": mqtt_bridge,
@@ -272,6 +278,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
         "request_scheduler": request_scheduler,
+        "soc_controller": soc_controller,
         "num_bidirectional": num_bi if modbus_coordinator is not None else 0,
     }
 
@@ -320,8 +327,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     """
     start_time = time.time()
 
-    # Clean up Modbus proxy + MQTT bridge
+    # Clean up SoC Controller + Modbus proxy + MQTT bridge
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:  # pragma: no cover
+        await soc_ctrl.stop()
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
         await modbus_proxy.stop()
