@@ -97,9 +97,11 @@ class KostalMqttBridge:
         hass: HomeAssistant,
         coordinator: ModbusDataUpdateCoordinator,
         device_id: str,
+        soc_controller: Any = None,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
+        self._soc_controller = soc_controller
         self._device_id = device_id
         self._topic_base = f"{TOPIC_PREFIX}/{device_id}/modbus"
         self._proxy_base = f"{TOPIC_PREFIX}/{device_id}/proxy"
@@ -355,10 +357,28 @@ class KostalMqttBridge:
 
         await self._execute_write(reg, payload, source=f"proxy/{proxy_name}")
 
+    # Battery control register names for SoC controller arbitration
+    _BATTERY_REG_NAMES: Final = frozenset({
+        "bat_charge_dc_abs_power", "bat_max_charge_limit", "bat_max_discharge_limit",
+        "bat_min_soc", "bat_max_soc", "bat_charge_ac_abs",
+        "g3_max_charge", "g3_max_discharge",
+    })
+
     async def _execute_write(self, reg: ModbusRegister, payload: str, source: str) -> None:
-        """Validate, rate-limit, and execute a register write."""
+        """Validate, rate-limit, arbitrate, and execute a register write."""
         if not self._check_rate_limit(reg.name):
             return
+
+        # SoC controller arbitration for battery registers
+        if reg.name in self._BATTERY_REG_NAMES:
+            ctrl = self._soc_controller
+            if ctrl is not None and getattr(ctrl, "active", False):
+                _LOGGER.warning(
+                    "MQTT command REJECTED: %s (SoC Controller active, target=%.0f%%). "
+                    "Stop the SoC Controller first. (source: %s)",
+                    reg.name, ctrl.target_soc or 0, source,
+                )
+                return
 
         try:
             value: Any

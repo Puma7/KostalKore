@@ -237,6 +237,12 @@ class ModbusTcpProxyServer:
                     await reader.readexactly(length - 1)
                     continue
 
+                if length < 2 or length > 260:
+                    _LOGGER.debug("Proxy: invalid MBAP length %d, dropping", length)
+                    if length > 1:
+                        await reader.readexactly(min(length - 1, 260))
+                    continue
+
                 pdu = await reader.readexactly(length - 1)
                 response_pdu = await self._process_pdu(pdu, unit_id)
 
@@ -374,6 +380,12 @@ class ModbusTcpProxyServer:
 
         reg = REGISTER_BY_ADDRESS.get(address)
         if reg is not None and reg.access == Access.RW:
+            if reg.count > 1:
+                _LOGGER.debug(
+                    "Proxy: FC06 rejected for %d-register %s (use FC16)",
+                    reg.count, reg.name,
+                )
+                return self._error_response(FC_WRITE_SINGLE, 0x03)
             try:
                 await self._coordinator.async_write_by_address(address, value)
                 _LOGGER.info("Proxy: write reg %d = %d (external)", address, value)

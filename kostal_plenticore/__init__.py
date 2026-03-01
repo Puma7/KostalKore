@@ -177,6 +177,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             )
             modbus_coordinator = None
 
+        # SoC Controller (must be created before MQTT bridge + proxy for arbitration)
+        if modbus_coordinator is not None:  # pragma: no cover
+            from .battery_soc_controller import BatterySocController
+            soc_controller = BatterySocController(modbus_coordinator, hass=hass)
+
         if modbus_coordinator and entry.options.get(
             CONF_MQTT_BRIDGE_ENABLED, False
         ):
@@ -184,14 +189,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             if isinstance(device_id, tuple):
                 device_id = str(entry.entry_id)
             mqtt_bridge = KostalMqttBridge(
-                hass, modbus_coordinator, str(device_id)
+                hass, modbus_coordinator, str(device_id),
+                soc_controller=soc_controller,
             )
             await mqtt_bridge.async_start()
-
-        # SoC Controller (must be created before proxy for arbitration)
-        if modbus_coordinator is not None:  # pragma: no cover
-            from .battery_soc_controller import BatterySocController
-            soc_controller = BatterySocController(modbus_coordinator, hass=hass)
 
         if modbus_coordinator and entry.options.get(  # pragma: no cover
             CONF_MODBUS_PROXY_ENABLED, False

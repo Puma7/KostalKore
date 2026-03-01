@@ -261,6 +261,18 @@ class BatteryTestButton(ButtonEntity):
             self.async_write_ha_state()
             return
 
+        # Block if SoC controller is active (avoid conflicting writes)
+        from .const import DOMAIN
+        entry_data = self.hass.data.get(DOMAIN, {})
+        for eid, edata in entry_data.items():
+            if isinstance(edata, dict):
+                ctrl = edata.get("soc_controller")
+                if ctrl is not None and getattr(ctrl, "active", False):
+                    _LOGGER.warning("Battery test blocked: SoC controller is active")
+                    self._attr_extra_state_attributes["status"] = "blocked: SoC Controller aktiv"
+                    self.async_write_ha_state()
+                    return
+
         self._attr_extra_state_attributes["status"] = "running"
         self._attr_extra_state_attributes["started"] = datetime.now().isoformat()
         self.async_write_ha_state()

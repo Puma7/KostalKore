@@ -37,6 +37,7 @@ DEFAULT_MAX_DISCHARGE_W: Final[float] = 5000.0
 SAFE_MIN_SOC: Final[float] = 10.0
 SAFE_MAX_SOC: Final[float] = 95.0
 MAX_BATTERY_TEMP_C: Final[float] = 48.0
+MAX_CONSECUTIVE_FAILURES: Final[int] = 5
 
 
 class BatterySocController:
@@ -140,25 +141,43 @@ class BatterySocController:
         Stop logic handles Pylontech SoC jumps (e.g. 18% → 9%):
             Charging:    stop if current_soc >= target  (at or above)
             Discharging: stop if current_soc <= target  (at or below)
-        This ensures we NEVER overshoot in either direction, even if
-        the BMS reports a stale value that suddenly jumps past the target.
         """
         was_charging = False
+        consecutive_read_fails = 0
+        consecutive_write_fails = 0
         try:
             while self._target_soc is not None:
                 current_soc = await self._read_soc()
+
+                # NaN protection: treat NaN/Inf as read failure
+                if current_soc is not None:
+                    import math
+                    if math.isnan(current_soc) or math.isinf(current_soc):
+                        current_soc = None
+
                 if current_soc is None:
-                    self._status = "error: SoC nicht lesbar"
+                    consecutive_read_fails += 1
+                    self._status = f"error: SoC nicht lesbar ({consecutive_read_fails}x)"
+                    if consecutive_read_fails >= MAX_CONSECUTIVE_FAILURES:
+                        _LOGGER.error(
+                            "SoC Controller: %d consecutive read failures, stopping",
+                            consecutive_read_fails,
+                        )
+                        await self._notify(
+                            "SoC Controller gestoppt",
+                            f"SoC konnte {consecutive_read_fails}x nicht gelesen werden.\n"
+                            f"Automatik-Modus wiederhergestellt.",
+                        )
+                        return
                     await asyncio.sleep(POLL_INTERVAL)
                     continue
+                consecutive_read_fails = 0
 
                 target = self._target_soc
                 need_charge = current_soc < target
                 need_discharge = current_soc > target
 
                 # ── SAFE STOP: directional, handles SoC jumps ──
-                # If we were charging and SoC is now AT or ABOVE target → done
-                # If we were discharging and SoC is now AT or BELOW target → done
                 target_reached = False
                 if need_charge is False and need_discharge is False:
                     target_reached = True
@@ -198,20 +217,38 @@ class BatterySocController:
                     continue
 
                 # ── CONTROL ──
+                write_ok = False
                 if need_charge:
                     was_charging = True
-                    power = self._max_charge_w
                     self._status = f"charging ({current_soc:.0f}% → {target:.0f}%)"
-                    await self._write_charge(power)
+                    write_ok = await self._write_charge(self._max_charge_w)
                 elif need_discharge:
                     was_charging = False
-                    power = self._max_discharge_w
                     self._status = f"discharging ({current_soc:.0f}% → {target:.0f}%)"
-                    await self._write_discharge(power)
+                    write_ok = await self._write_discharge(self._max_discharge_w)
 
-                # Wait, but don't exceed keepalive interval
-                elapsed = time.monotonic() - self._last_write
-                sleep = min(POLL_INTERVAL, KEEPALIVE_INTERVAL - elapsed - 1)
+                if write_ok:
+                    consecutive_write_fails = 0
+                else:
+                    consecutive_write_fails += 1
+                    if consecutive_write_fails >= MAX_CONSECUTIVE_FAILURES:
+                        _LOGGER.error(
+                            "SoC Controller: %d consecutive write failures, stopping",
+                            consecutive_write_fails,
+                        )
+                        await self._notify(
+                            "SoC Controller gestoppt",
+                            f"Register-Schreibfehler {consecutive_write_fails}x hintereinander.\n"
+                            f"Automatik-Modus wiederhergestellt.",
+                        )
+                        return
+
+                # Sleep, but cap at time-to-next-keepalive
+                if self._last_write > 0:
+                    elapsed = time.monotonic() - self._last_write
+                    sleep = min(POLL_INTERVAL, KEEPALIVE_INTERVAL - elapsed - 1)
+                else:
+                    sleep = 2.0
                 await asyncio.sleep(max(1.0, sleep))
 
         except asyncio.CancelledError:
@@ -226,31 +263,37 @@ class BatterySocController:
     # Register I/O
     # ------------------------------------------------------------------
 
-    async def _write_charge(self, power: float) -> None:
+    async def _write_charge(self, power: float) -> bool:
         """Charge from grid: REG 1034 = -power (Kostal: negative=charge)."""
         reg = REGISTER_BY_NAME.get("bat_charge_dc_abs_power")
-        if reg:
-            try:
-                await self._coord.async_write_register(reg, float(-abs(power)))
-                self._last_write = time.monotonic()
-            except Exception as err:
-                _LOGGER.warning("SoC Controller charge write failed: %s", err)
+        if not reg:
+            return False
+        try:
+            await self._coord.async_write_register(reg, float(-abs(power)))
+            self._last_write = time.monotonic()
+            return True
+        except Exception as err:
+            _LOGGER.warning("SoC Controller charge write failed: %s", err)
+            return False
 
-    async def _write_discharge(self, power: float) -> None:
+    async def _write_discharge(self, power: float) -> bool:
         """Discharge to grid: REG 1034 = +power, REG 1038 = 0."""
         reg1034 = REGISTER_BY_NAME.get("bat_charge_dc_abs_power")
         reg1038 = REGISTER_BY_NAME.get("bat_max_charge_limit")
-        if reg1034:
-            try:
-                await self._coord.async_write_register(reg1034, float(abs(power)))
-                self._last_write = time.monotonic()
-            except Exception as err:
-                _LOGGER.warning("SoC Controller discharge write failed: %s", err)
+        if not reg1034:
+            return False
+        try:
+            await self._coord.async_write_register(reg1034, float(abs(power)))
+            self._last_write = time.monotonic()
+        except Exception as err:
+            _LOGGER.warning("SoC Controller discharge write failed: %s", err)
+            return False
         if reg1038:
             try:
                 await self._coord.async_write_register(reg1038, 0.0)
             except Exception:
                 pass
+        return True
 
     async def _write_normal(self) -> None:
         """Reset to automatic mode."""
