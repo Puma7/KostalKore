@@ -26,6 +26,10 @@
 - [x] Grid diagnostics/safety thresholds adapt to detected 50/60 Hz and 120/230 V profiles.
 - [x] Runtime control paths avoid fixed 20 kW restore values and use inverter-aware caps.
 
+## Migration readiness
+
+- [x] One-click import routine exists to migrate legacy `kostal_plenticore` config/registry data into `kostal_kore`.
+
 ## Known limitations (alpha)
 
 - Some teardown errors in `Tests/test_modbus_integration.py` are pre-existing lingering-timer issues.

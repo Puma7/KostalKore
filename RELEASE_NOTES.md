@@ -1,5 +1,15 @@
 # Release Notes
 
+## v2.16.0-alpha.3 (Experimental)
+
+This alpha update adds one-click migration support from the legacy plugin.
+
+- Added **Import Legacy Plenticore Data** button for direct in-app migration.
+- Added registry migration logic to preserve existing entity IDs/history where possible.
+- Added migration test coverage (data/options import, host matching, duplicate handling).
+
+> Alpha notice: Please report bugs via GitHub Issues with diagnostics attached.
+
 ## v2.16.0-alpha.2 (Experimental)
 
 This alpha update focuses on setup UX, access control clarity, and branding alignment.

@@ -60,6 +60,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Platform constants
 PLATFORMS: Final[list[Platform]] = [
+    Platform.BUTTON,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
@@ -68,7 +69,6 @@ PLATFORMS: Final[list[Platform]] = [
 
 MODBUS_PLATFORMS: Final[list[Platform]] = [
     Platform.BINARY_SENSOR,
-    Platform.BUTTON,
 ]
 
 # Performance constants

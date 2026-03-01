@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0-alpha.3] - 2026-03-01
+
+### Added
+- **One-click legacy import**: New button action to import data/options from `kostal_plenticore` into `kostal_kore`.
+- **Registry migration routine**: Added migration logic to rebind entity/device registry records from old entry to new entry.
+- **Migration tests**: Added dedicated tests for legacy migration behavior and button setup coverage.
+
+### Changed
+- **Button platform scope**: Button platform now loads for every entry (migration button always available), while Modbus-only buttons remain conditional.
+- **Docs**: README now includes one-click migration steps from old plugin.
+
 ## [2.16.0-alpha.2] - 2026-03-01
 
 ### Added
