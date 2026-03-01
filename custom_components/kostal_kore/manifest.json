@@ -3,7 +3,7 @@
   "name": "KOSTAL KORE (Experimental Alpha)",
   "version": "2.16.0-alpha.4",
   "codeowners": [
-    "@stegm"
+    "@Puma7"
   ],
   "config_flow": true,
   "documentation": "https://github.com/Puma7/Kostal#readme",
