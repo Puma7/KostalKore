@@ -1,8 +1,5 @@
 {
   "name": "KOSTAL KORE (Experimental Alpha)",
-  "domains": [
-    "kostal_kore"
-  ],
   "homeassistant": "2024.1.0",
   "render_readme": true
 }

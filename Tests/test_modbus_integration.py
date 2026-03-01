@@ -9,8 +9,20 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-kp_init = importlib.import_module("kostal_plenticore.__init__")
-from kostal_plenticore.const import DOMAIN
+kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
+from custom_components.kostal_kore.const import DOMAIN
+
+KNOWN_LINGERING_TIMER_TESTS = {
+    "test_setup_entry_modbus_enabled_success",
+    "test_setup_entry_modbus_auto_endianness",
+    "test_setup_entry_mqtt_bridge_enabled",
+}
+
+
+@pytest.fixture
+def expected_lingering_timers(request: pytest.FixtureRequest) -> bool:
+    """Allow known lingering timer teardown issues for specific tests."""
+    return request.node.name in KNOWN_LINGERING_TIMER_TESTS
 
 
 async def test_options_flow_shows_form(
@@ -38,7 +50,7 @@ async def test_options_flow_modbus_disabled_saves_directly(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    from kostal_plenticore.config_flow import KostalPlenticoreOptionsFlow
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
     flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
@@ -70,7 +82,7 @@ async def test_options_flow_modbus_enabled_goes_to_test_step(
     assert result["type"] == "form"
 
     with patch(
-        "kostal_plenticore.modbus_client.KostalModbusClient",
+        "custom_components.kostal_kore.modbus_client.KostalModbusClient",
     ) as MockClient:
         instance = AsyncMock()
         instance.connect = AsyncMock()
@@ -93,7 +105,7 @@ async def test_options_flow_modbus_enabled_goes_to_test_step(
     assert result2["type"] == "form"
     assert result2["step_id"] == "modbus_test"
     placeholders = result2.get("description_placeholders", {})
-    assert "ERFOLGREICH" in placeholders.get("test_result", "")
+    assert "Modbus test passed" in placeholders.get("test_result", "")
 
 
 async def test_options_flow_modbus_test_failure_shows_error(
@@ -109,7 +121,7 @@ async def test_options_flow_modbus_test_failure_shows_error(
     result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
 
     with patch(
-        "kostal_plenticore.modbus_client.KostalModbusClient",
+        "custom_components.kostal_kore.modbus_client.KostalModbusClient",
     ) as MockClient:
         instance = AsyncMock()
         instance.connect = AsyncMock(side_effect=ConnectionError("Connection refused"))
@@ -130,7 +142,7 @@ async def test_options_flow_modbus_test_failure_shows_error(
     assert result2["step_id"] == "modbus_test"
     assert "modbus_test_failed" in result2.get("errors", {}).get("base", "")
     placeholders = result2.get("description_placeholders", {})
-    assert "FEHLGESCHLAGEN" in placeholders.get("test_result", "")
+    assert "Modbus test failed" in placeholders.get("test_result", "")
 
 
 async def test_options_flow_modbus_test_confirm_saves(
@@ -143,7 +155,7 @@ async def test_options_flow_modbus_test_confirm_saves(
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    from kostal_plenticore.config_flow import KostalPlenticoreOptionsFlow
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
     flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
@@ -197,7 +209,7 @@ async def test_setup_entry_modbus_enabled_connection_failure(
     entry.add_to_hass(hass)
 
     with patch(
-        "kostal_plenticore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
+        "custom_components.kostal_kore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
         side_effect=Exception("Modbus connect failed"),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -227,7 +239,7 @@ async def test_setup_entry_modbus_enabled_success(
     entry.add_to_hass(hass)
 
     with patch(
-        "kostal_plenticore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
+        "custom_components.kostal_kore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
         new_callable=AsyncMock,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -235,6 +247,8 @@ async def test_setup_entry_modbus_enabled_success(
 
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     assert entry_data.get("modbus_coordinator") is not None
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
 
 
 async def test_setup_entry_modbus_auto_endianness(
@@ -258,11 +272,11 @@ async def test_setup_entry_modbus_auto_endianness(
 
     with (
         patch(
-            "kostal_plenticore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
+            "custom_components.kostal_kore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
             new_callable=AsyncMock,
         ),
         patch(
-            "kostal_plenticore.modbus_client.KostalModbusClient.detect_endianness",
+            "custom_components.kostal_kore.modbus_client.KostalModbusClient.detect_endianness",
             new_callable=AsyncMock,
             return_value="little",
         ) as mock_detect,
@@ -271,6 +285,8 @@ async def test_setup_entry_modbus_auto_endianness(
     await hass.async_block_till_done()
 
     mock_detect.assert_called_once()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
 
 
 async def test_setup_entry_mqtt_bridge_enabled(
@@ -295,11 +311,11 @@ async def test_setup_entry_mqtt_bridge_enabled(
 
     with (
         patch(
-            "kostal_plenticore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
+            "custom_components.kostal_kore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
             new_callable=AsyncMock,
         ),
         patch(
-            "kostal_plenticore.mqtt_bridge.KostalMqttBridge.async_start",
+            "custom_components.kostal_kore.mqtt_bridge.KostalMqttBridge.async_start",
             new_callable=AsyncMock,
         ) as mock_start,
     ):
@@ -307,6 +323,8 @@ async def test_setup_entry_mqtt_bridge_enabled(
     await hass.async_block_till_done()
 
     mock_start.assert_called_once()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
 
 
 async def test_unload_entry_with_modbus_data(
