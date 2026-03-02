@@ -56,6 +56,8 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_HISTORY_MAX: int = 50
 EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
+SETUP_FETCH_TIMEOUT_SECONDS: float = 8.0
+SETUP_PREWARM_TIMEOUT_SECONDS: float = 8.0
 
 # Type variables for generic classes
 T = TypeVar("T")
@@ -202,32 +204,53 @@ class Plenticore:
         try:
             modules_task = self._fetch_modules()
             metadata_task = self._fetch_device_metadata()
-            
+
             # Run both operations concurrently
             modules_result, metadata_result = await asyncio.gather(
-                modules_task, metadata_task, return_exceptions=True
+                asyncio.wait_for(modules_task, timeout=SETUP_FETCH_TIMEOUT_SECONDS),
+                asyncio.wait_for(metadata_task, timeout=SETUP_FETCH_TIMEOUT_SECONDS),
+                return_exceptions=True,
             )
-            
+
             # Handle results
-            if isinstance(modules_result, Exception):
+            if isinstance(modules_result, asyncio.TimeoutError):
+                _LOGGER.warning(
+                    "Module discovery timed out after %.1fs, continuing with defaults",
+                    SETUP_FETCH_TIMEOUT_SECONDS,
+                )
+            elif isinstance(modules_result, Exception):
                 raise modules_result
-            if isinstance(metadata_result, Exception):
+            if isinstance(metadata_result, asyncio.TimeoutError):
+                _LOGGER.warning(
+                    "Device metadata fetch timed out after %.1fs, continuing with defaults",
+                    SETUP_FETCH_TIMEOUT_SECONDS,
+                )
+            elif isinstance(metadata_result, Exception):
                 raise metadata_result
 
             # Prime capability caches once to reduce duplicate startup probes
             # across sensor/number/select platforms.
             prewarm_results = await asyncio.gather(
-                self.async_get_process_data_cached(ttl_seconds=0.0),
-                self.async_get_settings_cached(ttl_seconds=0.0),
+                asyncio.wait_for(
+                    self.async_get_process_data_cached(ttl_seconds=0.0),
+                    timeout=SETUP_PREWARM_TIMEOUT_SECONDS,
+                ),
+                asyncio.wait_for(
+                    self.async_get_settings_cached(ttl_seconds=0.0),
+                    timeout=SETUP_PREWARM_TIMEOUT_SECONDS,
+                ),
                 return_exceptions=True,
             )
             for prewarm_result in prewarm_results:
                 if isinstance(prewarm_result, Exception):
-                    _LOGGER.debug("Capability cache prewarm failed: %s", prewarm_result)
+                    _LOGGER.debug(
+                        "Capability cache prewarm failed (non-fatal): %s",
+                        prewarm_result,
+                    )
 
             return True
-            
-        except (ApiException, KeyError, ValueError, asyncio.CancelledError) as err:
+
+        except (ApiException, KeyError, ValueError) as err:
             if isinstance(err, ApiException):
                 modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("Could not get device metadata: %s", modbus_err.message)
