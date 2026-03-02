@@ -41,6 +41,7 @@ from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import (
     PlenticoreDataFormatter,
     ensure_installer_access,
+    is_rest_write_supported_target,
     is_battery_control,
     parse_modbus_exception,
     requires_installer_service_code,
@@ -148,8 +149,13 @@ async def _get_settings_data_safe(plenticore: Any, operation: str) -> dict[str, 
         Settings data or empty dict if error occurs
     """
     try:
+        getter = (
+            plenticore.async_get_settings_cached
+            if hasattr(plenticore, "async_get_settings_cached")
+            else plenticore.client.get_settings
+        )
         return await asyncio.wait_for(
-            plenticore.client.get_settings(), timeout=SETTINGS_TIMEOUT_SECONDS
+            getter(), timeout=SETTINGS_TIMEOUT_SECONDS
         )
     except Exception as err:
         return _handle_number_error(err, operation)
@@ -1147,6 +1153,128 @@ NUMBER_SETTINGS_DATA = [
         fmt_from="format_round",
         fmt_to="format_round_back",
     ),
+    # Legacy/installer digital output controls used on some firmware tracks
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_configuration_flags",
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:tune",
+        name="Digital Outputs Customer Configuration Flags",
+        native_max_value=14,
+        native_min_value=1,
+        native_step=1,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:ConfigurationFlags",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_delay_time",
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:timer",
+        name="Digital Outputs Customer Delay Time",
+        native_unit_of_measurement="s",
+        native_max_value=86400,
+        native_min_value=0,
+        native_step=1,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:DelayTime",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_power_mode_on_threshold",
+        device_class=NumberDeviceClass.POWER,
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:power-plug",
+        name="Digital Outputs Customer Power Mode On Threshold",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        native_max_value=1000000,
+        native_min_value=10,
+        native_step=10,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:PowerMode:OnPowerThreshold",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_power_mode_off_threshold",
+        device_class=NumberDeviceClass.POWER,
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:power-plug-off",
+        name="Digital Outputs Customer Power Mode Off Threshold",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        native_max_value=1000000,
+        native_min_value=10,
+        native_step=10,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:PowerMode:OffPowerThreshold",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_time_mode_power_threshold",
+        device_class=NumberDeviceClass.POWER,
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:transmission-tower-export",
+        name="Digital Outputs Customer Time Mode Power Threshold",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        native_max_value=999000,
+        native_min_value=1,
+        native_step=10,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:TimeMode:PowerThreshold",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_time_mode_stable_time",
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:timer-sand",
+        name="Digital Outputs Customer Time Mode Stable Time",
+        native_unit_of_measurement="min",
+        native_max_value=720,
+        native_min_value=1,
+        native_step=1,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:TimeMode:StableTime",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_time_mode_run_time",
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:timer-play",
+        name="Digital Outputs Customer Time Mode Run Time",
+        native_unit_of_measurement="min",
+        native_max_value=1440,
+        native_min_value=1,
+        native_step=1,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:TimeMode:RunTime",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
+    PlenticoreNumberEntityDescription(
+        key="digital_outputs_customer_time_mode_max_cycles_per_day",
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        icon="mdi:counter",
+        name="Digital Outputs Customer Time Mode Max Cycles Per Day",
+        native_max_value=999,
+        native_min_value=1,
+        native_step=1,
+        module_id=ModuleId.DEVICES_LOCAL,
+        data_id="DigitalOutputs:Customer:TimeMode:MaxNoOfSwitchingCyclesPerDay",
+        fmt_from="format_round",
+        fmt_to="format_round_back",
+    ),
 ]
 
 
@@ -1219,6 +1347,13 @@ async def async_setup_entry(
                     legacy_id,
                     description.name,
                 )
+        if not is_rest_write_supported_target(str(description_to_use.data_id)):
+            _LOGGER.debug(
+                "Skipping REST number %s (%s) because it is Modbus-only",
+                description_to_use.name,
+                description_to_use.data_id,
+            )
+            continue
         # Check if the module even exists before trying to access its settings
         module_available = (
             description_to_use.module_id in plenticore.available_modules

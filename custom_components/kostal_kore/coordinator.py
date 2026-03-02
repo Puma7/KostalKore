@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Mapping
 from datetime import timedelta
 import logging
+import random
+import time
 from typing import Any, TYPE_CHECKING, TypeVar, cast
 import asyncio
 
@@ -14,6 +16,7 @@ from pykoplenti import (
     ApiClient,
     ApiException,
     AuthenticationException,
+    EventData,
     ExtendedApiClient,
 )
 
@@ -26,7 +29,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_SERVICE_CODE, DOMAIN
+from .const import ADVANCED_WRITE_ARM_TTL_SECONDS, CONF_SERVICE_CODE, DOMAIN
 from .repairs import (
     clear_issue,
     create_api_unreachable_issue,
@@ -41,10 +44,18 @@ from .helper import (
     ModbusMemoryParityError,
     ModbusException,
     get_hostname_id,
+    is_allowed_write_target,
+    is_rest_write_supported_target,
     parse_modbus_exception,
+    requires_advanced_write_arm,
+    validate_cross_field_write_rules,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+EVENT_HISTORY_MAX: int = 50
+EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
+EVENT_UPDATE_INTERVAL_SECONDS: int = 30
 
 # Type variables for generic classes
 T = TypeVar("T")
@@ -80,6 +91,11 @@ class Plenticore:
             sw_version="Unknown",
         )
         self.available_modules: list[str] = []
+        self._settings_cache: Mapping[str, Any] | None = None
+        self._settings_cache_ts: float = 0.0
+        self._process_data_cache: Mapping[str, Any] | None = None
+        self._process_data_cache_ts: float = 0.0
+        self._advanced_write_armed_until: float = 0.0
 
     @property
     def host(self) -> str:
@@ -90,6 +106,62 @@ class Plenticore:
     def client(self) -> ApiClient:
         """Return the Plenticore API client."""
         return cast(ApiClient, self._client)
+
+    def arm_advanced_writes(
+        self, ttl_seconds: int = ADVANCED_WRITE_ARM_TTL_SECONDS
+    ) -> None:
+        """Arm high-impact writes for a short time window."""
+        ttl = max(10, int(ttl_seconds))
+        self._advanced_write_armed_until = time.monotonic() + ttl
+
+    def disarm_advanced_writes(self) -> None:
+        """Immediately disable high-impact writes."""
+        self._advanced_write_armed_until = 0.0
+
+    @property
+    def is_advanced_write_armed(self) -> bool:
+        """Return whether high-impact writes are currently armed."""
+        return time.monotonic() < self._advanced_write_armed_until
+
+    @property
+    def advanced_write_arm_seconds_left(self) -> int:
+        """Return remaining arm window in seconds."""
+        return max(0, int(self._advanced_write_armed_until - time.monotonic()))
+
+    async def async_get_settings_cached(
+        self, ttl_seconds: float = 120.0
+    ) -> Mapping[str, Any]:
+        """Return cached settings metadata with short TTL."""
+        if self._client is None:
+            return {}
+        now = time.monotonic()
+        if self._settings_cache is not None and (now - self._settings_cache_ts) < ttl_seconds:
+            return self._settings_cache
+        data = cast(Mapping[str, Any], await self._client.get_settings())
+        self._settings_cache = data
+        self._settings_cache_ts = now
+        return data
+
+    async def async_get_process_data_cached(
+        self, ttl_seconds: float = 60.0
+    ) -> Mapping[str, Any]:
+        """Return cached process-data-id map with short TTL."""
+        if self._client is None:
+            return {}
+        now = time.monotonic()
+        if self._process_data_cache is not None and (now - self._process_data_cache_ts) < ttl_seconds:
+            return self._process_data_cache
+        data = cast(Mapping[str, Any], await self._client.get_process_data())
+        self._process_data_cache = data
+        self._process_data_cache_ts = now
+        return data
+
+    def invalidate_capability_cache(self) -> None:
+        """Clear cached process/settings capability maps."""
+        self._settings_cache = None
+        self._settings_cache_ts = 0.0
+        self._process_data_cache = None
+        self._process_data_cache_ts = 0.0
 
     async def async_setup(self) -> bool:
         """Set up Plenticore API client."""
@@ -141,7 +213,18 @@ class Plenticore:
                 raise modules_result
             if isinstance(metadata_result, Exception):
                 raise metadata_result
-                
+
+            # Prime capability caches once to reduce duplicate startup probes
+            # across sensor/number/select platforms.
+            prewarm_results = await asyncio.gather(
+                self.async_get_process_data_cached(ttl_seconds=0.0),
+                self.async_get_settings_cached(ttl_seconds=0.0),
+                return_exceptions=True,
+            )
+            for prewarm_result in prewarm_results:
+                if isinstance(prewarm_result, Exception):
+                    _LOGGER.debug("Capability cache prewarm failed: %s", prewarm_result)
+
             return True
             
         except (ApiException, KeyError, ValueError, asyncio.CancelledError) as err:
@@ -310,12 +393,64 @@ class DataUpdateCoordinatorMixin:
             "Setting value for %s in module %s to %s", self.name, module_id, value
         )
 
+        # Security: explicit write allowlist
+        for data_id in value:
+            if not is_rest_write_supported_target(data_id):
+                raise HomeAssistantError(
+                    f"REST write disabled for {data_id}. Use Modbus battery controls instead."
+                )
+            if not is_allowed_write_target(module_id, data_id):
+                raise HomeAssistantError(
+                    f"Write to unsupported target blocked: {module_id}/{data_id}"
+                )
+
+        # Security: temporary arming for high-impact controls
+        strict_verify = any(requires_advanced_write_arm(data_id) for data_id in value)
+        if strict_verify:
+            if not self._plenticore.is_advanced_write_armed:
+                raise HomeAssistantError(
+                    "High-impact control is locked. Arm advanced writes first."
+                )
+
+        get_setting_values = getattr(client, "get_setting_values", None)
+        supports_readback = callable(get_setting_values)
+        if strict_verify and not supports_readback:
+            raise HomeAssistantError(
+                "High-impact write requires readback verification, but API readback is unavailable."
+            )
+
+        # Pre-read for cross-field validation and change baseline.
+        current_module_values: dict[str, str] = {}
+        read_ids = set(value.keys())
+        for data_id in value:
+            if data_id.endswith("OnPowerThreshold"):
+                read_ids.add(data_id.replace("OnPowerThreshold", "OffPowerThreshold"))
+            elif data_id.endswith("OffPowerThreshold"):
+                read_ids.add(data_id.replace("OffPowerThreshold", "OnPowerThreshold"))
+
+        if get_setting_values is not None and supports_readback:
+            try:
+                current_response = await get_setting_values({module_id: list(read_ids)})
+                current_module_values = dict(current_response.get(module_id, {}))
+            except Exception as pre_read_err:
+                _LOGGER.debug(
+                    "Pre-read before write failed for %s (%s): %s",
+                    module_id,
+                    list(read_ids),
+                    pre_read_err,
+                )
+
+        for data_id, raw_new_value in value.items():
+            cross_field_error = validate_cross_field_write_rules(
+                data_id,
+                str(raw_new_value),
+                current_module_values,
+            )
+            if cross_field_error:
+                raise HomeAssistantError(cross_field_error)
+
         try:
             await client.set_setting_values(module_id, value)
-            # CHANGELOG (Codex, 2026-02-05):
-            # Successful write confirms recovery from prior inverter_busy state.
-            if (hass := getattr(self._plenticore, "hass", None)) is not None:
-                clear_issue(hass, "inverter_busy")
         except (ApiException, ClientError, TimeoutError) as err:
             # Parse into specific MODBUS exceptions for better error handling
             error_msg = str(err)
@@ -341,6 +476,77 @@ class DataUpdateCoordinatorMixin:
                 translation_key="write_setting_failed",
                 translation_placeholders={"error": error_msg},
             ) from err
+
+        mismatches: list[str] = []
+        if get_setting_values is not None and supports_readback:
+            verify_response: dict[str, Any] | None
+            try:
+                verify_response = await get_setting_values({module_id: list(value.keys())})
+            except (ApiException, ClientError, TimeoutError) as verify_err:
+                verify_msg = str(verify_err)
+                if strict_verify:
+                    raise HomeAssistantError(
+                        "Write verification read failed after successful write; "
+                        f"setting may already be applied ({verify_msg})"
+                    ) from verify_err
+                _LOGGER.warning(
+                    "Verification read failed after write to %s/%s: %s",
+                    module_id,
+                    list(value.keys()),
+                    verify_msg,
+                )
+                verify_response = None
+            except Exception as verify_err:
+                if strict_verify:
+                    raise HomeAssistantError(
+                        "Write verification failed after successful write; "
+                        f"setting may already be applied ({verify_err})"
+                    ) from verify_err
+                _LOGGER.warning(
+                    "Unexpected verification error after write to %s/%s: %s",
+                    module_id,
+                    list(value.keys()),
+                    verify_err,
+                )
+                verify_response = None
+
+            if verify_response is not None:
+                verify_values = dict(verify_response.get(module_id, {}))
+                for data_id, expected in value.items():
+                    if data_id not in verify_values:
+                        mismatches.append(f"{data_id}: missing in readback")
+                        continue
+                    actual = str(verify_values[data_id])
+                    expected_s = str(expected)
+                    try:
+                        expected_f = float(expected_s)
+                        actual_f = float(actual)
+                        if abs(expected_f - actual_f) > 1e-3:
+                            mismatches.append(
+                                f"{data_id}: expected {expected_s}, got {actual}"
+                            )
+                    except (TypeError, ValueError):
+                        if actual != expected_s:
+                            mismatches.append(
+                                f"{data_id}: expected {expected_s}, got {actual}"
+                            )
+
+                if mismatches and strict_verify:
+                    raise HomeAssistantError(
+                        "Write verification failed: " + "; ".join(mismatches)
+                    )
+                if mismatches and not strict_verify:
+                    _LOGGER.debug(
+                        "Non-strict write verification mismatch for %s/%s: %s",
+                        module_id,
+                        list(value.keys()),
+                        mismatches,
+                    )
+
+        # CHANGELOG (Codex, 2026-02-05):
+        # Successful write confirms recovery from prior inverter_busy state.
+        if (hass := getattr(self._plenticore, "hass", None)) is not None:
+            clear_issue(hass, "inverter_busy")
 
         return True
 
@@ -401,7 +607,10 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         # Force an update of all data. Multiple refresh calls
         # are ignored by the debouncer.
         async def force_refresh(event_time: Any) -> None:
-            await self.async_request_refresh()
+            try:
+                await self.async_request_refresh()
+            except Exception as err:
+                _LOGGER.debug("Deferred refresh failed for %s: %s", self.name, err)
 
         return async_call_later(self.hass, 0.5, force_refresh)
 
@@ -415,10 +624,69 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
                 pass
 
 
+class AdaptivePollingCoordinatorMixin:
+    """Shared adaptive interval behavior for API coordinators."""
+
+    update_interval: timedelta | None
+    _base_update_interval: timedelta
+    _max_update_interval: timedelta
+    _consecutive_failures: int
+    _failure_multiplier_cap: int
+
+    def _init_adaptive_polling(
+        self,
+        *,
+        default_base_seconds: int,
+        max_interval_floor_seconds: int,
+        max_interval_multiplier: int,
+        failure_multiplier_cap: int,
+    ) -> None:
+        base_interval = self.update_interval or timedelta(seconds=default_base_seconds)
+        self._base_update_interval = base_interval
+        self._max_update_interval = timedelta(
+            seconds=max(
+                max_interval_floor_seconds,
+                int(base_interval.total_seconds() * max_interval_multiplier),
+            )
+        )
+        self._consecutive_failures = 0
+        self._failure_multiplier_cap = max(1, int(failure_multiplier_cap))
+
+    def _apply_adaptive_interval(self, multiplier: float) -> None:
+        """Apply bounded adaptive interval with light jitter."""
+        base_seconds = max(1.0, self._base_update_interval.total_seconds())
+        next_seconds = min(
+            self._max_update_interval.total_seconds(), base_seconds * multiplier
+        )
+        # Jitter prevents synchronized poll bursts across instances.
+        next_seconds = max(1.0, next_seconds * random.uniform(0.9, 1.1))
+        self.update_interval = timedelta(seconds=next_seconds)
+
+    def _record_success(self) -> None:
+        self._consecutive_failures = 0
+        self.update_interval = self._base_update_interval
+
+    def _record_failure(self) -> None:
+        self._consecutive_failures += 1
+        self._apply_adaptive_interval(
+            1 + min(self._failure_multiplier_cap, self._consecutive_failures)
+        )
+
+
 class ProcessDataUpdateCoordinator(
-    PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]]
+    AdaptivePollingCoordinatorMixin,
+    PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]],
 ):
     """Implementation of PlenticoreUpdateCoordinator for process data."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._init_adaptive_polling(
+            default_base_seconds=10,
+            max_interval_floor_seconds=120,
+            max_interval_multiplier=6,
+            failure_multiplier_cap=5,
+        )
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
@@ -437,11 +705,14 @@ class ProcessDataUpdateCoordinator(
             # Auto-clear inverter_busy after a successful process-data roundtrip.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
                 clear_issue(hass, "inverter_busy")
+            self._record_success()
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
+            self._record_failure()
             raise UpdateFailed("Timeout fetching process data") from None
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
+            self._record_failure()
 
             # Handle 503 errors (internal communication error)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
@@ -482,6 +753,7 @@ class ProcessDataUpdateCoordinator(
 
 
 class SettingDataUpdateCoordinator(
+    AdaptivePollingCoordinatorMixin,
     PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]],
     DataUpdateCoordinatorMixin,
 ):
@@ -491,6 +763,12 @@ class SettingDataUpdateCoordinator(
         """Initialize with last-result fallback for 503 errors."""
         super().__init__(*args, **kwargs)
         self._last_result: Mapping[str, Mapping[str, str]] = {}
+        self._init_adaptive_polling(
+            default_base_seconds=30,
+            max_interval_floor_seconds=300,
+            max_interval_multiplier=8,
+            failure_multiplier_cap=8,
+        )
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         if (client := self._plenticore.client) is None:
@@ -516,9 +794,11 @@ class SettingDataUpdateCoordinator(
             # Auto-clear inverter_busy once settings communication recovers.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
                 clear_issue(hass, "inverter_busy")
+            self._record_success()
             return result
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
+            self._record_failure()
 
             # Handle 503 errors (internal communication error)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
@@ -555,6 +835,124 @@ class SettingDataUpdateCoordinator(
             else:
                 _LOGGER.error("Error fetching setting data for %s: %s", self.name, err)
             raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
+
+
+class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Coordinator for inverter event snapshots and bounded event history."""
+
+    config_entry: PlenticoreConfigEntry
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: PlenticoreConfigEntry,
+        logger: logging.Logger,
+        name: str,
+        update_interval: timedelta,
+        plenticore: Plenticore,
+    ) -> None:
+        super().__init__(
+            hass=hass,
+            logger=logger,
+            config_entry=config_entry,
+            name=name,
+            update_interval=update_interval,
+        )
+        self._plenticore = plenticore
+        self._history: deque[dict[str, Any]] = deque(maxlen=EVENT_HISTORY_MAX)
+        self._last_signature_ts: dict[str, float] = {}
+        self._last_result: dict[str, Any] = {}
+
+    @property
+    def history(self) -> list[dict[str, Any]]:
+        """Return bounded event history (newest first)."""
+        return list(self._history)
+
+    def _event_signature(self, event: EventData) -> str:
+        return f"{event.code}:{event.category}:{event.is_active}"
+
+    def _event_to_payload(self, event: EventData) -> dict[str, Any]:
+        return {
+            "code": int(event.code),
+            "category": str(event.category),
+            "is_active": bool(event.is_active),
+            "description": str(event.description),
+            "group": str(event.group),
+            "start_time": event.start_time.isoformat(),
+            "end_time": event.end_time.isoformat(),
+        }
+
+    def _append_history_if_new(self, event: EventData) -> None:
+        now = time.monotonic()
+        signature = self._event_signature(event)
+        last_seen = self._last_signature_ts.get(signature)
+        if (
+            last_seen is not None
+            and (now - last_seen) < EVENT_DEDUP_COOLDOWN_SECONDS
+        ):
+            return
+        self._last_signature_ts[signature] = now
+        self._history.appendleft(self._event_to_payload(event))
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        client = self._plenticore.client
+        if client is None:
+            return self._last_result
+
+        try:
+            events = list(await client.get_events(max_count=25))
+            events.sort(key=lambda e: e.start_time, reverse=True)
+
+            for event in events:
+                self._append_history_if_new(event)
+
+            latest = events[0] if events else None
+            active_error_count = sum(
+                1 for event in events if event.category.lower() == "error" and event.is_active
+            )
+            now_epoch = time.time()
+            result: dict[str, Any]
+            if latest is None:
+                result = {
+                    "last_event_code": None,
+                    "last_event_category": None,
+                    "last_event_age_s": None,
+                    "active_error_events_count": 0,
+                    "last_event_description": None,
+                    "history_size": len(self._history),
+                    "history_dropped": False,
+                    "fetched_count": 0,
+                }
+            else:
+                latest_age = max(0, int(now_epoch - latest.start_time.timestamp()))
+                result = {
+                    "last_event_code": int(latest.code),
+                    "last_event_category": str(latest.category),
+                    "last_event_age_s": latest_age,
+                    "active_error_events_count": int(active_error_count),
+                    "last_event_description": str(latest.description),
+                    "history_size": len(self._history),
+                    "history_dropped": len(self._history) >= EVENT_HISTORY_MAX,
+                    "fetched_count": len(events),
+                }
+
+            self._last_result = result
+            return result
+
+        except (ApiException, ClientError, TimeoutError) as err:
+            error_msg = str(err)
+            if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
+                _LOGGER.debug("Event fetch busy (503), using last event snapshot")
+                return self._last_result
+            if isinstance(err, ApiException):
+                modbus_err = parse_modbus_exception(err)
+                _LOGGER.debug("Event fetch failed: %s", modbus_err.message)
+            else:
+                _LOGGER.debug("Event fetch failed: %s", err)
+            return self._last_result
+        except Exception as err:
+            _LOGGER.debug("Event fetch failed unexpectedly: %s", err)
+            return self._last_result
 
 
 class PlenticoreSelectUpdateCoordinator(DataUpdateCoordinator[_DataT]):
@@ -596,7 +994,10 @@ class PlenticoreSelectUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         # Force an update of all data. Multiple refresh calls
         # are ignored by the debouncer.
         async def force_refresh(event_time: Any) -> None:
-            await self.async_request_refresh()
+            try:
+                await self.async_request_refresh()
+            except Exception as err:
+                _LOGGER.debug("Deferred select refresh failed for %s: %s", self.name, err)
 
         return async_call_later(self.hass, 2, force_refresh)
 

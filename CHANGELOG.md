@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Backlog implementation wave completed**:
+  - Event intelligence coordinator with bounded history + dedup/cooldown.
+  - Optional KSEM coordinator and source-precedence diagnostics entities.
+  - Modbus register coverage expansion and data-quality guards.
+  - Advanced write safety controls (allowlist, arming, validation, verification).
+- **Project learnings doc**: Added `LEARNINGS.md` with validated behavior and policy decisions.
+
 ### Changed
 - **Markdown documentation sweep**: Synced all maintained `.md` files with current `kostal_kore` naming, migration flow, and access model.
 - **Developer docs refresh**: Updated `QUICK_REFERENCE.md`, `AI_DOCUMENTATION.md`, and `ENTITY_REFERENCE.md` to remove stale paths/versions and align with optional Modbus/MQTT architecture.
 - **Agent runbook refresh**: Updated `AGENTS.md` test-count guidance and mypy path to current repository layout.
 - **Obsolete guide cleanup**: Removed untracked/ignored `custom_components/kostal_kore/DEVELOPMENT_GUIDE.md` and consolidated references to maintained docs.
+- **Auto-discovery documentation clarified**: discovery is best-effort and manual host entry remains primary fallback in segmented networks.
+- **Write model clarified**: battery charge/discharge setpoint control is documented as Modbus-only by design.
+
+### Fixed
+- **REST write safety policy**: blocked unsupported REST battery charge/discharge setpoint write targets to avoid non-deterministic behavior.
 
 ## [2.16.0-alpha.4] - 2026-03-01
 

@@ -51,10 +51,12 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - **Dashboard Ready**: Fully compatible with Home Assistant Energy Dashboard
 
 ### 🎛️ **Controls**
-- **Number Entities**: Adjustable power limits, charge/discharge rates
+- **Number Entities**: Adjustable power limits and installer settings
 - **Select Entities**: Operating mode selection (e.g., battery management modes)
 - **Switch Entities**: Enable/disable various inverter functions
 - **G3 Battery Limitation**: Max charge/discharge power limits are re-applied cyclically to keep them active (per vendor requirement)
+- **High-impact write safety**: Advanced REST writes are allowlisted and can require temporary arming + installer access
+- **REST/Modbus split**: Battery charge/discharge setpoint control is intentionally Modbus-only
 - **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `custom_components/kostal_kore/QUICK_REFERENCE.md` for full lists)
 
 ### 🔧 **Diagnostics**
@@ -135,6 +137,7 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 - `migration.md`: Step-by-step migration guide from `kostal_plenticore` to `kostal_kore`.
 - `PROXY_SETUP.md`: Modbus proxy + MQTT bridge integration examples (evcc/iobroker).
 - `ENTITY_REFERENCE.md`: Entity/register and threshold reference.
+- `LEARNINGS.md`: Consolidated implementation learnings and policy decisions.
 - `custom_components/kostal_kore/QUICK_REFERENCE.md`: Fast maintainer cheat sheet.
 - `custom_components/kostal_kore/AI_DOCUMENTATION.md`: AI-assistant context for repository internals.
 - `CHANGELOG.md` + `RELEASE_NOTES.md`: Change history and release communication.
@@ -160,6 +163,17 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 - **Password**: Password for accessing the inverter's web interface
 - **Service Code**: Optional service code. Actual write permissions are validated from detected account role.
 
+### Auto-discovery reality check
+- Auto-discovery is **best-effort**, not guaranteed.
+- It works well on flat local networks where Home Assistant can reach the inverter.
+- It can fail in segmented networks (VLAN/firewall/routing constraints).
+- Manual host/IP entry is always supported and remains the reliable fallback.
+
+### REST vs Modbus write model (important)
+- REST writes are supported for selected allowlisted settings (with safety checks).
+- Battery charge/discharge control setpoints are intentionally **Modbus-only**.
+- If you need deterministic charge/discharge control, enable Modbus and use Modbus-backed entities.
+
 ## Data Update
 
 The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from the inverter at regular intervals:
@@ -177,6 +191,7 @@ The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from
 ## Known Limitations
 
 - **Auto-discovery is best-effort**: The wizard scans likely local IPv4 hosts when host is empty. If discovery fails, enter inverter host/IP manually.
+- **Battery charge/discharge control via REST is blocked by design**: these controls are exposed via Modbus only for deterministic behavior.
 - **DC string count**: The number of DC inputs (PV strings) is detected automatically on first setup. Changes require re-adding the integration.
 - **Firmware dependency**: Some advanced settings (G3 battery controls, external control registers) are only available on specific firmware versions.
 - **Installer access**: Certain controls require the installer/service code. Without it, these entities remain disabled.
@@ -328,6 +343,7 @@ logger:
 - Consider network segmentation for sensitive devices
 - The Modbus proxy bind default is `127.0.0.1`; only expose it to LAN if strictly required
 - Installer/service code is required for advanced battery control write paths
+- Advanced REST controls are restricted by explicit allowlist + temporary arming window for high-impact settings
 
 ## API Documentation
 

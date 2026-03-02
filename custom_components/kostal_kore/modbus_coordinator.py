@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 import math
+import json
 from datetime import timedelta
 from typing import Any, Final
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .modbus_client import (
@@ -43,6 +45,7 @@ _LOGGER: Final = logging.getLogger(__name__)
 FAST_POLL_INTERVAL: Final[timedelta] = timedelta(seconds=5)
 SLOW_POLL_INTERVAL: Final[timedelta] = timedelta(seconds=30)
 DEVICE_INFO_POLL_INTERVAL: Final[timedelta] = timedelta(minutes=5)
+CAPABILITY_STORE_VERSION: Final[int] = 1
 
 FAST_GROUPS: Final[frozenset[RegisterGroup]] = frozenset({
     RegisterGroup.POWER,
@@ -83,6 +86,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._slow_tick = 0
         self._device_info_tick = 0
         self._device_info: dict[str, Any] = {}
+        self._capability_store = Store[dict[str, Any]](
+            hass,
+            CAPABILITY_STORE_VERSION,
+            f"kostal_kore_modbus_caps_{client.host}_{client.port}",
+        )
+        self._last_saved_capability_state: str = ""
 
     @property
     def client(self) -> KostalModbusClient:
@@ -97,6 +106,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._client.connect()
         await self._client.detect_endianness()
         await self._read_device_info()
+        await self._load_register_capability_state()
 
     async def async_shutdown(self) -> None:
         """Disconnect from the inverter."""
@@ -159,7 +169,51 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._device_info_tick = 0
             await self._read_device_info()
 
+        await self._save_register_capability_state_if_changed()
         return data
+
+    def _capability_signature(self) -> str:
+        sw_version = str(self._device_info.get("sw_version", "unknown"))
+        return (
+            f"{self._client.host}:{self._client.port}:{self._client.unit_id}:{sw_version}"
+        )
+
+    async def _load_register_capability_state(self) -> None:
+        """Load persisted unavailable-register state if signature still matches."""
+        try:
+            stored = await self._capability_store.async_load()
+        except Exception as err:
+            _LOGGER.debug("Could not load Modbus capability cache: %s", err)
+            return
+        if not stored:
+            return
+        if stored.get("signature") != self._capability_signature():
+            _LOGGER.debug("Ignoring stale Modbus capability cache (signature mismatch)")
+            return
+        raw_state = stored.get("state")
+        if isinstance(raw_state, dict):
+            try:
+                self._client.import_unavailable_state(raw_state)
+                self._last_saved_capability_state = json.dumps(raw_state, sort_keys=True)
+                _LOGGER.debug("Loaded persisted Modbus capability state")
+            except Exception as err:
+                _LOGGER.debug("Invalid persisted Modbus capability state: %s", err)
+
+    async def _save_register_capability_state_if_changed(self) -> None:
+        """Persist unavailable-register state if it changed."""
+        raw_state = self._client.export_unavailable_state()
+        encoded_state = json.dumps(raw_state, sort_keys=True)
+        if encoded_state == self._last_saved_capability_state:
+            return
+        payload = {
+            "signature": self._capability_signature(),
+            "state": raw_state,
+        }
+        try:
+            await self._capability_store.async_save(payload)
+            self._last_saved_capability_state = encoded_state
+        except Exception as err:
+            _LOGGER.debug("Could not persist Modbus capability state: %s", err)
 
     async def _read_device_info(self) -> None:
         """Read static device information registers."""

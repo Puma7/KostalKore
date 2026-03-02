@@ -10,7 +10,7 @@ from typing import Any, Final, cast
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE
-from .const_ids import SettingId
+from .const_ids import ModuleId, SettingId
 from .repairs import clear_issue, create_installer_required_issue
 
 from aiohttp.client_exceptions import ClientError
@@ -406,6 +406,8 @@ def requires_installer_service_code(data_id: str) -> bool:
         "MaxChargePower",
         "MaxDischargePower",
         "TimeUntilFallback",
+        "DigitalOutputs:Customer:",
+        "Battery:BackupMode:Enable",
     )
     return any(control in data_id for control in advanced_controls)
 
@@ -413,6 +415,139 @@ def requires_installer_service_code(data_id: str) -> bool:
 def is_battery_control(data_id: str) -> bool:
     """Return True if a data ID targets battery control settings."""
     return data_id.startswith("Battery:")
+
+
+# Explicit allowlist of writable setting prefixes/IDs used by this integration.
+# Unknown targets are blocked by default.
+_ALLOWED_WRITE_PREFIXES: Final[tuple[str, ...]] = (
+    "Battery:",
+    "EnergyMgmt:",
+    "EnergyManagement:",
+    "ActivePower:",
+    "ReactivePower:",
+    "DigitalOut",
+    "DigitalOutputs:Customer:",
+    "Generator:",
+    "Inverter:",
+    "POfF:",
+    "POfU:",
+    "LvrtHvrt:",
+    "Pave:",
+)
+
+_ALLOWED_WRITE_IDS: Final[frozenset[str]] = frozenset(
+    {
+        SettingId.SHADOW_MGMT_ENABLE,
+        SettingId.BATTERY_MIN_SOC,
+        SettingId.BATTERY_MIN_SOC_REL,
+        SettingId.BATTERY_MIN_HOME_CONSUMPTION,
+        SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY,
+        "Battery:BackupMode:Enable",
+        "Battery:SmartBatteryControl:Enable",
+        "Battery:Strategy",
+    }
+)
+
+# High-impact controls require explicit temporary arming.
+_ARM_REQUIRED_PREFIXES: Final[tuple[str, ...]] = (
+    "DigitalOutputs:Customer:",
+)
+
+_ARM_REQUIRED_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "Battery:BackupMode:Enable",
+        "Battery:ExternControl:AcPowerAbs",
+        "Battery:ChargePowerAcAbsolute",
+        "Battery:ChargePowerDcAbs",
+        "Battery:ChargePower",
+        "Battery:ChargeCurrent",
+        "Battery:MaxChargePowerG3",
+        "Battery:MaxDischargePowerG3",
+        "Battery:Limit:Charge_P",
+        "Battery:Limit:Discharge_P",
+        "Battery:Limit:FallbackCharge_P",
+        "Battery:Limit:FallbackDischarge_P",
+        "Battery:Limit:FallbackTime",
+    }
+)
+_ARM_REQUIRED_FRAGMENTS: Final[tuple[str, ...]] = (
+    "Battery:ChargePower",
+    "Battery:ChargeCurrent",
+    "Battery:ExternControl",
+)
+
+# Battery charge/discharge control is intentionally MODBUS-only in this
+# integration. These REST IDs are kept out of write paths to avoid false
+# "accepted" writes that do not reliably change inverter behavior.
+_REST_MODBUS_ONLY_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "Battery:ExternControl:AcPowerAbs",
+        "Battery:ChargePowerAcAbsolute",
+        "Battery:ChargeCurrentDcRel",
+        "Battery:ChargePowerAcRel",
+        "Battery:ChargeCurrentDcAbs",
+        "Battery:ChargePowerDcAbs",
+        "Battery:ChargePowerDcRel",
+    }
+)
+
+
+def is_allowed_write_target(module_id: str, data_id: str) -> bool:
+    """Return True if this module/data_id is allowed for writes."""
+    if module_id != ModuleId.DEVICES_LOCAL:
+        return False
+    if not is_rest_write_supported_target(data_id):
+        return False
+    if data_id in _ALLOWED_WRITE_IDS:
+        return True
+    return any(data_id.startswith(prefix) for prefix in _ALLOWED_WRITE_PREFIXES)
+
+
+def is_rest_write_supported_target(data_id: str) -> bool:
+    """Return False for settings intentionally kept Modbus-only."""
+    return data_id not in _REST_MODBUS_ONLY_IDS
+
+
+def requires_advanced_write_arm(data_id: str) -> bool:
+    """Return True if writing this data_id requires temporary arming."""
+    if data_id in _ARM_REQUIRED_IDS:
+        return True
+    if any(fragment in data_id for fragment in _ARM_REQUIRED_FRAGMENTS):
+        return True
+    return any(data_id.startswith(prefix) for prefix in _ARM_REQUIRED_PREFIXES)
+
+
+def validate_cross_field_write_rules(
+    data_id: str,
+    new_value: str,
+    current_module_values: dict[str, str] | None = None,
+) -> str | None:
+    """Validate cross-field write rules and return error message if invalid."""
+    try:
+        if data_id.endswith("OnPowerThreshold"):
+            off_key = data_id.replace("OnPowerThreshold", "OffPowerThreshold")
+            if current_module_values and off_key in current_module_values:
+                off_value = float(current_module_values[off_key])
+                on_value = float(new_value)
+                if on_value <= off_value:
+                    return (
+                        f"{data_id} must be greater than {off_key} "
+                        f"(got on={on_value}, off={off_value})"
+                    )
+        elif data_id.endswith("OffPowerThreshold"):
+            on_key = data_id.replace("OffPowerThreshold", "OnPowerThreshold")
+            if current_module_values and on_key in current_module_values:
+                on_value = float(current_module_values[on_key])
+                off_value = float(new_value)
+                if off_value >= on_value:
+                    return (
+                        f"{data_id} must be lower than {on_key} "
+                        f"(got off={off_value}, on={on_value})"
+                    )
+    except (TypeError, ValueError):
+        # If value cannot be parsed as float, let lower-level validation handle it.
+        return None
+    return None
 
 
 def ensure_installer_access(

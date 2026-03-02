@@ -196,6 +196,32 @@ REG_PM_TOTAL_REACTIVE = ModbusRegister(254, "pm_total_reactive", "Total reactive
 REG_PM_TOTAL_APPARENT = ModbusRegister(256, "pm_total_apparent", "Total apparent power (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "VA")
 REG_PM_COS_PHI = ModbusRegister(218, "pm_cos_phi", "Cos phi (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER)
 REG_PM_FREQUENCY = ModbusRegister(220, "pm_frequency", "Frequency (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "Hz")
+REG_PM_L1_CURRENT = ModbusRegister(222, "pm_l1_current", "Current phase 1 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "A")
+REG_PM_L1_ACTIVE = ModbusRegister(224, "pm_l1_active", "Active power phase 1 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "W")
+REG_PM_L1_REACTIVE = ModbusRegister(226, "pm_l1_reactive", "Reactive power phase 1 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "Var")
+REG_PM_L1_APPARENT = ModbusRegister(228, "pm_l1_apparent", "Apparent power phase 1 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "VA")
+REG_PM_L1_VOLTAGE = ModbusRegister(230, "pm_l1_voltage", "Voltage phase 1 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "V")
+REG_PM_L2_CURRENT = ModbusRegister(232, "pm_l2_current", "Current phase 2 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "A")
+REG_PM_L2_ACTIVE = ModbusRegister(234, "pm_l2_active", "Active power phase 2 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "W")
+REG_PM_L2_REACTIVE = ModbusRegister(236, "pm_l2_reactive", "Reactive power phase 2 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "Var")
+REG_PM_L2_APPARENT = ModbusRegister(238, "pm_l2_apparent", "Apparent power phase 2 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "VA")
+REG_PM_L2_VOLTAGE = ModbusRegister(240, "pm_l2_voltage", "Voltage phase 2 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "V")
+REG_PM_L3_CURRENT = ModbusRegister(242, "pm_l3_current", "Current phase 3 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "A")
+REG_PM_L3_ACTIVE = ModbusRegister(244, "pm_l3_active", "Active power phase 3 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "W")
+REG_PM_L3_REACTIVE = ModbusRegister(246, "pm_l3_reactive", "Reactive power phase 3 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "Var")
+REG_PM_L3_APPARENT = ModbusRegister(248, "pm_l3_apparent", "Apparent power phase 3 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "VA")
+REG_PM_L3_VOLTAGE = ModbusRegister(250, "pm_l3_voltage", "Voltage phase 3 (powermeter)", DataType.FLOAT32, 2, Access.RO, RegisterGroup.POWERMETER, "V")
+
+# Additional battery/system metadata registers used on older/newer firmware tracks
+REG_PSSB_FUSE_STATE = ModbusRegister(202, "pssb_fuse_state", "PSSB fuse state", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY)
+REG_BATTERY_READY_FLAG = ModbusRegister(208, "battery_ready_flag", "Battery ready flag", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY)
+REG_FW_MAINCONTROLLER = ModbusRegister(515, "fw_maincontroller", "Firmware maincontroller", DataType.UINT32, 2, Access.RO, RegisterGroup.DEVICE_INFO)
+REG_BATTERY_MANUFACTURER = ModbusRegister(517, "battery_manufacturer", "Battery manufacturer", DataType.STRING, 8, Access.RO, RegisterGroup.BATTERY)
+REG_BATTERY_MODEL_ID = ModbusRegister(525, "battery_model_id", "Battery model ID", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
+REG_BATTERY_SERIAL_ALT = ModbusRegister(527, "battery_serial_alt", "Battery serial number (alt)", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
+REG_BATTERY_OPERATION_MODE = ModbusRegister(529, "battery_operation_mode", "Battery operation mode", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
+REG_BATTERY_NET_CAPACITY = ModbusRegister(580, "battery_net_capacity", "Battery net capacity", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY, "Ah")
+REG_BATTERY_FW_VERSION = ModbusRegister(586, "battery_fw_version", "Battery firmware", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
 
 # ---------------------------------------------------------------------------
 # Control registers (read/write) – active/reactive power control
@@ -279,6 +305,13 @@ ALL_REGISTERS: Final[tuple[ModbusRegister, ...]] = (
     REG_TOTAL_AC_TO_GRID, REG_TOTAL_DC_POWER_ALL,
     REG_PM_TOTAL_ACTIVE, REG_PM_TOTAL_REACTIVE, REG_PM_TOTAL_APPARENT,
     REG_PM_COS_PHI, REG_PM_FREQUENCY,
+    REG_PM_L1_CURRENT, REG_PM_L1_ACTIVE, REG_PM_L1_REACTIVE, REG_PM_L1_APPARENT, REG_PM_L1_VOLTAGE,
+    REG_PM_L2_CURRENT, REG_PM_L2_ACTIVE, REG_PM_L2_REACTIVE, REG_PM_L2_APPARENT, REG_PM_L2_VOLTAGE,
+    REG_PM_L3_CURRENT, REG_PM_L3_ACTIVE, REG_PM_L3_REACTIVE, REG_PM_L3_APPARENT, REG_PM_L3_VOLTAGE,
+    REG_PSSB_FUSE_STATE, REG_BATTERY_READY_FLAG,
+    REG_FW_MAINCONTROLLER, REG_BATTERY_MANUFACTURER, REG_BATTERY_MODEL_ID,
+    REG_BATTERY_SERIAL_ALT, REG_BATTERY_OPERATION_MODE, REG_BATTERY_NET_CAPACITY,
+    REG_BATTERY_FW_VERSION,
     REG_ACTIVE_POWER_SETPOINT, REG_REACTIVE_POWER_SETPOINT,
     REG_DELTA_COS_PHI, REG_LOW_PRIO_ACTIVE_POWER,
     REG_IO_OUTPUT_1, REG_IO_OUTPUT_2, REG_IO_OUTPUT_3, REG_IO_OUTPUT_4,

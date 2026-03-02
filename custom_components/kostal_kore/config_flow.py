@@ -21,6 +21,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_ACCESS_ROLE,
     CONF_INSTALLER_ACCESS,
+    CONF_KSEM_ENABLED,
+    CONF_KSEM_HOST,
+    CONF_KSEM_PORT,
+    CONF_KSEM_UNIT_ID,
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
@@ -33,6 +37,8 @@ from .const import (
     DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_PROXY_BIND,
     DEFAULT_MODBUS_UNIT_ID,
+    DEFAULT_KSEM_PORT,
+    DEFAULT_KSEM_UNIT_ID,
     DOMAIN,
 )
 from .helper import get_hostname_id
@@ -168,6 +174,22 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_MODBUS_PROXY_BIND,
                 default=defaults.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND),
             ): str,
+            vol.Optional(
+                CONF_KSEM_ENABLED,
+                default=defaults.get(CONF_KSEM_ENABLED, False),
+            ): bool,
+            vol.Optional(
+                CONF_KSEM_HOST,
+                default=defaults.get(CONF_KSEM_HOST, ""),
+            ): str,
+            vol.Optional(
+                CONF_KSEM_PORT,
+                default=defaults.get(CONF_KSEM_PORT, DEFAULT_KSEM_PORT),
+            ): int,
+            vol.Optional(
+                CONF_KSEM_UNIT_ID,
+                default=defaults.get(CONF_KSEM_UNIT_ID, DEFAULT_KSEM_UNIT_ID),
+            ): int,
         }
     )
 
@@ -177,6 +199,7 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     modbus_enabled = bool(user_input.get(CONF_MODBUS_ENABLED, False))
     mqtt_enabled = bool(user_input.get(CONF_MQTT_BRIDGE_ENABLED, False))
     proxy_enabled = bool(user_input.get(CONF_MODBUS_PROXY_ENABLED, False))
+    ksem_enabled = bool(user_input.get(CONF_KSEM_ENABLED, False))
 
     # MQTT bridge and proxy both depend on Modbus being enabled.
     if mqtt_enabled or proxy_enabled:
@@ -196,6 +219,12 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         ),
         CONF_MODBUS_PROXY_BIND: str(
             user_input.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
+        ),
+        CONF_KSEM_ENABLED: ksem_enabled,
+        CONF_KSEM_HOST: str(user_input.get(CONF_KSEM_HOST, "")).strip(),
+        CONF_KSEM_PORT: int(user_input.get(CONF_KSEM_PORT, DEFAULT_KSEM_PORT)),
+        CONF_KSEM_UNIT_ID: int(
+            user_input.get(CONF_KSEM_UNIT_ID, DEFAULT_KSEM_UNIT_ID)
         ),
     }
 

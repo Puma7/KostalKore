@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_SERVICE_CODE
+from .const import CONF_SERVICE_CODE, DOMAIN
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
@@ -108,14 +108,31 @@ async def async_get_config_entry_diagnostics(
 
     plenticore = config_entry.runtime_data
 
+    process_getter = (
+        (lambda: plenticore.async_get_process_data_cached(ttl_seconds=0.0))
+        if hasattr(plenticore, "async_get_process_data_cached")
+        else plenticore.client.get_process_data
+    )
+    settings_getter = (
+        (lambda: plenticore.async_get_settings_cached(ttl_seconds=0.0))
+        if hasattr(plenticore, "async_get_settings_cached")
+        else plenticore.client.get_settings
+    )
+
     # Get information from Kostal Plenticore library with timeout protection
     available_process_data = await _get_diagnostics_data_safe(
-        plenticore, "process data", plenticore.client.get_process_data
+        plenticore,
+        "process data",
+        process_getter,
     )
     
     available_settings_data = await _get_diagnostics_data_safe(
-        plenticore, "settings data", plenticore.client.get_settings
+        plenticore,
+        "settings data",
+        settings_getter,
     )
+    available_process_data = available_process_data or {}
+    available_settings_data = available_settings_data or {}
     
     version = await _get_diagnostics_data_safe(
         plenticore, "version", plenticore.client.get_version, "Unknown"
@@ -169,5 +186,20 @@ async def async_get_config_entry_diagnostics(
     device_info = {**plenticore.device_info}
     device_info[ATTR_IDENTIFIERS] = REDACTED  # contains serial number
     data["device"] = device_info
+
+    # Event intelligence diagnostics (bounded history + latest snapshot).
+    entry_store = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
+    event_coordinator = entry_store.get("event_coordinator") if entry_store else None
+    if event_coordinator is not None:
+        data["events"] = {
+            "snapshot": dict(event_coordinator.data or {}),
+            "history": list(event_coordinator.history),
+        }
+    ksem_coordinator = entry_store.get("ksem_coordinator") if entry_store else None
+    if ksem_coordinator is not None:  # pragma: no cover
+        data["ksem"] = {
+            "connected": bool(ksem_coordinator.connected),
+            "snapshot": dict(ksem_coordinator.data or {}),
+        }
 
     return data
