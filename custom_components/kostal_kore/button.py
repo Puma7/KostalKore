@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import time
 from typing import Any, Final
 
 from homeassistant.components.button import ButtonEntity
@@ -11,11 +12,21 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_MODBUS_ENABLED, DOMAIN
+from .const import (
+    CONF_MODBUS_ENABLED,
+    DATA_KEY_LEGACY_CLEANUP_CODE_INPUT,
+    DATA_KEY_LEGACY_CLEANUP_GUARD,
+    DOMAIN,
+)
 from .coordinator import PlenticoreConfigEntry
+from .helper import generate_confirmation_code, integration_entry_store
 from .legacy_migration import finalize_legacy_cleanup, migrate_legacy_plenticore_entry
 
 _LOGGER: Final = logging.getLogger(__name__)
+LEGACY_CLEANUP_CHALLENGE_TTL_SECONDS: Final[int] = 300
+LEGACY_CLEANUP_FINAL_CONFIRM_TTL_SECONDS: Final[int] = 60
+LEGACY_CLEANUP_CODE_LEN: Final[int] = 6
+LEGACY_CLEANUP_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 class LegacyMigrationButton(ButtonEntity):
@@ -115,13 +126,177 @@ class LegacyCleanupButton(ButtonEntity):
             "last_status": "idle",
         }
 
+    async def _show_confirmation_step1(self, code: str) -> None:
+        """Show first critical confirmation popup with copy/paste challenge."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "KOSTAL KORE cleanup confirmation required (Step 1/2)",
+                "message": (
+                    "⚠️ **Critical data loss step**\n\n"
+                    "Finalize Legacy Cleanup permanently removes old legacy registry data.\n\n"
+                    f"**Confirmation code:** `{code}`\n\n"
+                    "Please copy this code and paste it into the text entity:\n"
+                    "**Legacy Cleanup Confirmation Code**\n\n"
+                    "Then press **Finalize Legacy Cleanup** again to continue."
+                ),
+                "notification_id": f"kostal_kore_cleanup_confirm_{self._entry_id}",
+            },
+            blocking=True,
+        )
+
+    async def _show_confirmation_step2(self) -> None:
+        """Show second confirmation popup before destructive cleanup."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "KOSTAL KORE cleanup final confirmation (Step 2/2)",
+                "message": (
+                    "Final confirmation armed.\n\n"
+                    "Press **Finalize Legacy Cleanup** one more time within "
+                    f"{LEGACY_CLEANUP_FINAL_CONFIRM_TTL_SECONDS} seconds to execute "
+                    "the irreversible cleanup."
+                ),
+                "notification_id": f"kostal_kore_cleanup_confirm_{self._entry_id}",
+            },
+            blocking=True,
+        )
+
+    async def _show_confirmation_mismatch(self) -> None:
+        """Inform user that entered confirmation code is invalid."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "KOSTAL KORE cleanup confirmation failed",
+                "message": (
+                    "Entered confirmation code is invalid.\n\n"
+                    "Please copy the shown code exactly into **Legacy Cleanup "
+                    "Confirmation Code**, then press **Finalize Legacy Cleanup** again."
+                ),
+                "notification_id": f"kostal_kore_cleanup_confirm_{self._entry_id}",
+            },
+            blocking=True,
+        )
+
+    async def _show_confirmation_expired(self) -> None:
+        """Inform user that confirmation session has expired."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "KOSTAL KORE cleanup confirmation expired",
+                "message": (
+                    "Cleanup confirmation expired for safety.\n\n"
+                    "Press **Finalize Legacy Cleanup** again to start a new "
+                    "confirmation challenge."
+                ),
+                "notification_id": f"kostal_kore_cleanup_confirm_{self._entry_id}",
+            },
+            blocking=True,
+        )
+
+    def _reset_cleanup_guard(self, store: dict[str, Any]) -> None:
+        """Reset multi-step cleanup confirmation state."""
+        store[DATA_KEY_LEGACY_CLEANUP_GUARD] = {
+            "phase": 0,
+            "code": None,
+            "expires_at": 0.0,
+        }
+        store[DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] = ""
+
     async def async_press(self) -> None:
         """Delete remaining legacy artifacts."""
+        store = integration_entry_store(self.hass, self._entry_id)
+        guard = dict(
+            store.get(
+                DATA_KEY_LEGACY_CLEANUP_GUARD,
+                {"phase": 0, "code": None, "expires_at": 0.0},
+            )
+        )
+        phase = int(guard.get("phase", 0))
+        code = guard.get("code")
+        expires_at = float(guard.get("expires_at", 0.0))
+        now = time.monotonic()
+
+        if phase == 2:
+            if now > expires_at:
+                self._reset_cleanup_guard(store)
+                self._attr_extra_state_attributes = {
+                    "last_status": "expired",
+                    "last_run": datetime.now().isoformat(),
+                }
+                self.async_write_ha_state()
+                await self._show_confirmation_expired()
+                return
+        elif phase == 1:
+            if now > expires_at:
+                self._reset_cleanup_guard(store)
+                self._attr_extra_state_attributes = {
+                    "last_status": "expired",
+                    "last_run": datetime.now().isoformat(),
+                }
+                self.async_write_ha_state()
+                await self._show_confirmation_expired()
+                return
+            entered_code = str(store.get(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, "")).strip().upper()
+            expected_code = str(code or "")
+            if entered_code != expected_code:
+                self._attr_extra_state_attributes = {
+                    "last_status": "awaiting_code",
+                    "last_run": datetime.now().isoformat(),
+                    "confirmation_phase": 1,
+                    "confirmation_expires_in_s": max(0, int(expires_at - now)),
+                }
+                self.async_write_ha_state()
+                await self._show_confirmation_mismatch()
+                return
+
+            # Code is correct -> arm final confirmation step.
+            store[DATA_KEY_LEGACY_CLEANUP_GUARD] = {
+                "phase": 2,
+                "code": expected_code,
+                "expires_at": now + LEGACY_CLEANUP_FINAL_CONFIRM_TTL_SECONDS,
+            }
+            store[DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] = ""
+            self._attr_extra_state_attributes = {
+                "last_status": "awaiting_final_confirm",
+                "last_run": datetime.now().isoformat(),
+                "confirmation_phase": 2,
+                "confirmation_expires_in_s": LEGACY_CLEANUP_FINAL_CONFIRM_TTL_SECONDS,
+            }
+            self.async_write_ha_state()
+            await self._show_confirmation_step2()
+            return
+        else:
+            # Step 1/2: start confirmation challenge on first press.
+            confirmation_code = generate_confirmation_code(
+                length=LEGACY_CLEANUP_CODE_LEN,
+                alphabet=LEGACY_CLEANUP_CODE_ALPHABET,
+            )
+            store[DATA_KEY_LEGACY_CLEANUP_GUARD] = {
+                "phase": 1,
+                "code": confirmation_code,
+                "expires_at": now + LEGACY_CLEANUP_CHALLENGE_TTL_SECONDS,
+            }
+            self._attr_extra_state_attributes = {
+                "last_status": "awaiting_code",
+                "last_run": datetime.now().isoformat(),
+                "confirmation_phase": 1,
+                "confirmation_expires_in_s": LEGACY_CLEANUP_CHALLENGE_TTL_SECONDS,
+            }
+            self.async_write_ha_state()
+            await self._show_confirmation_step1(confirmation_code)
+            return
+
         try:
             result = await finalize_legacy_cleanup(
                 self.hass,
                 target_entry_id=self._entry_id,
             )
+            self._reset_cleanup_guard(store)
             self._attr_extra_state_attributes = {
                 "last_status": "ok",
                 "last_run": datetime.now().isoformat(),
@@ -148,6 +323,7 @@ class LegacyCleanupButton(ButtonEntity):
                 blocking=True,
             )
         except Exception as err:
+            self._reset_cleanup_guard(store)
             self._attr_extra_state_attributes = {
                 "last_status": "error",
                 "last_run": datetime.now().isoformat(),
@@ -177,6 +353,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities for the integration."""
+    entry_store = integration_entry_store(hass, entry.entry_id)
+    entry_store.setdefault(
+        DATA_KEY_LEGACY_CLEANUP_GUARD,
+        {"phase": 0, "code": None, "expires_at": 0.0},
+    )
+    entry_store.setdefault(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, "")
+
     buttons: list[ButtonEntity] = [
         LegacyMigrationButton(entry),
         LegacyCleanupButton(entry),

@@ -16,6 +16,8 @@ from custom_components.kostal_kore.const import (
 )
 from custom_components.kostal_kore.legacy_migration import (
     LEGACY_DOMAIN,
+    adopt_legacy_entity_ids,
+    discover_legacy_duplicate_entity_pairs,
     finalize_legacy_cleanup,
     migrate_legacy_plenticore_entry,
 )
@@ -196,3 +198,92 @@ async def test_migrate_legacy_entry_errors_when_multiple_sources_ambiguous(hass)
             hass,
             target_entry_id=target_entry.entry_id,
         )
+
+
+async def test_discover_duplicate_pairs_and_adopt_entity_ids(hass):
+    """Adopt mode should keep old IDs and remove duplicate new entities."""
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore-target",
+        data={CONF_HOST: "10.0.0.11", CONF_PASSWORD: "new"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        title="legacy-source",
+        data={CONF_HOST: "10.0.0.11", CONF_PASSWORD: "old"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    entity_registry = er.async_get(hass)
+    old_entity = entity_registry.async_get_or_create(
+        "sensor",
+        LEGACY_DOMAIN,
+        f"{source_entry.entry_id}_devices:local_Ac_P",
+        config_entry=source_entry,
+        suggested_object_id="legacy_ac_power",
+    )
+    duplicate_target_entity = entity_registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{target_entry.entry_id}_devices:local_Ac_P",
+        config_entry=target_entry,
+        suggested_object_id="kore_ac_power",
+    )
+
+    device_registry = dr.async_get(hass)
+    old_device = device_registry.async_get_or_create(
+        config_entry_id=source_entry.entry_id,
+        identifiers={(LEGACY_DOMAIN, "SER-ADOPT-1")},
+        manufacturer="Kostal",
+        name="Legacy inverter",
+    )
+
+    pairs = discover_legacy_duplicate_entity_pairs(
+        hass,
+        target_entry_id=target_entry.entry_id,
+        source_entry_id=source_entry.entry_id,
+    )
+    assert len(pairs) == 1
+    assert pairs[0].old_entity_id == old_entity.entity_id
+    assert pairs[0].new_entity_id == duplicate_target_entity.entity_id
+
+    preview = await adopt_legacy_entity_ids(
+        hass,
+        target_entry_id=target_entry.entry_id,
+        source_entry_id=source_entry.entry_id,
+        dry_run=True,
+    )
+    await hass.async_block_till_done()
+    assert preview.dry_run is True
+    assert preview.migrated_entities == 1
+    assert preview.migrated_devices == 1
+    assert preview.removed_target_duplicates == 1
+    assert entity_registry.async_get(duplicate_target_entity.entity_id) is not None
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        AsyncMock(return_value=True),
+    ) as mock_reload:
+        applied = await adopt_legacy_entity_ids(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+            dry_run=False,
+        )
+    await hass.async_block_till_done()
+    assert applied.dry_run is False
+    assert applied.migrated_entities == 1
+    assert applied.removed_target_duplicates == 1
+    mock_reload.assert_awaited_once_with(target_entry.entry_id)
+
+    migrated = entity_registry.async_get(old_entity.entity_id)
+    assert migrated is not None
+    assert migrated.config_entry_id == target_entry.entry_id
+    assert migrated.unique_id == f"{target_entry.entry_id}_devices:local_Ac_P"
+    assert entity_registry.async_get(duplicate_target_entity.entity_id) is None
+
+    migrated_device = device_registry.async_get(old_device.id)
+    assert migrated_device is not None
+    assert target_entry.entry_id in migrated_device.config_entries

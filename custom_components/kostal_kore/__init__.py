@@ -62,6 +62,10 @@ from .modbus_client import KostalModbusClient, ModbusClientError
 from .request_scheduler import RequestScheduler
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .ksem_coordinator import KsemDataUpdateCoordinator
+from .migration_services import (
+    async_register_migration_services,
+    async_unregister_migration_services_if_unused,
+)
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue
 
@@ -74,6 +78,7 @@ PLATFORMS: Final[list[Platform]] = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
 ]
 
 MODBUS_PLATFORMS: Final[list[Platform]] = [
@@ -391,6 +396,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         _log_setup_metrics(start_time, False)
         return False
 
+    async_register_migration_services(hass)
     _log_setup_metrics(start_time, True)
     return True
 
@@ -487,6 +493,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
             MEMORY_CLEANUP_MAX_MS / 1000,
         )
 
+    async_unregister_migration_services_if_unused(
+        hass,
+        unloading_entry_id=entry.entry_id,
+    )
     return unload_ok
 
 

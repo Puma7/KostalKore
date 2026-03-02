@@ -1,0 +1,102 @@
+adopt_legacy_entity_ids:
+  name: Adopt legacy entity IDs
+  description: >
+    Rebind legacy kostal_plenticore entities/devices to a kostal_kore config entry.
+    Use dry-run first. Apply mode is guarded by a two-step confirmation code flow.
+  fields:
+    target_entry_id:
+      name: Target config entry ID
+      description: >
+        Entry ID of the kostal_kore config entry. Optional if only one exists.
+      example: 01KJQY76BA13GW5SHZCS06N970
+      required: false
+      selector:
+        text:
+    source_entry_id:
+      name: Source legacy config entry ID
+      description: >
+        Optional legacy kostal_plenticore entry ID. Required only if multiple legacy
+        entries exist.
+      example: 01K95AMXM2RHRNHZ2QQ1QN35R7
+      required: false
+      selector:
+        text:
+    dry_run:
+      name: Dry-run
+      description: Preview only (no changes). Defaults to true.
+      required: false
+      default: true
+      selector:
+        boolean:
+    confirmation_code:
+      name: Confirmation code
+      description: Code shown in the persistent notification for guarded apply mode.
+      required: false
+      selector:
+        text:
+    final_confirm:
+      name: Final confirm
+      description: Set true on the third call to execute guarded apply mode.
+      required: false
+      default: false
+      selector:
+        boolean:
+
+copy_legacy_history:
+  name: Copy/merge legacy history
+  description: >
+    Advanced recorder history copy/merge from old entity IDs to new ones.
+    Dry-run recommended first. Apply mode is guarded by a two-step confirmation code flow.
+  fields:
+    target_entry_id:
+      name: Target config entry ID
+      description: >
+        Entry ID of the kostal_kore config entry. Optional if only one exists.
+      required: false
+      selector:
+        text:
+    source_entry_id:
+      name: Source legacy config entry ID
+      description: >
+        Optional legacy kostal_plenticore entry ID used for automatic pair discovery.
+      required: false
+      selector:
+        text:
+    include_auto_map:
+      name: Include auto mapping
+      description: >
+        Auto-detect old/new pairs from duplicate unique IDs.
+      required: false
+      default: true
+      selector:
+        boolean:
+    entity_map:
+      name: Manual mapping
+      description: >
+        Optional manual old/new pairs to include in copy/merge.
+      required: false
+      example:
+        - old_entity_id: sensor.kostal_plenticore_grid_power
+          new_entity_id: sensor.kostal_kore_grid_power
+      selector:
+        object:
+    dry_run:
+      name: Dry-run
+      description: Preview only (no database changes). Defaults to true.
+      required: false
+      default: true
+      selector:
+        boolean:
+    confirmation_code:
+      name: Confirmation code
+      description: Code shown in the persistent notification for guarded apply mode.
+      required: false
+      selector:
+        text:
+    final_confirm:
+      name: Final confirm
+      description: Set true on the third call to execute guarded apply mode.
+      required: false
+      default: false
+      selector:
+        boolean:

@@ -31,6 +31,7 @@ PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
 SELECT_UPDATE_INTERVAL_SECONDS: Final[int] = 30
+SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 8.0
 UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 NONE_OPTION_VALUE: Final[str] = "None"
 
@@ -107,7 +108,7 @@ async def _get_settings_data_safe(plenticore: Any, operation: str) -> dict[str, 
         )
         return await asyncio.wait_for(
             getter(),
-            timeout=SELECT_UPDATE_INTERVAL_SECONDS
+            timeout=SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS
         )
     except Exception as err:
         _handle_select_error(err, operation)

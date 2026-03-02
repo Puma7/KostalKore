@@ -67,6 +67,19 @@ What this does:
 
 After that, you can remove old repository remnants from HACS if still present.
 
+## Advanced: Recorder history copy/merge
+
+Use this only after successful entity-ID adoption and only with a fresh backup.
+
+Recommended checklist:
+1. Full HA backup/snapshot (mandatory).
+2. Maintenance window (restart acceptable).
+3. Dry-run preview first (`kostal_kore.copy_legacy_history`, `dry_run: true`).
+4. Apply only for remaining unmatched old/new entities.
+
+The service uses guarded apply mode with challenge code + final confirmation.
+It merges recorder metadata references instead of blind raw row copying.
+
 ## Troubleshooting
 
 ### Error: "No legacy 'kostal_plenticore' config entry found"
@@ -97,3 +110,35 @@ Only after you run **Finalize Legacy Cleanup** and verify KORE works as expected
 ### Will history be preserved?
 
 The migration is designed to preserve history by moving registry mappings to the new entry. Always keep a backup as safety net.
+
+### Can I re-run migration and copy remaining history?
+
+Yes. Use this order:
+
+1. `kostal_kore.adopt_legacy_entity_ids` with `dry_run: true`, then apply.
+2. `kostal_kore.copy_legacy_history` only for remaining unmatched entities.
+
+Both services are safety-guarded in apply mode:
+- First call (`dry_run: false`) creates a challenge code notification.
+- Second call includes `confirmation_code`.
+- Third call includes `confirmation_code` + `final_confirm: true`.
+
+Example (preview):
+
+```yaml
+service: kostal_kore.adopt_legacy_entity_ids
+data:
+  dry_run: true
+```
+
+Example (advanced history preview):
+
+```yaml
+service: kostal_kore.copy_legacy_history
+data:
+  dry_run: true
+  include_auto_map: true
+  entity_map:
+    - old_entity_id: sensor.kostal_plenticore_grid_power
+      new_entity_id: sensor.kostal_kore_grid_power
+```

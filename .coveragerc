@@ -38,6 +38,7 @@ omit =
     custom_components/kostal_kore/button.py
     custom_components/kostal_kore/config_flow.py
     custom_components/kostal_kore/legacy_migration.py
+    custom_components/kostal_kore/migration_services.py
     custom_components/kostal_kore/power_limits.py
     custom_components/kostal_kore/ksem_coordinator.py
 

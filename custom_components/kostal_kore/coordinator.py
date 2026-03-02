@@ -717,11 +717,12 @@ class ProcessDataUpdateCoordinator(
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self._last_result: dict[str, dict[str, str]] = {}
         self._init_adaptive_polling(
             default_base_seconds=10,
             max_interval_floor_seconds=120,
             max_interval_multiplier=6,
-            failure_multiplier_cap=5,
+            failure_multiplier_cap=3,
         )
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
@@ -744,10 +745,33 @@ class ProcessDataUpdateCoordinator(
             self._record_success()
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
+            if self._last_result:
+                _LOGGER.warning(
+                    "Timeout fetching process data for %s - using last known values",
+                    self.name,
+                )
+                # Soft backoff while keeping entities responsive.
+                self._apply_adaptive_interval(1.5)
+                return self._last_result
             self._record_failure()
             raise UpdateFailed("Timeout fetching process data") from None
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
+            if self._last_result:
+                if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
+                    _LOGGER.warning(
+                        "Inverter internal communication error (503) fetching process data - "
+                        "using last known values"
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Process data fetch failed for %s - using last known values: %s",
+                        self.name,
+                        error_msg,
+                    )
+                # Soft backoff while keeping entities responsive.
+                self._apply_adaptive_interval(1.5)
+                return self._last_result
             self._record_failure()
 
             # Handle 503 errors (internal communication error)
@@ -785,6 +809,8 @@ class ProcessDataUpdateCoordinator(
                 _LOGGER.warning("Error processing module %s: %s", module_id, err)
                 result[module_id] = {}
 
+        if result:
+            self._last_result = result
         return result
 
 

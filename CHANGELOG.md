@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional KSEM coordinator and source-precedence diagnostics entities.
   - Modbus register coverage expansion and data-quality guards.
   - Advanced write safety controls (allowlist, arming, validation, verification).
+- **Guarded migration services**:
+  - `kostal_kore.adopt_legacy_entity_ids` for safe registry rebind previews/applies.
+  - `kostal_kore.copy_legacy_history` for optional advanced recorder metadata merge.
 - **Project learnings doc**: Added `LEARNINGS.md` with validated behavior and policy decisions.
 
 ### Changed
@@ -22,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Obsolete guide cleanup**: Removed untracked/ignored `custom_components/kostal_kore/DEVELOPMENT_GUIDE.md` and consolidated references to maintained docs.
 - **Auto-discovery documentation clarified**: discovery is best-effort and manual host entry remains primary fallback in segmented networks.
 - **Write model clarified**: battery charge/discharge setpoint control is documented as Modbus-only by design.
+- **Operations docs extended**: Added guarded migration service usage, grid feed-in optimizer behavior, and `Isolation Resistance = unknown` troubleshooting notes across README/LEARNINGS/migration guides.
 
 ### Fixed
 - **REST write safety policy**: blocked unsupported REST battery charge/discharge setpoint write targets to avoid non-deterministic behavior.

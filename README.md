@@ -59,6 +59,15 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - **REST/Modbus split**: Battery charge/discharge setpoint control is intentionally Modbus-only
 - **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `custom_components/kostal_kore/QUICK_REFERENCE.md` for full lists)
 
+### ⚡ Grid Feed-In Optimizer (KORE GridGuard)
+- Requires Modbus.
+- Uses:
+  - `switch.<device>_grid_feed_in_optimizer`
+  - `number.<device>_grid_feed_in_limit`
+- Control logic runs periodically and writes Modbus register `1038` (`bat_max_charge_limit`) so battery charging absorbs PV surplus above the configured feed-in cap.
+- Turning the switch OFF restores normal charging limits.
+- Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations + optimizer), or they can conflict.
+
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting
 - Redacted sensitive information for privacy
@@ -121,6 +130,20 @@ If you previously used the `kostal_plenticore` integration:
 This split flow lets you migrate first, test in production for a few weeks, and only then finalize cleanup.
 
 Detailed step-by-step guide: see `migration.md`.
+
+### Advanced migration services (optional)
+
+For users who need additional control from Developer Tools -> Services:
+
+- `kostal_kore.adopt_legacy_entity_ids` (recommended)
+  - Safe registry rebind to keep old/canonical entity IDs.
+  - Supports `dry_run: true` preview before apply.
+- `kostal_kore.copy_legacy_history` (advanced)
+  - Recorder metadata/history merge for old -> new entity IDs.
+  - Supports auto-mapping and optional manual `entity_map`.
+
+Both services are guarded in apply mode with a two-step confirmation code flow
+(persistent notification challenge + final confirmation call).
 
 ## Development
 
@@ -298,6 +321,14 @@ The integration provides human-readable inverter states:
 1. Reduce polling frequency if experiencing slow response
 2. Check network bandwidth and latency to the inverter
 3. Monitor Home Assistant system resources
+
+### Isolation Resistance shows `unknown`
+1. In KORE, isolation resistance is sourced from Modbus register `120` (`isolation_resistance`), not REST.
+2. `unknown` means no valid Modbus value was read yet (startup, transient disconnects, or unsupported register on current model/firmware).
+3. Check logs for:
+   - `Connection lost reading isolation_resistance`
+   - `Illegal data address`
+4. Verify Modbus is enabled on inverter and integration settings (host/port/unit-id) are correct.
 
 ## Example Automations
 

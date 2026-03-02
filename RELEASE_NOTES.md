@@ -13,6 +13,12 @@ implementation wave and follow-up production-oriented checks.
 - Clarified write-path policy:
   - Advanced REST writes are allowlisted and safety-gated.
   - Battery charge/discharge setpoint controls are intentionally Modbus-only.
+- Added guarded migration services guidance:
+  - `kostal_kore.adopt_legacy_entity_ids` (safe/default, dry-run first).
+  - `kostal_kore.copy_legacy_history` (advanced recorder merge path).
+- Added operational notes:
+  - Grid Feed-In Optimizer behavior and register ownership caveat (`1038`).
+  - Troubleshooting for `Isolation Resistance = unknown` (Modbus register `120` source path).
 - Synced README + backlog + changelog with the above decisions to prevent
   regressions and confusion.
 

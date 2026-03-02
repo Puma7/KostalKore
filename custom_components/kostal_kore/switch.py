@@ -36,6 +36,7 @@ UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 DC_STRING_FEATURE_DATA_ID: Final[str] = STRING_FEATURE_TEMPLATE
 SHADOW_MANAGEMENT_SUPPORT: Final[int] = 1
 SHADOW_MANAGEMENT_ADVANCED: Final[int] = 3
+SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 8.0
 
 # Security defaults
 DEFAULT_ENTITY_REGISTRY_ENABLED: Final[bool] = False
@@ -641,6 +642,7 @@ async def async_setup_entry(
     plenticore = entry.runtime_data
 
     entities: list[Entity] = []
+    settings_fetch_ok = True
     entities.append(
         AdvancedWriteArmSwitch(
             plenticore=plenticore,
@@ -651,11 +653,24 @@ async def async_setup_entry(
 
     # Fetch fresh settings data
     try:
-        if hasattr(plenticore, "async_get_settings_cached"):
-            available_settings_data = await plenticore.async_get_settings_cached()
-        else:
-            available_settings_data = await plenticore.client.get_settings()
+        settings_getter = (
+            plenticore.async_get_settings_cached
+            if hasattr(plenticore, "async_get_settings_cached")
+            else plenticore.client.get_settings
+        )
+        available_settings_data = await asyncio.wait_for(
+            settings_getter(),
+            timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _LOGGER.warning(
+            "Timeout fetching settings data for switch setup - "
+            "continuing with minimal switch set"
+        )
+        settings_fetch_ok = False
+        available_settings_data = {}
     except (ApiException, ClientError, TimeoutError) as err:
+        settings_fetch_ok = False
         error_msg = str(err)
         if "Unknown API response [500]" in error_msg:
             _LOGGER.error(
@@ -666,8 +681,7 @@ async def async_setup_entry(
             _LOGGER.error("Could not get settings data: %s", modbus_err.message)
         else:
             _LOGGER.error("Could not get settings data: %s", err)
-        # Return early if we can't get basic settings
-        return
+        available_settings_data = {}
     available_settings_data = available_settings_data or {}
 
     from .const import CONF_MODBUS_ENABLED
@@ -727,7 +741,7 @@ async def async_setup_entry(
     # add shadow management switches for strings which support it
     # Wrap ENTIRE shadow management section in try-except to prevent ANY exception from crashing the platform
     # This ensures basic switches (Battery Strategy, Battery Manual Charge) are always created
-    try:
+    if settings_fetch_ok:
         try:
             string_count_setting = await plenticore.client.get_setting_values(
                 ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
@@ -756,9 +770,22 @@ async def async_setup_entry(
 
         # Initialize variables for shadow management
         dc_strings = tuple(range(string_count))
-        dc_string_feature_ids = tuple(
-            string_feature_id(dc_string) for dc_string in dc_strings
-        )
+        try:
+            dc_string_feature_ids = tuple(
+                string_feature_id(dc_string) for dc_string in dc_strings
+            )
+        except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as gen_err:
+            _handle_api_error(
+                gen_err, "shadow management feature-id generation", "shadow management"
+            )
+            dc_strings = ()
+            dc_string_feature_ids = ()
+        except Exception as gen_err:
+            _LOGGER.warning(
+                "Shadow management feature-id generation failed: %s", gen_err
+            )
+            dc_strings = ()
+            dc_string_feature_ids = ()
 
         # Skip shadow management if no strings
         if not dc_strings:
@@ -909,31 +936,10 @@ async def async_setup_entry(
                         dc_string + 1,
                         dc_string_feature,
                     )
-    except (
-        ApiException,
-        ClientError,
-        TimeoutError,
-        asyncio.TimeoutError,
-    ) as shadow_err:
-        # Catch ANY exception in shadow management setup to prevent platform crash
-        # This is a catch-all to ensure basic switches are always created
-        error_msg = str(shadow_err)
-        if "Unknown API response [500]" in error_msg:
-            _LOGGER.warning(
-                "Shadow management features not supported on this inverter model - continuing without shadow management switches"
-            )
-        elif isinstance(shadow_err, ApiException):
-            modbus_err = parse_modbus_exception(shadow_err)
-            _LOGGER.warning(
-                "Shadow management setup failed: %s - continuing without shadow management switches",
-                modbus_err.message,
-            )
-        else:
-            _LOGGER.warning(
-                "Error setting up shadow management switches: %s - continuing without shadow management switches",
-                shadow_err,
-            )
-        # Ensure we don't crash - basic switches will still be created
+    else:
+        _LOGGER.debug(
+            "Skipping shadow management capability probe due settings timeout/error"
+        )
 
     # Add Modbus-based charge block switch if Modbus is enabled
     try:  # pragma: no cover
