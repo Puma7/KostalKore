@@ -74,6 +74,7 @@ PLATFORMS: Final[list[Platform]] = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
 ]
 
 MODBUS_PLATFORMS: Final[list[Platform]] = [

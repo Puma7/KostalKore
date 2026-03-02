@@ -36,6 +36,10 @@ DEFAULT_KSEM_UNIT_ID: Final[int] = 71
 # High-impact write arming window (seconds)
 ADVANCED_WRITE_ARM_TTL_SECONDS: Final[int] = 120
 
+# In-memory guard keys for critical legacy cleanup confirmation flow
+DATA_KEY_LEGACY_CLEANUP_GUARD: Final[str] = "legacy_cleanup_guard"
+DATA_KEY_LEGACY_CLEANUP_CODE_INPUT: Final[str] = "legacy_cleanup_code_input"
+
 # Centralised import for the platform callback type.
 # Older HA versions export ``AddEntitiesCallback``; newer ones renamed it to
 # ``AddConfigEntryEntitiesCallback``.  Using a single location avoids the
@@ -78,6 +82,8 @@ __all__ = [
     "DEFAULT_MODBUS_PORT",
     "DEFAULT_MODBUS_PROXY_BIND",
     "DEFAULT_MODBUS_UNIT_ID",
+    "DATA_KEY_LEGACY_CLEANUP_CODE_INPUT",
+    "DATA_KEY_LEGACY_CLEANUP_GUARD",
     "DOMAIN",
     "ADVANCED_WRITE_ARM_TTL_SECONDS",
 ]
