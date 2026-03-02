@@ -67,6 +67,19 @@ What this does:
 
 After that, you can remove old repository remnants from HACS if still present.
 
+## Advanced: Recorder history copy/merge
+
+Use this only after successful entity-ID adoption and only with a fresh backup.
+
+Recommended checklist:
+1. Full HA backup/snapshot (mandatory).
+2. Maintenance window (restart acceptable).
+3. Dry-run preview first (`kostal_kore.copy_legacy_history`, `dry_run: true`).
+4. Apply only for remaining unmatched old/new entities.
+
+The service uses guarded apply mode with challenge code + final confirmation.
+It merges recorder metadata references instead of blind raw row copying.
+
 ## Troubleshooting
 
 ### Error: "No legacy 'kostal_plenticore' config entry found"

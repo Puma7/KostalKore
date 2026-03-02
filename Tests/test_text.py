@@ -57,3 +57,39 @@ async def test_cleanup_confirmation_text_normalizes_and_persists_value(hass):
         == "AB12CD"
     )
     assert entity.native_value == "AB12CD"
+
+
+async def test_cleanup_confirmation_text_returns_empty_without_hass() -> None:
+    """native_value should gracefully return empty string when hass is not set."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore",
+        data={"host": "10.0.0.11", "password": "pw"},
+    )
+    entry.runtime_data = SimpleNamespace(
+        device_info=DeviceInfo(identifiers={(DOMAIN, "SERIAL-TEXT-3")})
+    )
+    entity = text_platform.LegacyCleanupConfirmationCodeText(entry)
+    assert entity.native_value == ""
+
+
+async def test_cleanup_confirmation_text_set_value_no_hass_or_entity_id(hass):
+    """async_set_value should no-op without hass and skip state write without entity_id."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore",
+        data={"host": "10.0.0.11", "password": "pw"},
+    )
+    entry.runtime_data = SimpleNamespace(
+        device_info=DeviceInfo(identifiers={(DOMAIN, "SERIAL-TEXT-4")})
+    )
+
+    entity = text_platform.LegacyCleanupConfirmationCodeText(entry)
+    # no hass: should not raise and should not create data
+    await entity.async_set_value("abc")
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
+    entity.hass = hass
+    # no entity_id branch should still persist normalized value
+    await entity.async_set_value(" z9 ")
+    assert hass.data[DOMAIN][entry.entry_id][DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] == "Z9"

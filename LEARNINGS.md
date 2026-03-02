@@ -105,3 +105,69 @@ Most valuable documentation updates were policy-level:
 - which safeguards are mandatory
 
 This prevents future regressions where convenience reintroduces unsafe behavior.
+
+---
+
+## 8) Legacy migration is safest as a two-layer workflow
+
+### Recommended operational order
+1. **Adopt legacy entity IDs** (registry-only, safe/default path).
+2. **Copy/merge recorder history** only for remaining unmatched pairs.
+
+### Why this order matters
+- Recorder history in Home Assistant is keyed through metadata/entity mappings.
+- If canonical IDs can be preserved first, most historical continuity is retained
+  without direct recorder DB changes.
+- DB-level history merge should be a second step, not the default.
+
+### Implemented safeguards
+- Both migration services support `dry_run` previews.
+- Apply mode requires multi-step confirmation:
+  - challenge code generation,
+  - code verification,
+  - explicit final confirmation call.
+
+---
+
+## 9) Recorder history migration should update metadata, not raw row copies
+
+### Implemented approach
+- Merge at metadata layer (`states_meta`, `statistics_meta`) and move linked
+  rows (`states`, `statistics`, `statistics_short_term`) with dedupe on
+  conflicting timestamps/start buckets.
+
+### Why this matters
+- Avoids fragile row-by-row blind copies.
+- Reduces duplicate-statistics artifacts and keeps recorder references coherent.
+- Works across SQLite and MariaDB/MySQL (and PostgreSQL support path included).
+
+---
+
+## 10) Grid Feed-In Optimizer is a limiter, not PV curtailment
+
+### Behavior
+- Optimizer adjusts battery charge limit via Modbus register `1038`
+  (`bat_max_charge_limit`) so PV surplus above configured grid feed-in cap is
+  redirected to battery charging.
+- When disabled, normal charge limits are restored.
+
+### Important integration rule
+- Register `1038` can be written by several control features.
+- Running multiple concurrent writers (optimizer, external automations, manual
+  scripts) can cause control contention. One owner per control period is safer.
+
+---
+
+## 11) `Isolation Resistance = unknown` is typically a data-source symptom
+
+### What it means
+- Isolation resistance is read from Modbus register `120`.
+- `unknown` usually indicates:
+  - no successful read after startup yet,
+  - transient Modbus disconnects,
+  - unsupported register on specific firmware/model (illegal address path).
+
+### Operator guidance
+- Verify Modbus connectivity first (host/port/unit-id and inverter setting).
+- Check logs for `Connection lost reading isolation_resistance` or
+  `Illegal data address`.

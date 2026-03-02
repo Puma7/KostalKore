@@ -307,6 +307,24 @@ data:
   option: Battery:SmartBatteryControl:Enable
 ```
 
+### Legacy migration (safe first)
+```yaml
+service: kostal_kore.adopt_legacy_entity_ids
+data:
+  dry_run: true
+```
+
+### Legacy recorder history merge (advanced)
+```yaml
+service: kostal_kore.copy_legacy_history
+data:
+  dry_run: true
+  include_auto_map: true
+  entity_map:
+    - old_entity_id: sensor.kostal_plenticore_grid_power
+      new_entity_id: sensor.kostal_kore_grid_power
+```
+
 ---
 
 ## 🐛 Debug Checklist
@@ -318,6 +336,25 @@ data:
 5. ✅ Full Home Assistant restart
 6. ✅ Check `manifest.json` has `version` field
 7. ✅ Verify folder structure: `custom_components/kostal_kore/`
+
+---
+
+## ⚡ Grid Feed-In Optimizer (Modbus)
+
+- Switch: `switch.<device>_grid_feed_in_optimizer`
+- Limit number: `number.<device>_grid_feed_in_limit`
+- Writes register `1038` (`bat_max_charge_limit`) in a control loop.
+- Keep one owner for register `1038` (avoid conflicting parallel automations).
+
+---
+
+## 🧯 Isolation resistance = `unknown`
+
+- Data source is Modbus register `120` (`isolation_resistance`).
+- `unknown` indicates no valid read yet (startup, connection loss, or unsupported register).
+- Check logs for:
+  - `Connection lost reading isolation_resistance`
+  - `Illegal data address`
 
 ---
 
