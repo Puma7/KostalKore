@@ -1,5 +1,21 @@
 # Release Notes
 
+## Implementation + learnings sync (2026-03-02)
+
+This documentation update captures validated behavior after the full backlog
+implementation wave and follow-up production-oriented checks.
+
+- Added `LEARNINGS.md` as consolidated source-of-truth for technical learnings.
+- Clarified auto-discovery behavior:
+  - It can work on reachable local networks.
+  - It is best-effort and may fail in segmented/firewalled topologies.
+  - Manual host entry remains the reliable fallback.
+- Clarified write-path policy:
+  - Advanced REST writes are allowlisted and safety-gated.
+  - Battery charge/discharge setpoint controls are intentionally Modbus-only.
+- Synced README + backlog + changelog with the above decisions to prevent
+  regressions and confusion.
+
 ## Documentation sync update (post v2.16.0-alpha.4)
 
 - Reviewed and updated all maintained Markdown docs for current `kostal_kore` naming and behavior.

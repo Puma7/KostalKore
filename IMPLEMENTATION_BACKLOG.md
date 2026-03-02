@@ -1,6 +1,6 @@
 # KOSTAL KORE Implementation Backlog (Post-Analysis)
 
-Status: proposed  
+Status: implemented (2026-03-02)  
 Scope: features inspired by `kostal-ksem`, `kostal-modbusquery`, `kostal-RESTAPI`, `pykoplenti`, reworked for KORE architecture
 
 ## Guiding principles (non-negotiable)
@@ -23,6 +23,24 @@ Scope: features inspired by `kostal-ksem`, `kostal-modbusquery`, `kostal-RESTAPI
 - **M1 (P0):** Event intelligence + Modbus data quality hardening
 - **M2 (P1):** Advanced installer controls with strong safeguards
 - **M3 (P1/P2):** KSEM optional integration and deeper observability
+
+### Implementation outcome snapshot (2026-03-02)
+
+- ✅ **Epic A delivered**: Event coordinator, bounded event history, dedup/cooldown, event snapshot sensors, diagnostics event payload.
+- ✅ **Epic B delivered**: Sentinel/outlier handling (incl. register 575 behavior), expanded powermeter/battery register coverage, register capability persistence.
+- ✅ **Epic C delivered with safety tightening**: allowlist, arming switch, cross-field validation, write verification.
+- ✅ **Epic D delivered (optional)**: KSEM coordinator/options, diagnostics sensors, source precedence + confidence metadata.
+- ✅ **Epic E delivered**: adaptive polling backoff/jitter and capability caching to reduce duplicate probes.
+- ✅ **Epic F delivered**: dangerous-write allowlist and policy enforcement for high-impact controls.
+
+### Post-implementation learning (critical policy update)
+
+- **Battery charge/discharge setpoint control is now intentionally Modbus-only.**
+  - Reason: REST behavior for these controls is not reliably deterministic across supported devices/firmware.
+  - Result: REST write paths for those IDs are blocked; equivalent Modbus controls remain available.
+- **Auto-discovery can work but is best-effort only.**
+  - Works in reachable local networks.
+  - Fails in segmented/firewalled topologies and must fallback to manual host entry.
 
 ---
 
