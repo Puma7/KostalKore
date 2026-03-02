@@ -384,3 +384,22 @@ class TestUnavailableRegisterTracking:
         c._unavailable_strikes[100] = 2
         c._unavailable_strikes.pop(100, None)
         assert 100 not in c._unavailable_strikes
+
+    def test_export_unavailable_state_persists_only_strikes(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        for _ in range(3):
+            c._record_unavailable_strike(100, "test_reg")
+        state = c.export_unavailable_state()
+        assert state == {"strikes": {"100": 3}}
+
+    def test_import_unavailable_state_ignores_legacy_suppressed(self) -> None:
+        c = KostalModbusClient("127.0.0.1")
+        c.import_unavailable_state(
+            {
+                "strikes": {"100": 3},
+                "suppressed": {"100": 99999.0},
+            }
+        )
+        assert c._unavailable_strikes[100] == 3
+        assert c._unavailable_suppressed == {}
+        assert c._is_suppressed(100) is False

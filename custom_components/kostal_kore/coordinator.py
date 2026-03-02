@@ -624,24 +624,40 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
                 pass
 
 
-class ProcessDataUpdateCoordinator(
-    PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]]
-):
-    """Implementation of PlenticoreUpdateCoordinator for process data."""
+class AdaptivePollingCoordinatorMixin:
+    """Shared adaptive interval behavior for API coordinators."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._base_update_interval = self.update_interval or timedelta(seconds=10)
+    update_interval: timedelta | None
+    _base_update_interval: timedelta
+    _max_update_interval: timedelta
+    _consecutive_failures: int
+    _failure_multiplier_cap: int
+
+    def _init_adaptive_polling(
+        self,
+        *,
+        default_base_seconds: int,
+        max_interval_floor_seconds: int,
+        max_interval_multiplier: int,
+        failure_multiplier_cap: int,
+    ) -> None:
+        base_interval = self.update_interval or timedelta(seconds=default_base_seconds)
+        self._base_update_interval = base_interval
         self._max_update_interval = timedelta(
-            seconds=max(120, int(self._base_update_interval.total_seconds() * 6))
+            seconds=max(
+                max_interval_floor_seconds,
+                int(base_interval.total_seconds() * max_interval_multiplier),
+            )
         )
         self._consecutive_failures = 0
+        self._failure_multiplier_cap = max(1, int(failure_multiplier_cap))
 
     def _apply_adaptive_interval(self, multiplier: float) -> None:
         """Apply bounded adaptive interval with light jitter."""
         base_seconds = max(1.0, self._base_update_interval.total_seconds())
-        next_seconds = base_seconds * multiplier
-        next_seconds = min(next_seconds, self._max_update_interval.total_seconds())
+        next_seconds = min(
+            self._max_update_interval.total_seconds(), base_seconds * multiplier
+        )
         # Jitter prevents synchronized poll bursts across instances.
         next_seconds = max(1.0, next_seconds * random.uniform(0.9, 1.1))
         self.update_interval = timedelta(seconds=next_seconds)
@@ -652,7 +668,25 @@ class ProcessDataUpdateCoordinator(
 
     def _record_failure(self) -> None:
         self._consecutive_failures += 1
-        self._apply_adaptive_interval(1 + min(5, self._consecutive_failures))
+        self._apply_adaptive_interval(
+            1 + min(self._failure_multiplier_cap, self._consecutive_failures)
+        )
+
+
+class ProcessDataUpdateCoordinator(
+    AdaptivePollingCoordinatorMixin,
+    PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]],
+):
+    """Implementation of PlenticoreUpdateCoordinator for process data."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._init_adaptive_polling(
+            default_base_seconds=10,
+            max_interval_floor_seconds=120,
+            max_interval_multiplier=6,
+            failure_multiplier_cap=5,
+        )
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
@@ -719,6 +753,7 @@ class ProcessDataUpdateCoordinator(
 
 
 class SettingDataUpdateCoordinator(
+    AdaptivePollingCoordinatorMixin,
     PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]],
     DataUpdateCoordinatorMixin,
 ):
@@ -728,27 +763,12 @@ class SettingDataUpdateCoordinator(
         """Initialize with last-result fallback for 503 errors."""
         super().__init__(*args, **kwargs)
         self._last_result: Mapping[str, Mapping[str, str]] = {}
-        self._base_update_interval = self.update_interval or timedelta(seconds=30)
-        self._max_update_interval = timedelta(
-            seconds=max(300, int(self._base_update_interval.total_seconds() * 8))
+        self._init_adaptive_polling(
+            default_base_seconds=30,
+            max_interval_floor_seconds=300,
+            max_interval_multiplier=8,
+            failure_multiplier_cap=8,
         )
-        self._consecutive_failures = 0
-
-    def _apply_adaptive_interval(self, multiplier: float) -> None:
-        base_seconds = max(1.0, self._base_update_interval.total_seconds())
-        next_seconds = min(
-            self._max_update_interval.total_seconds(), base_seconds * multiplier
-        )
-        next_seconds = max(1.0, next_seconds * random.uniform(0.9, 1.1))
-        self.update_interval = timedelta(seconds=next_seconds)
-
-    def _record_success(self) -> None:
-        self._consecutive_failures = 0
-        self.update_interval = self._base_update_interval
-
-    def _record_failure(self) -> None:
-        self._consecutive_failures += 1
-        self._apply_adaptive_interval(1 + min(8, self._consecutive_failures))
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         if (client := self._plenticore.client) is None:

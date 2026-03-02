@@ -27,6 +27,7 @@ from custom_components.kostal_kore.modbus_client import (
     KostalModbusClient,
     ModbusReadError,
 )
+from custom_components.kostal_kore.ksem_coordinator import KsemDataUpdateCoordinator
 from custom_components.kostal_kore.modbus_registers import REG_INVERTER_GEN_POWER
 
 
@@ -200,3 +201,59 @@ def test_plenticore_advanced_write_arm_window(hass) -> None:
     assert plenticore.is_advanced_write_armed
     plenticore.disarm_advanced_writes()
     assert not plenticore.is_advanced_write_armed
+
+
+@pytest.mark.asyncio
+async def test_ksem_phase_active_power_uses_signed_reads(hass) -> None:
+    """Per-phase active power values must preserve export (negative) sign."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "x"},
+    )
+    coordinator = KsemDataUpdateCoordinator(
+        hass=hass,
+        config_entry=config_entry,
+        host="192.168.1.20",
+        port=1502,
+        unit_id=71,
+    )
+    coordinator._ensure_connected = AsyncMock()
+    coordinator._read_u32 = AsyncMock(
+        side_effect=[3200.0, 400.0, 49.99, 230.1, 229.9, 230.0]
+    )
+    coordinator._read_i32 = AsyncMock(side_effect=[0.995, -150.0, -50.0, -75.0])
+
+    data = await coordinator._async_update_data()
+
+    assert coordinator._read_i32.await_count == 4
+    assert data["l1_active_power_w"] == -150.0
+    assert data["l2_active_power_w"] == -50.0
+    assert data["l3_active_power_w"] == -75.0
+
+
+@pytest.mark.asyncio
+async def test_ksem_shutdown_calls_base_cleanup(hass) -> None:
+    """Shutdown must cancel coordinator polling and close TCP client."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "x"},
+    )
+    coordinator = KsemDataUpdateCoordinator(
+        hass=hass,
+        config_entry=config_entry,
+        host="192.168.1.20",
+        port=1502,
+        unit_id=71,
+    )
+    client = MagicMock()
+    coordinator._client = client
+
+    with patch(
+        "custom_components.kostal_kore.ksem_coordinator.DataUpdateCoordinator.async_shutdown",
+        new_callable=AsyncMock,
+    ) as base_shutdown:
+        await coordinator.async_shutdown()
+
+    base_shutdown.assert_awaited_once()
+    client.close.assert_called_once()
+    assert coordinator._client is None

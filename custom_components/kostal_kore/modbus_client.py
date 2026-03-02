@@ -206,25 +206,25 @@ class KostalModbusClient:
                 count,
             )
 
-    def export_unavailable_state(self) -> dict[str, dict[str, float | int]]:
-        """Export unavailable-register strike/suppression state for persistence."""
+    def export_unavailable_state(self) -> dict[str, dict[str, int]]:
+        """Export unavailable-register strikes for persistence.
+
+        Suppression timestamps are intentionally not persisted because they are
+        based on time.monotonic() and are not portable across restarts.
+        """
         return {
             "strikes": {str(addr): int(v) for addr, v in self._unavailable_strikes.items()},
-            "suppressed": {
-                str(addr): float(ts) for addr, ts in self._unavailable_suppressed.items()
-            },
         }
 
     def import_unavailable_state(self, state: dict[str, dict[str, float | int]]) -> None:
-        """Import persisted unavailable-register state."""
+        """Import persisted unavailable-register strikes.
+
+        Legacy payloads may include a "suppressed" map. It is ignored because
+        monotonic timestamps cannot be safely restored after restart.
+        """
         strikes = state.get("strikes", {})
-        suppressed = state.get("suppressed", {})
-        self._unavailable_strikes = {
-            int(addr): int(v) for addr, v in strikes.items()
-        }
-        self._unavailable_suppressed = {
-            int(addr): float(ts) for addr, ts in suppressed.items()
-        }
+        self._unavailable_strikes = {int(addr): int(v) for addr, v in strikes.items()}
+        self._unavailable_suppressed = {}
 
     def _is_suppressed(self, address: int) -> bool:
         """Check if a register is temporarily suppressed."""

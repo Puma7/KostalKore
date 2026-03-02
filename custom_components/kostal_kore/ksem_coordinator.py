@@ -56,6 +56,8 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
         await self._ensure_connected()
 
     async def async_shutdown(self) -> None:
+        # Ensure coordinator timers/debouncers are cancelled before closing I/O.
+        await super().async_shutdown()
         async with self._lock:
             if self._client is not None:
                 self._client.close()
@@ -121,9 +123,10 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
         l1_voltage = await self._read_u32(62, 0.001)
         l2_voltage = await self._read_u32(102, 0.001)
         l3_voltage = await self._read_u32(142, 0.001)
-        l1_active = await self._read_u32(40, 0.1)
-        l2_active = await self._read_u32(80, 0.1)
-        l3_active = await self._read_u32(120, 0.1)
+        # Per-phase active power is signed on bidirectional meters.
+        l1_active = await self._read_i32(40, 0.1)
+        l2_active = await self._read_i32(80, 0.1)
+        l3_active = await self._read_i32(120, 0.1)
 
         return {
             "active_power_import_w": active_import,
