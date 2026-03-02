@@ -1024,7 +1024,16 @@ class SelectDataUpdateCoordinator(
 
         _LOGGER.debug("Fetching select %s for %s", self.name, self._fetch)
 
-        return await self._async_get_current_option(self._fetch)
+        # Snapshot fetch map to avoid RuntimeError when entities are added/removed
+        # while an update round is iterating with await points.
+        fetch_snapshot = {
+            module: {
+                data_id: list(options)
+                for data_id, options in data_map.items()
+            }
+            for module, data_map in self._fetch.items()
+        }
+        return await self._async_get_current_option(fetch_snapshot)
 
     async def _async_get_current_option(
         self,
@@ -1035,11 +1044,11 @@ class SelectDataUpdateCoordinator(
         # Fix review finding #1: evaluate all options for all tracked select
         # entities instead of returning after the first entry.
         result: dict[str, dict[str, str]] = {}
-        for mid, data_map in module_id.items():
+        for mid, data_map in list(module_id.items()):
             module_result: dict[str, str] = {}
-            for data_id, all_options in data_map.items():
+            for data_id, all_options in list(data_map.items()):
                 selected_option = "None"
-                for all_option in all_options:
+                for all_option in list(all_options):
                     if all_option == "None":
                         continue
                     val = await self.async_read_data(mid, all_option)

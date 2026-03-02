@@ -15,6 +15,7 @@ Key Features:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from datetime import timedelta
 import logging
 import time
@@ -401,6 +402,21 @@ async def _async_options_updated(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+async def _await_cleanup_step(
+    label: str,
+    step: Awaitable[object],
+    *,
+    timeout: float = UNLOAD_TIMEOUT_SECONDS,
+) -> None:
+    """Await a cleanup coroutine with timeout protection."""
+    try:
+        await asyncio.wait_for(step, timeout=timeout)
+    except asyncio.TimeoutError:
+        _LOGGER.warning("%s timed out after %.1fs during unload", label, timeout)
+    except Exception as err:  # pragma: no cover - defensive logging
+        _LOGGER.debug("%s failed during unload: %s", label, err)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -> bool:
     """
     Unload the Kostal Plenticore integration with graceful cleanup.
@@ -427,23 +443,27 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
-        await soc_ctrl.stop()
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
-        await modbus_proxy.stop()
+        await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
     mqtt_bridge = entry_data.get("mqtt_bridge")
     if mqtt_bridge:
-        await mqtt_bridge.async_stop()
+        await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
         try:
             await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
         except Exception:  # pragma: no cover
             _LOGGER.debug("Modbus platform unload incomplete (non-fatal)")
-        await modbus_coordinator.async_shutdown()
+        await _await_cleanup_step(
+            "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
+        )
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator:  # pragma: no cover
-        await ksem_coordinator.async_shutdown()
+        await _await_cleanup_step(
+            "KSEM coordinator shutdown", ksem_coordinator.async_shutdown()
+        )
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
