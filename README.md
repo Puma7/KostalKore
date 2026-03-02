@@ -445,7 +445,7 @@ The integration supports various battery manufacturers:
 - Additional control functions may require installer-level access and service code
 
 ### Integration Implementation
-- This integration uses the `pykoplenti` library which abstracts MODBUS-TCP communication
+- This integration uses the `pykoplenti` library which abstracts REST-API MODBUS-TCP communication
 - Direct MODBUS access available for advanced users
 - All SunSpec standard data points are exposed through Home Assistant entities
 
