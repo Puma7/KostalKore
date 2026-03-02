@@ -451,11 +451,67 @@ class DataUpdateCoordinatorMixin:
 
         try:
             await client.set_setting_values(module_id, value)
-            mismatches: list[str] = []
-            if get_setting_values is not None and supports_readback:
-                verify_response = await get_setting_values({module_id: list(value.keys())})
-                verify_values = dict(verify_response.get(module_id, {}))
+        except (ApiException, ClientError, TimeoutError) as err:
+            # Parse into specific MODBUS exceptions for better error handling
+            error_msg = str(err)
+            if isinstance(err, ApiException):
+                modbus_err = parse_modbus_exception(err)
+                _LOGGER.error("MODBUS error writing %s:%s - %s", module_id, value, modbus_err.message)
+                
+                # For certain errors, we might want to retry
+                if isinstance(modbus_err, ModbusServerDeviceBusyError):
+                    _LOGGER.warning("Inverter busy, consider retrying operation")
+                elif isinstance(modbus_err, ModbusIllegalDataValueError):
+                    _LOGGER.error("Invalid value provided, check value ranges")
+                elif isinstance(modbus_err, ModbusIllegalDataAddressError):
+                    _LOGGER.error("Invalid register address, check inverter model compatibility")
+            elif "Unknown API response [500]" in error_msg:
+                _LOGGER.error("Inverter API returned 500 error when writing %s:%s - feature not supported", module_id, value)
+            else:
+                _LOGGER.error("Error writing %s:%s - %s", module_id, value, err)
+            
+            # Raise translated exception to ensure UI feedback
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="write_setting_failed",
+                translation_placeholders={"error": error_msg},
+            ) from err
 
+        mismatches: list[str] = []
+        if get_setting_values is not None and supports_readback:
+            verify_response: dict[str, Any] | None
+            try:
+                verify_response = await get_setting_values({module_id: list(value.keys())})
+            except (ApiException, ClientError, TimeoutError) as verify_err:
+                verify_msg = str(verify_err)
+                if strict_verify:
+                    raise HomeAssistantError(
+                        "Write verification read failed after successful write; "
+                        f"setting may already be applied ({verify_msg})"
+                    ) from verify_err
+                _LOGGER.warning(
+                    "Verification read failed after write to %s/%s: %s",
+                    module_id,
+                    list(value.keys()),
+                    verify_msg,
+                )
+                verify_response = None
+            except Exception as verify_err:
+                if strict_verify:
+                    raise HomeAssistantError(
+                        "Write verification failed after successful write; "
+                        f"setting may already be applied ({verify_err})"
+                    ) from verify_err
+                _LOGGER.warning(
+                    "Unexpected verification error after write to %s/%s: %s",
+                    module_id,
+                    list(value.keys()),
+                    verify_err,
+                )
+                verify_response = None
+
+            if verify_response is not None:
+                verify_values = dict(verify_response.get(module_id, {}))
                 for data_id, expected in value.items():
                     if data_id not in verify_values:
                         mismatches.append(f"{data_id}: missing in readback")
@@ -487,39 +543,10 @@ class DataUpdateCoordinatorMixin:
                         mismatches,
                     )
 
-            # CHANGELOG (Codex, 2026-02-05):
-            # Successful write confirms recovery from prior inverter_busy state.
-            if (hass := getattr(self._plenticore, "hass", None)) is not None:
-                clear_issue(hass, "inverter_busy")
-        except (ApiException, ClientError, TimeoutError) as err:
-            # Parse into specific MODBUS exceptions for better error handling
-            error_msg = str(err)
-            if isinstance(err, ApiException):
-                modbus_err = parse_modbus_exception(err)
-                _LOGGER.error("MODBUS error writing %s:%s - %s", module_id, value, modbus_err.message)
-                
-                # For certain errors, we might want to retry
-                if isinstance(modbus_err, ModbusServerDeviceBusyError):
-                    _LOGGER.warning("Inverter busy, consider retrying operation")
-                elif isinstance(modbus_err, ModbusIllegalDataValueError):
-                    _LOGGER.error("Invalid value provided, check value ranges")
-                elif isinstance(modbus_err, ModbusIllegalDataAddressError):
-                    _LOGGER.error("Invalid register address, check inverter model compatibility")
-            elif "Unknown API response [500]" in error_msg:
-                _LOGGER.error("Inverter API returned 500 error when writing %s:%s - feature not supported", module_id, value)
-            else:
-                _LOGGER.error("Error writing %s:%s - %s", module_id, value, err)
-            
-            # Raise translated exception to ensure UI feedback
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="write_setting_failed",
-                translation_placeholders={"error": error_msg},
-            ) from err
-        except HomeAssistantError:
-            raise
-        except Exception as err:
-            raise HomeAssistantError(f"Write failed with verification error: {err}") from err
+        # CHANGELOG (Codex, 2026-02-05):
+        # Successful write confirms recovery from prior inverter_busy state.
+        if (hass := getattr(self._plenticore, "hass", None)) is not None:
+            clear_issue(hass, "inverter_busy")
 
         return True
 

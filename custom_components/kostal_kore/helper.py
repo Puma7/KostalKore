@@ -491,10 +491,6 @@ _REST_MODBUS_ONLY_IDS: Final[frozenset[str]] = frozenset(
     }
 )
 
-_REST_MODBUS_ONLY_FRAGMENTS: Final[tuple[str, ...]] = (
-    "Battery:ExternControl:",
-)
-
 
 def is_allowed_write_target(module_id: str, data_id: str) -> bool:
     """Return True if this module/data_id is allowed for writes."""
@@ -509,9 +505,7 @@ def is_allowed_write_target(module_id: str, data_id: str) -> bool:
 
 def is_rest_write_supported_target(data_id: str) -> bool:
     """Return False for settings intentionally kept Modbus-only."""
-    if data_id in _REST_MODBUS_ONLY_IDS:
-        return False
-    return not any(fragment in data_id for fragment in _REST_MODBUS_ONLY_FRAGMENTS)
+    return data_id not in _REST_MODBUS_ONLY_IDS
 
 
 def requires_advanced_write_arm(data_id: str) -> bool:

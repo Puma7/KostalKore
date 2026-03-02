@@ -277,6 +277,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         )
         ksem_coordinator = KsemDataUpdateCoordinator(
             hass=hass,
+            config_entry=entry,
             host=ksem_host,
             port=ksem_port,
             unit_id=ksem_unit_id,
@@ -291,6 +292,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 ksem_unit_id,
             )
         except Exception as ksem_err:
+            if ksem_coordinator is not None:
+                try:
+                    await ksem_coordinator.async_shutdown()
+                except Exception as shutdown_err:
+                    _LOGGER.debug(
+                        "KSEM cleanup after setup failure also failed: %s", shutdown_err
+                    )
             _LOGGER.warning(
                 "KSEM setup failed (%s:%s, unit %s): %s",
                 ksem_host,
