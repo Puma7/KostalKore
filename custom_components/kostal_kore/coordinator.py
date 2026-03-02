@@ -8,7 +8,7 @@ from datetime import timedelta
 import logging
 import random
 import time
-from typing import Any, TYPE_CHECKING, TypeVar, cast
+from typing import Any, Final, TYPE_CHECKING, TypeVar, cast
 import asyncio
 
 from aiohttp.client_exceptions import ClientError
@@ -58,6 +58,13 @@ EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
 SETUP_FETCH_TIMEOUT_SECONDS: float = 8.0
 SETUP_PREWARM_TIMEOUT_SECONDS: float = 8.0
+DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
+    "devices:local",
+    "scb:statistic:EnergyFlow",
+    "scb:event",
+    "scb:system",
+    "scb:network",
+]
 
 # Type variables for generic classes
 T = TypeVar("T")
@@ -92,7 +99,7 @@ class Plenticore:
             model="Unknown",
             sw_version="Unknown",
         )
-        self.available_modules: list[str] = []
+        self.available_modules: list[str] = list(DEFAULT_AVAILABLE_MODULES)
         self._settings_cache: Mapping[str, Any] | None = None
         self._settings_cache_ts: float = 0.0
         self._process_data_cache: Mapping[str, Any] | None = None
@@ -214,6 +221,7 @@ class Plenticore:
 
             # Handle results
             if isinstance(modules_result, asyncio.TimeoutError):
+                self.available_modules = list(DEFAULT_AVAILABLE_MODULES)
                 _LOGGER.warning(
                     "Module discovery timed out after %.1fs, continuing with defaults",
                     SETUP_FETCH_TIMEOUT_SECONDS,
@@ -221,6 +229,7 @@ class Plenticore:
             elif isinstance(modules_result, Exception):
                 raise modules_result
             if isinstance(metadata_result, asyncio.TimeoutError):
+                self._set_default_device_info()
                 _LOGGER.warning(
                     "Device metadata fetch timed out after %.1fs, continuing with defaults",
                     SETUP_FETCH_TIMEOUT_SECONDS,
@@ -258,6 +267,16 @@ class Plenticore:
                 _LOGGER.error("Error processing device metadata: %s", err)
             return False
 
+    def _set_default_device_info(self) -> None:
+        """Set conservative fallback device metadata."""
+        self.device_info = DeviceInfo(
+            configuration_url=f"http://{self.host}",
+            identifiers={(DOMAIN, "unknown")},
+            manufacturer="Kostal",
+            model="Unknown",
+            name=self.host,
+        )
+
     async def _fetch_modules(self) -> None:
         """Fetch available modules concurrently."""
         if self._client is None:
@@ -269,7 +288,7 @@ class Plenticore:
         except (ApiException, ClientError, TimeoutError) as err:
             _LOGGER.warning("Could not get available modules: %s. Using default assumption.", err)
             # Fallback to defaults if modules can't be fetched (older firmware?)
-            self.available_modules = ["devices:local", "scb:statistic:EnergyFlow", "scb:event", "scb:system", "scb:network"]
+            self.available_modules = list(DEFAULT_AVAILABLE_MODULES)
 
     async def _fetch_device_metadata(self) -> None:
         """Fetch device metadata concurrently."""
@@ -292,13 +311,7 @@ class Plenticore:
         except (ApiException, ClientError, TimeoutError, KeyError) as err:
             _LOGGER.error("Could not fetch device metadata: %s", err)
             # Set default device info to prevent setup failure
-            self.device_info = DeviceInfo(
-                configuration_url=f"http://{self.host}",
-                identifiers={(DOMAIN, "unknown")},
-                manufacturer="Kostal",
-                model="Unknown",
-                name=self.host,
-            )
+            self._set_default_device_info()
             return
 
         # Safe dictionary access with defaults
