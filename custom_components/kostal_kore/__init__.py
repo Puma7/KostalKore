@@ -15,6 +15,7 @@ Key Features:
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import logging
 import time
 from typing import Final
@@ -29,6 +30,10 @@ from homeassistant.helpers import device_registry as dr
 from .const import (
     CONF_ACCESS_ROLE,
     CONF_INSTALLER_ACCESS,
+    CONF_KSEM_ENABLED,
+    CONF_KSEM_HOST,
+    CONF_KSEM_PORT,
+    CONF_KSEM_UNIT_ID,
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
@@ -38,11 +43,13 @@ from .const import (
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
     CONF_SERVICE_CODE,
+    DEFAULT_KSEM_PORT,
+    DEFAULT_KSEM_UNIT_ID,
     DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_UNIT_ID,
     DOMAIN,
 )
-from .coordinator import Plenticore, PlenticoreConfigEntry
+from .coordinator import EventDataUpdateCoordinator, Plenticore, PlenticoreConfigEntry
 from .helper import parse_modbus_exception
 from .battery_chemistry import detect_chemistry
 from .degradation_tracker import DegradationTracker
@@ -53,6 +60,7 @@ from .longevity_advisor import LongevityAdvisor
 from .modbus_client import KostalModbusClient, ModbusClientError
 from .request_scheduler import RequestScheduler
 from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .ksem_coordinator import KsemDataUpdateCoordinator
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue
 
@@ -75,6 +83,7 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
 UNLOAD_TIMEOUT_SECONDS: Final[float] = 5.0
 PLATFORM_SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
+EVENT_POLL_INTERVAL_SECONDS: Final[int] = 30
 
 # Performance metrics constants
 MEMORY_CLEANUP_MAX_MS: Final[int] = 500
@@ -151,8 +160,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
+    # Event intelligence coordinator (REST /events/latest), independent from
+    # process/settings coordinators so transient event API failures don't impact
+    # regular entity updates.
+    event_coordinator = EventDataUpdateCoordinator(
+        hass=hass,
+        config_entry=entry,
+        logger=_LOGGER,
+        name="Event Data",
+        update_interval=timedelta(seconds=EVENT_POLL_INTERVAL_SECONDS),
+        plenticore=plenticore,
+    )
+    try:
+        await event_coordinator.async_config_entry_first_refresh()
+    except Exception as event_err:
+        _LOGGER.debug("Initial event refresh failed (non-fatal): %s", event_err)
+
     # Optional Modbus TCP setup
     modbus_coordinator = None
+    ksem_coordinator = None
     mqtt_bridge = None
     modbus_proxy = None
     soc_controller = None
@@ -240,6 +266,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 _LOGGER.warning("Modbus proxy failed to start on port %s: %s", proxy_port, proxy_err)
                 modbus_proxy = None
 
+    # Optional standalone KSEM source (separate failure domain).
+    if entry.options.get(CONF_KSEM_ENABLED, False):  # pragma: no cover
+        ksem_host = str(entry.options.get(CONF_KSEM_HOST, "")).strip() or str(
+            entry.data[CONF_HOST]
+        )
+        ksem_port = int(entry.options.get(CONF_KSEM_PORT, DEFAULT_KSEM_PORT))
+        ksem_unit_id = int(
+            entry.options.get(CONF_KSEM_UNIT_ID, DEFAULT_KSEM_UNIT_ID)
+        )
+        ksem_coordinator = KsemDataUpdateCoordinator(
+            hass=hass,
+            host=ksem_host,
+            port=ksem_port,
+            unit_id=ksem_unit_id,
+        )
+        try:
+            await ksem_coordinator.async_setup()
+            await ksem_coordinator.async_config_entry_first_refresh()
+            _LOGGER.info(
+                "KSEM source active on %s:%s (unit %s)",
+                ksem_host,
+                ksem_port,
+                ksem_unit_id,
+            )
+        except Exception as ksem_err:
+            _LOGGER.warning(
+                "KSEM setup failed (%s:%s, unit %s): %s",
+                ksem_host,
+                ksem_port,
+                ksem_unit_id,
+                ksem_err,
+            )
+            ksem_coordinator = None
+
     # Health + Fire Safety + Degradation monitors
     health_monitor = None
     fire_safety = None
@@ -296,6 +356,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "modbus_coordinator": modbus_coordinator,
+        "ksem_coordinator": ksem_coordinator,
+        "event_coordinator": event_coordinator,
         "mqtt_bridge": mqtt_bridge,
         "modbus_proxy": modbus_proxy if modbus_coordinator is not None else None,
         "health_monitor": health_monitor,
@@ -371,6 +433,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         except Exception:  # pragma: no cover
             _LOGGER.debug("Modbus platform unload incomplete (non-fatal)")
         await modbus_coordinator.async_shutdown()
+    ksem_coordinator = entry_data.get("ksem_coordinator")
+    if ksem_coordinator:  # pragma: no cover
+        await ksem_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

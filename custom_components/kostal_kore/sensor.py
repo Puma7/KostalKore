@@ -31,8 +31,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
-from .coordinator import PlenticoreConfigEntry, ProcessDataUpdateCoordinator
+from .coordinator import (
+    EventDataUpdateCoordinator,
+    PlenticoreConfigEntry,
+    ProcessDataUpdateCoordinator,
+)
 from .helper import PlenticoreDataFormatter, parse_modbus_exception
+from .ksem_coordinator import KsemDataUpdateCoordinator
+from .modbus_coordinator import ModbusDataUpdateCoordinator
 
 from pykoplenti import ApiException
 
@@ -73,6 +79,30 @@ DC_STRING_COUNT_TIMEOUT: Final[float] = 30.0
 MAX_EFFICIENCY_PERCENT: Final[float] = 100.0
 MODULE_ID_PREFIX: Final[str] = f"{ModuleId.DEVICES_LOCAL}:pv"
 PV_MODULE_PREFIX: Final[str] = "pv"
+EVENT_SENSOR_MODULE_ID: Final[str] = "_events_"
+
+MODBUS_DIAGNOSTIC_SENSORS: Final[tuple[tuple[str, str, str | None], ...]] = (
+    ("pm_l1_current", "Power Meter L1 Current (Modbus)", UnitOfElectricCurrent.AMPERE),
+    ("pm_l2_current", "Power Meter L2 Current (Modbus)", UnitOfElectricCurrent.AMPERE),
+    ("pm_l3_current", "Power Meter L3 Current (Modbus)", UnitOfElectricCurrent.AMPERE),
+    ("pm_l1_reactive", "Power Meter L1 Reactive Power (Modbus)", "Var"),
+    ("pm_l2_reactive", "Power Meter L2 Reactive Power (Modbus)", "Var"),
+    ("pm_l3_reactive", "Power Meter L3 Reactive Power (Modbus)", "Var"),
+    ("pm_l1_apparent", "Power Meter L1 Apparent Power (Modbus)", "VA"),
+    ("pm_l2_apparent", "Power Meter L2 Apparent Power (Modbus)", "VA"),
+    ("pm_l3_apparent", "Power Meter L3 Apparent Power (Modbus)", "VA"),
+    ("pssb_fuse_state", "PSSB Fuse State (Modbus)", None),
+    ("battery_ready_flag", "Battery Ready Flag (Modbus)", None),
+)
+KSEM_DIAGNOSTIC_SENSORS: Final[tuple[tuple[str, str, str | None], ...]] = (
+    ("active_power_import_w", "KSEM Active Power Import", UnitOfPower.WATT),
+    ("active_power_export_w", "KSEM Active Power Export", UnitOfPower.WATT),
+    ("net_active_power_w", "KSEM Net Active Power", UnitOfPower.WATT),
+    ("frequency_hz", "KSEM Frequency", "Hz"),
+    ("power_factor", "KSEM Power Factor", None),
+)
+SOURCE_DIVERGENCE_WATTS: Final[float] = 1000.0
+SOURCE_DIVERGENCE_RATIO: Final[float] = 0.2
 
 
 def _sensor_translation_key(module_id: str, key: str) -> str | None:
@@ -1457,8 +1487,13 @@ async def async_setup_entry(
 
     # Fetch fresh process data with timeout for better async handling
     try:
+        process_getter = (
+            plenticore.async_get_process_data_cached
+            if hasattr(plenticore, "async_get_process_data_cached")
+            else plenticore.client.get_process_data
+        )
         available_process_data = await asyncio.wait_for(
-            plenticore.client.get_process_data(),
+            process_getter(),
             timeout=DEFAULT_TIMEOUT_SECONDS  # Use constant instead of magic number
         )
     except asyncio.TimeoutError:
@@ -1699,9 +1734,93 @@ async def async_setup_entry(
     
     async_add_entities(calc_entities)
 
-    # Health + Fire Safety monitoring sensors (only when Modbus is active)
+    # Event snapshot sensors (REST /events/latest intelligence)
     from .const import DOMAIN
     entry_store = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    event_coordinator = entry_store.get("event_coordinator") if entry_store else None
+    if event_coordinator is not None:
+        event_entities: list[PlenticoreEventSensor] = [
+            PlenticoreEventSensor(
+                event_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                key="last_event_code",
+                name="Last Event Code",
+                icon="mdi:identifier",
+            ),
+            PlenticoreEventSensor(
+                event_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                key="last_event_category",
+                name="Last Event Category",
+                icon="mdi:alert-circle-outline",
+            ),
+            PlenticoreEventSensor(
+                event_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                key="last_event_age_s",
+                name="Last Event Age",
+                icon="mdi:timeline-clock-outline",
+                unit="s",
+            ),
+            PlenticoreEventSensor(
+                event_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                key="active_error_events_count",
+                name="Active Error Events",
+                icon="mdi:alert-octagon",
+            ),
+        ]
+        async_add_entities(event_entities)
+        _LOGGER.info("Added %d event snapshot sensors", len(event_entities))
+
+    modbus_coordinator = entry_store.get("modbus_coordinator") if entry_store else None
+    if modbus_coordinator is not None:
+        modbus_diag_entities = [
+            ModbusDiagnosticSensor(
+                modbus_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                key=key,
+                name=name,
+                unit=unit,
+            )
+            for key, name, unit in MODBUS_DIAGNOSTIC_SENSORS
+        ]
+        async_add_entities(modbus_diag_entities)
+        _LOGGER.info(
+            "Added %d Modbus diagnostics sensors", len(modbus_diag_entities)
+        )
+
+    ksem_coordinator = entry_store.get("ksem_coordinator") if entry_store else None
+    if ksem_coordinator is not None:
+        ksem_diag_entities: list[SensorEntity] = [
+            KsemDiagnosticSensor(
+                ksem_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                key=key,
+                name=name,
+                unit=unit,
+            )
+            for key, name, unit in KSEM_DIAGNOSTIC_SENSORS
+        ]
+        ksem_diag_entities.append(
+            PreferredGridPowerSensor(
+                ksem_coordinator,
+                entry.entry_id,
+                plenticore.device_info,
+                modbus_coordinator,
+                process_data_update_coordinator,
+            )
+        )
+        async_add_entities(ksem_diag_entities)
+        _LOGGER.info("Added %d KSEM sensors", len(ksem_diag_entities))
+
+    # Health + Fire Safety monitoring sensors (only when Modbus is active)
     health_monitor = entry_store.get("health_monitor") if entry_store else None
     fire_safety = entry_store.get("fire_safety") if entry_store else None
     if health_monitor is not None:
@@ -2085,6 +2204,231 @@ class CalculatedPvSumSensor(
         for dc_num in range(1, self.dc_string_count + 1):
             self.coordinator.stop_fetch_data(f"devices:local:pv{dc_num}", "P")
         await super().async_will_remove_from_hass()
+
+
+class PlenticoreEventSensor(
+    CoordinatorEntity[EventDataUpdateCoordinator], SensorEntity
+):
+    """Sensor backed by event snapshot coordinator data."""
+
+    def __init__(
+        self,
+        coordinator: EventDataUpdateCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo,
+        *,
+        key: str,
+        name: str,
+        icon: str,
+        unit: str | None = None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_unique_id = f"{entry_id}_{EVENT_SENSOR_MODULE_ID}_{key}"
+        self._attr_device_info = device_info
+        self._attr_has_entity_name = True
+        if unit is not None:
+            self._attr_native_unit_of_measurement = unit
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return super().available and self.coordinator.data is not None
+
+    @property
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self.coordinator.data is None:
+            return None
+        return cast(StateType, self.coordinator.data.get(self._key))
+
+
+class ModbusDiagnosticSensor(
+    CoordinatorEntity[ModbusDataUpdateCoordinator], SensorEntity
+):
+    """Diagnostics-first sensor that exposes raw Modbus register telemetry."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: ModbusDataUpdateCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo,
+        *,
+        key: str,
+        name: str,
+        unit: str | None = None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry_id}_modbus_diag_{key}"
+        self._attr_device_info = device_info
+        if unit is not None:
+            self._attr_native_unit_of_measurement = unit
+
+    @property
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self.coordinator.data is None:
+            return None
+        value = self.coordinator.data.get(self._key)
+        if value is None:
+            value = self.coordinator.device_info_data.get(self._key)
+        if value is None:
+            return None
+        return cast(StateType, value)
+
+
+class KsemDiagnosticSensor(
+    CoordinatorEntity[KsemDataUpdateCoordinator], SensorEntity
+):
+    """Diagnostics-first sensor that exposes KSEM telemetry."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: KsemDataUpdateCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo,
+        *,
+        key: str,
+        name: str,
+        unit: str | None = None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry_id}_ksem_diag_{key}"
+        self._attr_device_info = device_info
+        if unit is not None:
+            self._attr_native_unit_of_measurement = unit
+
+    @property
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self.coordinator.data is None:
+            return None
+        return cast(StateType, self.coordinator.data.get(self._key))
+
+
+class PreferredGridPowerSensor(
+    CoordinatorEntity[KsemDataUpdateCoordinator], SensorEntity
+):
+    """Grid power sensor using KSEM→Modbus→REST source precedence."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Grid Power Preferred Source"
+    _attr_icon = "mdi:source-merge"
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(
+        self,
+        coordinator: KsemDataUpdateCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo,
+        modbus_coordinator: ModbusDataUpdateCoordinator | None,
+        process_coordinator: ProcessDataUpdateCoordinator,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_calc_preferred_grid_power"
+        self._attr_device_info = device_info
+        self._modbus_coordinator = modbus_coordinator
+        self._process_coordinator = process_coordinator
+        self._remove_modbus_listener: Any = None
+        self._remove_process_listener: Any = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self._modbus_coordinator is not None:
+            self._remove_modbus_listener = self._modbus_coordinator.async_add_listener(
+                self._async_external_update
+            )
+        self._remove_process_listener = self._process_coordinator.async_add_listener(
+            self._async_external_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._remove_modbus_listener is not None:
+            self._remove_modbus_listener()
+            self._remove_modbus_listener = None
+        if self._remove_process_listener is not None:
+            self._remove_process_listener()
+            self._remove_process_listener = None
+        await super().async_will_remove_from_hass()
+
+    def _async_external_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
+        source, value, _, _ = self._resolve()
+        if value is None:
+            return None
+        return cast(StateType, round(value))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        source, value, conflict, confidence = self._resolve()
+        return {
+            "source": source,
+            "source_confidence": confidence,
+            "source_conflict": conflict,
+            "raw_value": value,
+        }
+
+    def _resolve(self) -> tuple[str, float | None, bool, str]:
+        ksem_val = None
+        if self.coordinator.data:
+            raw_ksem = self.coordinator.data.get("net_active_power_w")
+            if raw_ksem is not None:
+                try:
+                    ksem_val = float(raw_ksem)
+                except (TypeError, ValueError):
+                    ksem_val = None
+
+        modbus_val = None
+        if self._modbus_coordinator is not None and self._modbus_coordinator.data:
+            raw_modbus = self._modbus_coordinator.data.get("pm_total_active")
+            if raw_modbus is not None:
+                try:
+                    modbus_val = float(raw_modbus)
+                except (TypeError, ValueError):
+                    modbus_val = None
+
+        rest_val = None
+        if self._process_coordinator.data:
+            raw_rest = (
+                self._process_coordinator.data.get(ModuleId.DEVICES_LOCAL, {}).get("Grid_P")
+            )
+            if raw_rest is not None:
+                try:
+                    rest_val = float(raw_rest)
+                except (TypeError, ValueError):
+                    rest_val = None
+
+        conflict = False
+        confidence = "high"
+        if ksem_val is not None and modbus_val is not None:
+            diff = abs(ksem_val - modbus_val)
+            rel = diff / max(1.0, abs(ksem_val))
+            if diff > SOURCE_DIVERGENCE_WATTS and rel > SOURCE_DIVERGENCE_RATIO:
+                conflict = True
+                confidence = "low"
+
+        if ksem_val is not None:
+            return "ksem", ksem_val, conflict, confidence
+        if modbus_val is not None:
+            return "modbus_powermeter", modbus_val, False, "medium"
+        if rest_val is not None:
+            return "rest_grid_p", rest_val, False, "fallback"
+        return "none", None, False, "none"
 
 
 class PlenticoreDataSensor(

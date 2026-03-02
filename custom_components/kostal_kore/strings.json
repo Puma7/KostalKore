@@ -12,7 +12,11 @@
           "mqtt_bridge_enabled": "Enable MQTT Bridge",
           "modbus_proxy_enabled": "Enable Modbus Proxy Server",
           "modbus_proxy_port": "Modbus Proxy Port",
-          "modbus_proxy_bind": "Modbus Proxy Bind Address (default: 127.0.0.1)"
+          "modbus_proxy_bind": "Modbus Proxy Bind Address (default: 127.0.0.1)",
+          "ksem_enabled": "Enable external KSEM source",
+          "ksem_host": "KSEM Host/IP (empty = inverter host)",
+          "ksem_port": "KSEM Modbus TCP Port",
+          "ksem_unit_id": "KSEM Modbus Unit ID"
         }
       },
       "modbus_test": {
@@ -75,7 +79,11 @@
           "mqtt_bridge_enabled": "Enable MQTT Bridge",
           "modbus_proxy_enabled": "Enable Modbus Proxy Server",
           "modbus_proxy_port": "Modbus Proxy Port",
-          "modbus_proxy_bind": "Modbus Proxy Bind Address (default: 127.0.0.1)"
+          "modbus_proxy_bind": "Modbus Proxy Bind Address (default: 127.0.0.1)",
+          "ksem_enabled": "Enable external KSEM source",
+          "ksem_host": "KSEM Host/IP (empty = inverter host)",
+          "ksem_port": "KSEM Modbus TCP Port",
+          "ksem_unit_id": "KSEM Modbus Unit ID"
         }
       },
       "setup_modbus_test": {

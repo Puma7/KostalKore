@@ -13,6 +13,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import AddConfigEntryEntitiesCallback
@@ -208,6 +209,19 @@ SWITCH_SETTINGS_DATA = [
         off_label="Disabled",
         entity_category=EntityCategory.CONFIG,
         entity_registry_enabled_default=False,  # Security: Hidden by default
+    ),
+    PlenticoreSwitchEntityDescription(
+        module_id=ModuleId.DEVICES_LOCAL,
+        key="Battery:BackupMode:Enable",
+        name="Battery Backup Mode",
+        is_on="1",
+        on_value="1",
+        on_label="Enabled",
+        off_value="0",
+        off_label="Disabled",
+        installer_required=True,
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
     ),
     PlenticoreSwitchEntityDescription(
         module_id=ModuleId.DEVICES_LOCAL,
@@ -561,6 +575,62 @@ SWITCH_SETTINGS_DATA = [
 ]
 
 
+class AdvancedWriteArmSwitch(SwitchEntity):
+    """Temporary arming switch for high-impact write operations."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_name = "Arm Advanced Controls"
+    _attr_icon = "mdi:shield-key-outline"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        plenticore: Any,
+        entry_id: str,
+        device_info: DeviceInfo,
+    ) -> None:
+        self._plenticore = plenticore
+        self._attr_unique_id = f"{entry_id}_advanced_write_arm"
+        self._attr_device_info = device_info
+        self._remove_expire_listener: Any = None
+
+    @property
+    def is_on(self) -> bool | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return bool(self._plenticore.is_advanced_write_armed)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return {
+            "seconds_left": int(self._plenticore.advanced_write_arm_seconds_left),
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._plenticore.arm_advanced_writes()
+        if self._remove_expire_listener is not None:
+            self._remove_expire_listener()
+        # Ensure HA state flips back automatically when arm window expires.
+        self._remove_expire_listener = async_call_later(
+            self.hass,
+            max(1, int(self._plenticore.advanced_write_arm_seconds_left) + 1),
+            lambda _: self.async_write_ha_state(),
+        )
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._plenticore.disarm_advanced_writes()
+        if self._remove_expire_listener is not None:
+            self._remove_expire_listener()
+            self._remove_expire_listener = None
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._remove_expire_listener is not None:
+            self._remove_expire_listener()
+            self._remove_expire_listener = None
+        await super().async_will_remove_from_hass()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PlenticoreConfigEntry,
@@ -571,10 +641,20 @@ async def async_setup_entry(
     plenticore = entry.runtime_data
 
     entities: list[Entity] = []
+    entities.append(
+        AdvancedWriteArmSwitch(
+            plenticore=plenticore,
+            entry_id=entry.entry_id,
+            device_info=plenticore.device_info,
+        )
+    )
 
     # Fetch fresh settings data
     try:
-        available_settings_data = await plenticore.client.get_settings()
+        if hasattr(plenticore, "async_get_settings_cached"):
+            available_settings_data = await plenticore.async_get_settings_cached()
+        else:
+            available_settings_data = await plenticore.client.get_settings()
     except (ApiException, ClientError, TimeoutError) as err:
         error_msg = str(err)
         if "Unknown API response [500]" in error_msg:

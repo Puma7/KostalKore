@@ -50,6 +50,7 @@ MAX_RETRIES: Final[int] = 5
 
 UNAVAILABLE_STRIKES_THRESHOLD: Final[int] = 3
 UNAVAILABLE_RESET_INTERVAL: Final[int] = 120
+OUTLIER_ABS_LIMIT_DEFAULT: Final[float] = 10_000_000.0
 
 
 class ModbusExceptionCode(IntEnum):
@@ -151,6 +152,7 @@ class KostalModbusClient:
         unit_id: int = DEFAULT_UNIT_ID,
         endianness: str = "little",
         request_scheduler: Any = None,
+        outlier_policy: str = "keep_last",
     ) -> None:
         self._host = host
         self._port = port
@@ -162,6 +164,8 @@ class KostalModbusClient:
         self._unavailable_strikes: dict[int, int] = {}
         self._unavailable_suppressed: dict[int, float] = {}
         self._last_exc_code: int | None = None
+        self._last_good_values: dict[int, Any] = {}
+        self._outlier_policy = outlier_policy
 
     @property
     def host(self) -> str:
@@ -170,6 +174,10 @@ class KostalModbusClient:
     @property
     def port(self) -> int:
         return self._port
+
+    @property
+    def unit_id(self) -> int:
+        return self._unit_id
 
     @property
     def connected(self) -> bool:
@@ -197,6 +205,26 @@ class KostalModbusClient:
                 "Reset %d suppressed registers – they will be retried on next poll",
                 count,
             )
+
+    def export_unavailable_state(self) -> dict[str, dict[str, float | int]]:
+        """Export unavailable-register strike/suppression state for persistence."""
+        return {
+            "strikes": {str(addr): int(v) for addr, v in self._unavailable_strikes.items()},
+            "suppressed": {
+                str(addr): float(ts) for addr, ts in self._unavailable_suppressed.items()
+            },
+        }
+
+    def import_unavailable_state(self, state: dict[str, dict[str, float | int]]) -> None:
+        """Import persisted unavailable-register state."""
+        strikes = state.get("strikes", {})
+        suppressed = state.get("suppressed", {})
+        self._unavailable_strikes = {
+            int(addr): int(v) for addr, v in strikes.items()
+        }
+        self._unavailable_suppressed = {
+            int(addr): float(ts) for addr, ts in suppressed.items()
+        }
 
     def _is_suppressed(self, address: int) -> bool:
         """Check if a register is temporarily suppressed."""
@@ -307,7 +335,10 @@ class KostalModbusClient:
                         "Register %s (addr %d) is available again after previous failures",
                         register.name, register.address,
                     )
-                return self._decode(raw, register)
+                decoded = self._decode(raw, register)
+                filtered = self._apply_quality_filter(register, decoded)
+                self._last_good_values[register.address] = filtered
+                return filtered
             except ModbusPermanentError:
                 if self._last_exc_code == ModbusExceptionCode.ILLEGAL_DATA_ADDRESS:
                     self._record_unavailable_strike(register.address, register.name)
@@ -339,6 +370,53 @@ class KostalModbusClient:
                     raise
 
         raise ModbusReadError(f"Read failed for {register.name} after all retries")
+
+    def _apply_quality_filter(self, register: ModbusRegister, value: Any) -> Any:
+        """Apply per-register quality guards (sentinel/outlier filtering)."""
+        # Known inverter quirk: register 575 can return 32767 as invalid/sentinel.
+        if register.address == 575:
+            try:
+                if int(value) >= 32767:
+                    previous = self._last_good_values.get(register.address)
+                    if previous is not None and self._outlier_policy == "keep_last":
+                        _LOGGER.debug(
+                            "Register %s returned sentinel %s, keeping previous value %s",
+                            register.name,
+                            value,
+                            previous,
+                        )
+                        return previous
+                    raise ModbusReadError(
+                        f"Register {register.name} returned invalid sentinel value {value}"
+                    )
+            except (TypeError, ValueError):
+                pass
+
+        # Generic outlier guard for numeric telemetry.
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+            if math.isnan(numeric_value) or math.isinf(numeric_value):
+                previous = self._last_good_values.get(register.address)
+                if previous is not None and self._outlier_policy == "keep_last":
+                    return previous
+                raise ModbusReadError(
+                    f"Register {register.name} returned NaN/Infinity"
+                )
+            if abs(numeric_value) > OUTLIER_ABS_LIMIT_DEFAULT:
+                previous = self._last_good_values.get(register.address)
+                if previous is not None and self._outlier_policy == "keep_last":
+                    _LOGGER.debug(
+                        "Register %s outlier %s exceeds abs limit, keeping %s",
+                        register.name,
+                        numeric_value,
+                        previous,
+                    )
+                    return previous
+                raise ModbusReadError(
+                    f"Register {register.name} value {numeric_value} exceeds absolute outlier limit"
+                )
+
+        return value
 
     async def write_register(self, register: ModbusRegister, value: Any) -> None:
         """Encode and write a value with retry on transient errors."""

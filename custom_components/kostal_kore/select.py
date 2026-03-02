@@ -100,8 +100,13 @@ async def _get_settings_data_safe(plenticore: Any, operation: str) -> dict[str, 
         Settings data or empty dict if error occurs
     """
     try:
+        getter = (
+            plenticore.async_get_settings_cached
+            if hasattr(plenticore, "async_get_settings_cached")
+            else plenticore.client.get_settings
+        )
         return await asyncio.wait_for(
-            plenticore.client.get_settings(),
+            getter(),
             timeout=SELECT_UPDATE_INTERVAL_SECONDS
         )
     except Exception as err:
