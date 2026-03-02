@@ -39,6 +39,11 @@ ADVANCED_WRITE_ARM_TTL_SECONDS: Final[int] = 120
 # In-memory guard keys for critical legacy cleanup confirmation flow
 DATA_KEY_LEGACY_CLEANUP_GUARD: Final[str] = "legacy_cleanup_guard"
 DATA_KEY_LEGACY_CLEANUP_CODE_INPUT: Final[str] = "legacy_cleanup_code_input"
+DATA_KEY_HISTORY_MIGRATION_GUARDS: Final[str] = "history_migration_guards"
+
+# Services
+SERVICE_ADOPT_LEGACY_ENTITY_IDS: Final[str] = "adopt_legacy_entity_ids"
+SERVICE_COPY_LEGACY_HISTORY: Final[str] = "copy_legacy_history"
 
 # Centralised import for the platform callback type.
 # Older HA versions export ``AddEntitiesCallback``; newer ones renamed it to
@@ -82,8 +87,11 @@ __all__ = [
     "DEFAULT_MODBUS_PORT",
     "DEFAULT_MODBUS_PROXY_BIND",
     "DEFAULT_MODBUS_UNIT_ID",
+    "DATA_KEY_HISTORY_MIGRATION_GUARDS",
     "DATA_KEY_LEGACY_CLEANUP_CODE_INPUT",
     "DATA_KEY_LEGACY_CLEANUP_GUARD",
     "DOMAIN",
+    "SERVICE_ADOPT_LEGACY_ENTITY_IDS",
+    "SERVICE_COPY_LEGACY_HISTORY",
     "ADVANCED_WRITE_ARM_TTL_SECONDS",
 ]

@@ -122,6 +122,20 @@ This split flow lets you migrate first, test in production for a few weeks, and 
 
 Detailed step-by-step guide: see `migration.md`.
 
+### Advanced migration services (optional)
+
+For users who need additional control from Developer Tools -> Services:
+
+- `kostal_kore.adopt_legacy_entity_ids` (recommended)
+  - Safe registry rebind to keep old/canonical entity IDs.
+  - Supports `dry_run: true` preview before apply.
+- `kostal_kore.copy_legacy_history` (advanced)
+  - Recorder metadata/history merge for old -> new entity IDs.
+  - Supports auto-mapping and optional manual `entity_map`.
+
+Both services are guarded in apply mode with a two-step confirmation code flow
+(persistent notification challenge + final confirmation call).
+
 ## Development
 
 ### Branches

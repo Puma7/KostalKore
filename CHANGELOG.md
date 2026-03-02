@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional KSEM coordinator and source-precedence diagnostics entities.
   - Modbus register coverage expansion and data-quality guards.
   - Advanced write safety controls (allowlist, arming, validation, verification).
+- **Guarded migration services**:
+  - `kostal_kore.adopt_legacy_entity_ids` for safe registry rebind previews/applies.
+  - `kostal_kore.copy_legacy_history` for optional advanced recorder metadata merge.
 - **Project learnings doc**: Added `LEARNINGS.md` with validated behavior and policy decisions.
 
 ### Changed

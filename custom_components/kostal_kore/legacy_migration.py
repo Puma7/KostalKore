@@ -52,6 +52,29 @@ class LegacyCleanupResult:
     removed_source_entry: bool = False
 
 
+@dataclass(slots=True)
+class LegacyAdoptResult:
+    """Summary for safe entity-ID adoption from legacy to KORE entry."""
+
+    source_entry_id: str
+    target_entry_id: str
+    dry_run: bool
+    migrated_entities: int = 0
+    migrated_devices: int = 0
+    removed_target_duplicates: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class LegacyEntityPair:
+    """A detected old/new duplicate entity pair for migration actions."""
+
+    source_entry_id: str
+    target_entry_id: str
+    old_entity_id: str
+    new_entity_id: str
+    rewritten_unique_id: str
+
+
 def _rewrite_unique_id(
     unique_id: str,
     source_entry_id: str,
@@ -140,6 +163,167 @@ def _merge_options(target_entry: ConfigEntry, source_entry: ConfigEntry) -> dict
     merged_options: dict[str, object] = dict(target_entry.options)
     merged_options.update(dict(source_entry.options))
     return merged_options
+
+
+def discover_legacy_duplicate_entity_pairs(
+    hass: HomeAssistant,
+    target_entry_id: str,
+    source_entry_id: str | None = None,
+) -> list[LegacyEntityPair]:
+    """Discover old/new entity pairs linked by rewritten legacy unique_id."""
+    target_entry = hass.config_entries.async_get_entry(target_entry_id)
+    if target_entry is None:
+        raise HomeAssistantError(f"Target entry '{target_entry_id}' not found.")
+    if target_entry.domain != DOMAIN:
+        raise HomeAssistantError(
+            f"Target entry '{target_entry_id}' is not a '{DOMAIN}' entry."
+        )
+
+    source_entry = _select_source_entry(hass, target_entry, source_entry_id)
+
+    entity_registry = er.async_get(hass)
+    source_entities = list(
+        er.async_entries_for_config_entry(entity_registry, source_entry.entry_id)
+    )
+    target_entities = list(
+        er.async_entries_for_config_entry(entity_registry, target_entry.entry_id)
+    )
+    target_by_unique_id = {
+        entity_entry.unique_id: entity_entry
+        for entity_entry in target_entities
+        if entity_entry.unique_id
+    }
+
+    pairs: list[LegacyEntityPair] = []
+    for source_entity in source_entities:
+        if not source_entity.unique_id:
+            continue
+        rewritten_unique_id = _rewrite_unique_id(
+            source_entity.unique_id,
+            source_entry.entry_id,
+            target_entry.entry_id,
+        )
+        duplicate_target_entity = target_by_unique_id.get(rewritten_unique_id)
+        if (
+            duplicate_target_entity is None
+            or duplicate_target_entity.entity_id == source_entity.entity_id
+        ):
+            continue
+        pairs.append(
+            LegacyEntityPair(
+                source_entry_id=source_entry.entry_id,
+                target_entry_id=target_entry.entry_id,
+                old_entity_id=source_entity.entity_id,
+                new_entity_id=duplicate_target_entity.entity_id,
+                rewritten_unique_id=rewritten_unique_id,
+            )
+        )
+
+    return pairs
+
+
+async def adopt_legacy_entity_ids(
+    hass: HomeAssistant,
+    target_entry_id: str,
+    source_entry_id: str | None = None,
+    *,
+    dry_run: bool = True,
+) -> LegacyAdoptResult:
+    """Adopt legacy entity IDs while preserving old historical continuity.
+
+    This operation only touches registry bindings (entities/devices) and does not
+    merge config-entry credentials/options. It is safe to re-run.
+    """
+    target_entry = hass.config_entries.async_get_entry(target_entry_id)
+    if target_entry is None:
+        raise HomeAssistantError(f"Target entry '{target_entry_id}' not found.")
+    if target_entry.domain != DOMAIN:
+        raise HomeAssistantError(
+            f"Target entry '{target_entry_id}' is not a '{DOMAIN}' entry."
+        )
+
+    source_entry = _select_source_entry(hass, target_entry, source_entry_id)
+    if source_entry.entry_id == target_entry.entry_id:
+        raise HomeAssistantError("Source and target entry are identical.")
+
+    result = LegacyAdoptResult(
+        source_entry_id=source_entry.entry_id,
+        target_entry_id=target_entry.entry_id,
+        dry_run=dry_run,
+    )
+
+    entity_registry = er.async_get(hass)
+    source_entities = list(
+        er.async_entries_for_config_entry(entity_registry, source_entry.entry_id)
+    )
+    target_entities = list(
+        er.async_entries_for_config_entry(entity_registry, target_entry.entry_id)
+    )
+    target_by_unique_id = {
+        entity_entry.unique_id: entity_entry
+        for entity_entry in target_entities
+        if entity_entry.unique_id
+    }
+
+    for source_entity in source_entities:
+        rewritten_unique_id = source_entity.unique_id
+        if source_entity.unique_id:
+            rewritten_unique_id = _rewrite_unique_id(
+                source_entity.unique_id,
+                source_entry.entry_id,
+                target_entry.entry_id,
+            )
+            duplicate_target_entity = target_by_unique_id.get(rewritten_unique_id)
+            if (
+                duplicate_target_entity is not None
+                and duplicate_target_entity.entity_id != source_entity.entity_id
+            ):
+                result.removed_target_duplicates += 1
+                if not dry_run:
+                    entity_registry.async_remove(duplicate_target_entity.entity_id)
+
+        result.migrated_entities += 1
+        if dry_run:
+            continue
+
+        if source_entity.unique_id and rewritten_unique_id != source_entity.unique_id:
+            entity_registry.async_update_entity(
+                source_entity.entity_id,
+                config_entry_id=target_entry.entry_id,
+                new_unique_id=rewritten_unique_id,
+            )
+        else:
+            entity_registry.async_update_entity(
+                source_entity.entity_id,
+                config_entry_id=target_entry.entry_id,
+            )
+
+    device_registry = dr.async_get(hass)
+    source_devices = list(
+        dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
+    )
+    for source_device in source_devices:
+        result.migrated_devices += 1
+        if dry_run:
+            continue
+        device_registry.async_update_device(
+            source_device.id,
+            add_config_entry_id=target_entry.entry_id,
+        )
+
+    if not dry_run:
+        await hass.config_entries.async_reload(target_entry.entry_id)
+
+    _LOGGER.info(
+        "Legacy entity-id adopt %s: source=%s target=%s entities=%d devices=%d duplicates_removed=%d",
+        "preview" if dry_run else "applied",
+        result.source_entry_id,
+        result.target_entry_id,
+        result.migrated_entities,
+        result.migrated_devices,
+        result.removed_target_duplicates,
+    )
+    return result
 
 
 async def migrate_legacy_plenticore_entry(
