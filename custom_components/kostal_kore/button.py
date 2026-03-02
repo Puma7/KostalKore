@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-import secrets
 import time
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
@@ -20,6 +19,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import PlenticoreConfigEntry
+from .helper import generate_confirmation_code, integration_entry_store
 from .legacy_migration import finalize_legacy_cleanup, migrate_legacy_plenticore_entry
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -27,21 +27,6 @@ LEGACY_CLEANUP_CHALLENGE_TTL_SECONDS: Final[int] = 300
 LEGACY_CLEANUP_FINAL_CONFIRM_TTL_SECONDS: Final[int] = 60
 LEGACY_CLEANUP_CODE_LEN: Final[int] = 6
 LEGACY_CLEANUP_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-
-def _entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
-    """Return mutable per-entry integration state store."""
-    return cast(
-        dict[str, Any],
-        hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {}),
-    )
-
-
-def _generate_cleanup_code() -> str:
-    """Generate a short human-friendly confirmation code."""
-    return "".join(
-        secrets.choice(LEGACY_CLEANUP_CODE_ALPHABET) for _ in range(LEGACY_CLEANUP_CODE_LEN)
-    )
 
 
 class LegacyMigrationButton(ButtonEntity):
@@ -224,7 +209,7 @@ class LegacyCleanupButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Delete remaining legacy artifacts."""
-        store = _entry_store(self.hass, self._entry_id)
+        store = integration_entry_store(self.hass, self._entry_id)
         guard = dict(
             store.get(
                 DATA_KEY_LEGACY_CLEANUP_GUARD,
@@ -287,7 +272,10 @@ class LegacyCleanupButton(ButtonEntity):
             return
         else:
             # Step 1/2: start confirmation challenge on first press.
-            confirmation_code = _generate_cleanup_code()
+            confirmation_code = generate_confirmation_code(
+                length=LEGACY_CLEANUP_CODE_LEN,
+                alphabet=LEGACY_CLEANUP_CODE_ALPHABET,
+            )
             store[DATA_KEY_LEGACY_CLEANUP_GUARD] = {
                 "phase": 1,
                 "code": confirmation_code,
@@ -365,7 +353,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities for the integration."""
-    entry_store = _entry_store(hass, entry.entry_id)
+    entry_store = integration_entry_store(hass, entry.entry_id)
     entry_store.setdefault(
         DATA_KEY_LEGACY_CLEANUP_GUARD,
         {"phase": 0, "code": None, "expires_at": 0.0},

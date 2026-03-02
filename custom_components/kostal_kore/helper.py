@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from collections.abc import Callable
 from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE
+from .const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE, DOMAIN
 from .const_ids import ModuleId, SettingId
 from .repairs import clear_issue, create_installer_required_issue
 
@@ -23,6 +24,22 @@ _KNOWN_HOSTNAME_IDS: Final[tuple[str, ...]] = (SettingId.HOSTNAME, "Hostname")
 
 # Performance constants
 HOSTNAME_ID_TIMEOUT_SECONDS: Final[float] = 30.0
+DEFAULT_CONFIRMATION_CODE_LEN: Final[int] = 6
+DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
+    """Return mutable per-entry integration state store."""
+    return cast(dict[str, Any], hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {}))
+
+
+def generate_confirmation_code(
+    *,
+    length: int = DEFAULT_CONFIRMATION_CODE_LEN,
+    alphabet: str = DEFAULT_CONFIRMATION_CODE_ALPHABET,
+) -> str:
+    """Generate a short human-friendly confirmation code."""
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 # Inverter state constants
 INVERTER_STATE_OFF: Final[int] = 0

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import secrets
 import time
 from typing import Any, Final, cast
 
@@ -29,6 +28,7 @@ from .const import (
     SERVICE_ADOPT_LEGACY_ENTITY_IDS,
     SERVICE_COPY_LEGACY_HISTORY,
 )
+from .helper import generate_confirmation_code, integration_entry_store
 from .legacy_migration import (
     LegacyEntityPair,
     adopt_legacy_entity_ids,
@@ -98,13 +98,8 @@ class _HistoryCopySummary:
     short_term_rows_moved: int = 0
     meta_pairs_rebound: int = 0
 
-
-def _entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
-    return cast(dict[str, Any], hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {}))
-
-
 def _guard_store(hass: HomeAssistant, entry_id: str) -> dict[str, dict[str, Any]]:
-    store = _entry_store(hass, entry_id)
+    store = integration_entry_store(hass, entry_id)
     return cast(
         dict[str, dict[str, Any]],
         store.setdefault(DATA_KEY_HISTORY_MIGRATION_GUARDS, {}),
@@ -129,12 +124,6 @@ def _get_or_init_guard(hass: HomeAssistant, entry_id: str, action: str) -> dict[
             "code": None,
             "expires_at": 0.0,
         },
-    )
-
-
-def _generate_confirmation_code() -> str:
-    return "".join(
-        secrets.choice(_GUARD_CODE_ALPHABET) for _ in range(_GUARD_CODE_LEN)
     )
 
 
@@ -226,7 +215,10 @@ async def _ensure_guard_confirmed(
         return False
 
     if phase == _GUARD_PHASE_IDLE:
-        code = _generate_confirmation_code()
+        code = generate_confirmation_code(
+            length=_GUARD_CODE_LEN,
+            alphabet=_GUARD_CODE_ALPHABET,
+        )
         guard["phase"] = _GUARD_PHASE_AWAITING_CODE
         guard["code"] = code
         guard["expires_at"] = now + _GUARD_CHALLENGE_TTL_SECONDS
@@ -641,10 +633,22 @@ def async_register_migration_services(hass: HomeAssistant) -> None:
         )
 
 
-def async_unregister_migration_services_if_unused(hass: HomeAssistant) -> None:
-    """Unregister services when no KORE config entries remain."""
-    remaining_entries = list(hass.config_entries.async_entries(DOMAIN))
-    if remaining_entries:
+def async_unregister_migration_services_if_unused(
+    hass: HomeAssistant,
+    *,
+    unloading_entry_id: str | None = None,
+) -> None:
+    """Unregister services when no loaded KORE runtime entries remain."""
+    domain_data = hass.data.get(DOMAIN, {})
+    if not isinstance(domain_data, dict):
+        domain_data = {}
+
+    active_entry_ids = {
+        str(entry_id)
+        for entry_id in domain_data
+        if unloading_entry_id is None or str(entry_id) != unloading_entry_id
+    }
+    if active_entry_ids:
         return
     if hass.services.has_service(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS):
         hass.services.async_remove(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS)

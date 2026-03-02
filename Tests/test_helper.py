@@ -28,7 +28,9 @@ from custom_components.kostal_kore.helper import (
     ModbusServerDeviceBusyError,
     PlenticoreDataFormatter,
     ensure_installer_access,
+    generate_confirmation_code,
     get_hostname_id,
+    integration_entry_store,
     is_battery_control,
     parse_modbus_exception,
     requires_installer_service_code,
@@ -159,6 +161,20 @@ def test_helper_battery_control_checks() -> None:
     assert requires_installer_service_code("Battery:MinSocRel") is False
     assert is_battery_control("Battery:MinSocRel") is True
     assert is_battery_control("Grid:Power") is False
+
+
+def test_integration_entry_store_reuses_entry_dict(hass: HomeAssistant) -> None:
+    first = integration_entry_store(hass, "entry-test")
+    first["x"] = 1
+    second = integration_entry_store(hass, "entry-test")
+    assert first is second
+    assert second["x"] == 1
+
+
+def test_generate_confirmation_code_uses_expected_alphabet() -> None:
+    code = generate_confirmation_code()
+    assert len(code) == 6
+    assert all(c in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" for c in code)
 
 
 def test_ensure_installer_access() -> None:

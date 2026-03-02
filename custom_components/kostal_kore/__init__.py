@@ -493,7 +493,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
             MEMORY_CLEANUP_MAX_MS / 1000,
         )
 
-    async_unregister_migration_services_if_unused(hass)
+    async_unregister_migration_services_if_unused(
+        hass,
+        unloading_entry_id=entry.entry_id,
+    )
     return unload_ok
 
 

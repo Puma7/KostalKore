@@ -31,6 +31,31 @@ async def test_register_unregister_migration_services(hass: HomeAssistant) -> No
     assert not hass.services.has_service(DOMAIN, SERVICE_COPY_LEGACY_HISTORY)
 
 
+async def test_unregister_migration_services_ignores_unloading_entry_id(
+    hass: HomeAssistant,
+) -> None:
+    """Services should be removable even if unloading entry still exists in domain store."""
+    async_register_migration_services(hass)
+    hass.data.setdefault(DOMAIN, {})["entry-a"] = {"mock": True}
+
+    async_unregister_migration_services_if_unused(hass, unloading_entry_id="entry-a")
+    assert not hass.services.has_service(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS)
+    assert not hass.services.has_service(DOMAIN, SERVICE_COPY_LEGACY_HISTORY)
+
+
+async def test_unregister_migration_services_keeps_services_with_other_entries(
+    hass: HomeAssistant,
+) -> None:
+    """Services must stay registered while other KORE runtime entries are active."""
+    async_register_migration_services(hass)
+    hass.data.setdefault(DOMAIN, {})["entry-a"] = {"mock": True}
+    hass.data.setdefault(DOMAIN, {})["entry-b"] = {"mock": True}
+
+    async_unregister_migration_services_if_unused(hass, unloading_entry_id="entry-a")
+    assert hass.services.has_service(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS)
+    assert hass.services.has_service(DOMAIN, SERVICE_COPY_LEGACY_HISTORY)
+
+
 async def test_adopt_service_dry_run_calls_adopt(hass: HomeAssistant) -> None:
     """Dry-run adopt should execute immediately without confirmation challenge."""
     target_entry = MockConfigEntry(domain=DOMAIN, data={"host": "10.0.0.11"})
