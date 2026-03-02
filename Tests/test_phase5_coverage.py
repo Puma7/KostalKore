@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiohttp.client_exceptions import ClientError
+from aiohttp.client_exceptions import ClientError, ContentTypeError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -43,6 +43,16 @@ def test_log_setup_metrics_branches() -> None:
         kp_init._log_setup_metrics(0.0, True)
         kp_init._log_setup_metrics(0.0, False)
         assert logger.info.called
+        assert logger.warning.called
+
+
+@pytest.mark.asyncio
+async def test_await_cleanup_step_timeout_is_handled() -> None:
+    async def _slow_cleanup() -> None:
+        await asyncio.sleep(0.05)
+
+    with patch("custom_components.kostal_kore.__init__._LOGGER") as logger:
+        await kp_init._await_cleanup_step("slow-step", _slow_cleanup(), timeout=0.001)
         assert logger.warning.called
 
 
@@ -189,6 +199,12 @@ def test_handle_config_flow_error_branches() -> None:
     errors = config_flow._handle_config_flow_error(ClientError("x"), "net")
     expected_net_error = "cannot_connect"
     assert errors[CONF_HOST] == expected_net_error
+
+    errors = config_flow._handle_config_flow_error(
+        ContentTypeError(MagicMock(), (), message="html", headers=None),
+        "net",
+    )
+    assert errors[CONF_HOST] == "cannot_connect"
 
     errors = config_flow._handle_config_flow_error(ApiException("api"), "api")
     assert errors[CONF_HOST] == "cannot_connect"

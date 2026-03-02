@@ -9,7 +9,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Final, TypeAlias, TYPE_CHECKING
 
-from aiohttp.client_exceptions import ClientError
+from aiohttp.client_exceptions import ClientError, ContentTypeError
 from pykoplenti import ApiClient, AuthenticationException, ApiException
 import voluptuous as vol
 
@@ -328,6 +328,14 @@ def _handle_config_flow_error(err: Exception, operation: str) -> dict[str, str]:
     elif isinstance(err, asyncio.TimeoutError):
         errors[CONF_HOST] = "timeout"
         _LOGGER.warning("Timeout during %s", operation)
+    elif isinstance(err, ContentTypeError):
+        errors[CONF_HOST] = "cannot_connect"
+        _LOGGER.warning(
+            "Non-JSON response during %s. Host may not be a Kostal inverter "
+            "or traffic is intercepted by a proxy/captive portal: %s",
+            operation,
+            err,
+        )
     elif isinstance(err, (ClientError, TimeoutError)):
         errors[CONF_HOST] = "cannot_connect"
         _LOGGER.error("Network error during %s: %s", operation, err)

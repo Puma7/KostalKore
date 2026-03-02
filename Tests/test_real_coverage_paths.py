@@ -83,6 +83,54 @@ async def test_plenticore_async_setup_and_unload_error_paths(hass: HomeAssistant
 
 
 @pytest.mark.asyncio
+async def test_plenticore_async_setup_tolerates_metadata_timeout(
+    hass: HomeAssistant,
+) -> None:
+    """Slow metadata fetch should not fail startup outright."""
+    from kostal_plenticore.coordinator import Plenticore
+
+    entry = _mock_entry()
+    p = Plenticore(hass, entry)
+
+    with patch("kostal_plenticore.coordinator.ExtendedApiClient") as client_cls:
+        client = MagicMock()
+        client.login = AsyncMock(return_value=None)
+        client.get_settings = AsyncMock(return_value={})
+        client.get_process_data = AsyncMock(return_value={})
+        client_cls.return_value = client
+
+        p._fetch_modules = AsyncMock(return_value=None)
+        p._fetch_device_metadata = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        assert await p.async_setup() is True
+        assert p.device_info.get("name") == "192.168.1.2"
+
+
+@pytest.mark.asyncio
+async def test_plenticore_async_setup_tolerates_module_timeout(
+    hass: HomeAssistant,
+) -> None:
+    """Slow module discovery should keep default module capability set."""
+    from kostal_plenticore.coordinator import Plenticore
+
+    entry = _mock_entry()
+    p = Plenticore(hass, entry)
+
+    with patch("kostal_plenticore.coordinator.ExtendedApiClient") as client_cls:
+        client = MagicMock()
+        client.login = AsyncMock(return_value=None)
+        client.get_settings = AsyncMock(return_value={})
+        client.get_process_data = AsyncMock(return_value={})
+        client_cls.return_value = client
+
+        p._fetch_modules = AsyncMock(side_effect=asyncio.TimeoutError())
+        p._fetch_device_metadata = AsyncMock(return_value=None)
+
+        assert await p.async_setup() is True
+        assert "devices:local" in p.available_modules
+
+
+@pytest.mark.asyncio
 async def test_coordinator_mixins_and_update_error_paths(hass: HomeAssistant) -> None:
     """Cover DataUpdateCoordinatorMixin/Process/Setting/Select branches."""
     from kostal_plenticore.coordinator import (

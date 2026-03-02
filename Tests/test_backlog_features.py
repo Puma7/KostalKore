@@ -16,6 +16,7 @@ from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.coordinator import (
     EventDataUpdateCoordinator,
     Plenticore,
+    SelectDataUpdateCoordinator,
 )
 from custom_components.kostal_kore.helper import (
     is_allowed_write_target,
@@ -257,3 +258,41 @@ async def test_ksem_shutdown_calls_base_cleanup(hass) -> None:
     base_shutdown.assert_awaited_once()
     client.close.assert_called_once()
     assert coordinator._client is None
+
+
+@pytest.mark.asyncio
+async def test_select_coordinator_fetch_snapshot_prevents_mutation_runtime_error(
+    hass,
+) -> None:
+    """Mutating tracked select map during update must not crash iteration."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "x"},
+    )
+    plenticore = MagicMock()
+    plenticore.client = MagicMock()
+
+    coordinator = SelectDataUpdateCoordinator(
+        hass=hass,
+        config_entry=config_entry,
+        logger=logging.getLogger(__name__),
+        name="select-test",
+        update_interval=timedelta(seconds=30),
+        plenticore=plenticore,
+    )
+    coordinator._fetch = {
+        "devices:local": {
+            "ModeA": ["Opt1", "None"],
+            "ModeB": ["Opt2", "None"],
+        }
+    }
+
+    async def _mutating_read(_module_id: str, _data_id: str):
+        coordinator.stop_fetch_data("devices:local", "ModeB", ["Opt2", "None"])
+        return {}
+
+    with patch.object(coordinator, "async_read_data", AsyncMock(side_effect=_mutating_read)):
+        result = await coordinator._async_update_data()
+
+    assert result["devices:local"]["ModeA"] == "None"
+    assert result["devices:local"]["ModeB"] == "None"

@@ -8,7 +8,7 @@ from datetime import timedelta
 import logging
 import random
 import time
-from typing import Any, TYPE_CHECKING, TypeVar, cast
+from typing import Any, Final, TYPE_CHECKING, TypeVar, cast
 import asyncio
 
 from aiohttp.client_exceptions import ClientError
@@ -56,6 +56,15 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_HISTORY_MAX: int = 50
 EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
+SETUP_FETCH_TIMEOUT_SECONDS: float = 8.0
+SETUP_PREWARM_TIMEOUT_SECONDS: float = 8.0
+DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
+    "devices:local",
+    "scb:statistic:EnergyFlow",
+    "scb:event",
+    "scb:system",
+    "scb:network",
+]
 
 # Type variables for generic classes
 T = TypeVar("T")
@@ -90,7 +99,7 @@ class Plenticore:
             model="Unknown",
             sw_version="Unknown",
         )
-        self.available_modules: list[str] = []
+        self.available_modules: list[str] = list(DEFAULT_AVAILABLE_MODULES)
         self._settings_cache: Mapping[str, Any] | None = None
         self._settings_cache_ts: float = 0.0
         self._process_data_cache: Mapping[str, Any] | None = None
@@ -202,38 +211,71 @@ class Plenticore:
         try:
             modules_task = self._fetch_modules()
             metadata_task = self._fetch_device_metadata()
-            
+
             # Run both operations concurrently
             modules_result, metadata_result = await asyncio.gather(
-                modules_task, metadata_task, return_exceptions=True
+                asyncio.wait_for(modules_task, timeout=SETUP_FETCH_TIMEOUT_SECONDS),
+                asyncio.wait_for(metadata_task, timeout=SETUP_FETCH_TIMEOUT_SECONDS),
+                return_exceptions=True,
             )
-            
+
             # Handle results
-            if isinstance(modules_result, Exception):
+            if isinstance(modules_result, asyncio.TimeoutError):
+                self.available_modules = list(DEFAULT_AVAILABLE_MODULES)
+                _LOGGER.warning(
+                    "Module discovery timed out after %.1fs, continuing with defaults",
+                    SETUP_FETCH_TIMEOUT_SECONDS,
+                )
+            elif isinstance(modules_result, Exception):
                 raise modules_result
-            if isinstance(metadata_result, Exception):
+            if isinstance(metadata_result, asyncio.TimeoutError):
+                self._set_default_device_info()
+                _LOGGER.warning(
+                    "Device metadata fetch timed out after %.1fs, continuing with defaults",
+                    SETUP_FETCH_TIMEOUT_SECONDS,
+                )
+            elif isinstance(metadata_result, Exception):
                 raise metadata_result
 
             # Prime capability caches once to reduce duplicate startup probes
             # across sensor/number/select platforms.
             prewarm_results = await asyncio.gather(
-                self.async_get_process_data_cached(ttl_seconds=0.0),
-                self.async_get_settings_cached(ttl_seconds=0.0),
+                asyncio.wait_for(
+                    self.async_get_process_data_cached(ttl_seconds=0.0),
+                    timeout=SETUP_PREWARM_TIMEOUT_SECONDS,
+                ),
+                asyncio.wait_for(
+                    self.async_get_settings_cached(ttl_seconds=0.0),
+                    timeout=SETUP_PREWARM_TIMEOUT_SECONDS,
+                ),
                 return_exceptions=True,
             )
             for prewarm_result in prewarm_results:
                 if isinstance(prewarm_result, Exception):
-                    _LOGGER.debug("Capability cache prewarm failed: %s", prewarm_result)
+                    _LOGGER.debug(
+                        "Capability cache prewarm failed (non-fatal): %s",
+                        prewarm_result,
+                    )
 
             return True
-            
-        except (ApiException, KeyError, ValueError, asyncio.CancelledError) as err:
+
+        except (ApiException, KeyError, ValueError) as err:
             if isinstance(err, ApiException):
                 modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("Could not get device metadata: %s", modbus_err.message)
             else:
                 _LOGGER.error("Error processing device metadata: %s", err)
             return False
+
+    def _set_default_device_info(self) -> None:
+        """Set conservative fallback device metadata."""
+        self.device_info = DeviceInfo(
+            configuration_url=f"http://{self.host}",
+            identifiers={(DOMAIN, "unknown")},
+            manufacturer="Kostal",
+            model="Unknown",
+            name=self.host,
+        )
 
     async def _fetch_modules(self) -> None:
         """Fetch available modules concurrently."""
@@ -246,7 +288,7 @@ class Plenticore:
         except (ApiException, ClientError, TimeoutError) as err:
             _LOGGER.warning("Could not get available modules: %s. Using default assumption.", err)
             # Fallback to defaults if modules can't be fetched (older firmware?)
-            self.available_modules = ["devices:local", "scb:statistic:EnergyFlow", "scb:event", "scb:system", "scb:network"]
+            self.available_modules = list(DEFAULT_AVAILABLE_MODULES)
 
     async def _fetch_device_metadata(self) -> None:
         """Fetch device metadata concurrently."""
@@ -269,13 +311,7 @@ class Plenticore:
         except (ApiException, ClientError, TimeoutError, KeyError) as err:
             _LOGGER.error("Could not fetch device metadata: %s", err)
             # Set default device info to prevent setup failure
-            self.device_info = DeviceInfo(
-                configuration_url=f"http://{self.host}",
-                identifiers={(DOMAIN, "unknown")},
-                manufacturer="Kostal",
-                model="Unknown",
-                name=self.host,
-            )
+            self._set_default_device_info()
             return
 
         # Safe dictionary access with defaults
@@ -1024,7 +1060,16 @@ class SelectDataUpdateCoordinator(
 
         _LOGGER.debug("Fetching select %s for %s", self.name, self._fetch)
 
-        return await self._async_get_current_option(self._fetch)
+        # Snapshot fetch map to avoid RuntimeError when entities are added/removed
+        # while an update round is iterating with await points.
+        fetch_snapshot = {
+            module: {
+                data_id: list(options)
+                for data_id, options in data_map.items()
+            }
+            for module, data_map in self._fetch.items()
+        }
+        return await self._async_get_current_option(fetch_snapshot)
 
     async def _async_get_current_option(
         self,
@@ -1035,11 +1080,11 @@ class SelectDataUpdateCoordinator(
         # Fix review finding #1: evaluate all options for all tracked select
         # entities instead of returning after the first entry.
         result: dict[str, dict[str, str]] = {}
-        for mid, data_map in module_id.items():
+        for mid, data_map in list(module_id.items()):
             module_result: dict[str, str] = {}
-            for data_id, all_options in data_map.items():
+            for data_id, all_options in list(data_map.items()):
                 selected_option = "None"
-                for all_option in all_options:
+                for all_option in list(all_options):
                     if all_option == "None":
                         continue
                     val = await self.async_read_data(mid, all_option)
