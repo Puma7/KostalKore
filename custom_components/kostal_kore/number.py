@@ -41,6 +41,7 @@ from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import (
     PlenticoreDataFormatter,
     ensure_installer_access,
+    is_rest_write_supported_target,
     is_battery_control,
     parse_modbus_exception,
     requires_installer_service_code,
@@ -1346,6 +1347,13 @@ async def async_setup_entry(
                     legacy_id,
                     description.name,
                 )
+        if not is_rest_write_supported_target(str(description_to_use.data_id)):
+            _LOGGER.debug(
+                "Skipping REST number %s (%s) because it is Modbus-only",
+                description_to_use.name,
+                description_to_use.data_id,
+            )
+            continue
         # Check if the module even exists before trying to access its settings
         module_available = (
             description_to_use.module_id in plenticore.available_modules

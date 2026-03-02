@@ -476,14 +476,42 @@ _ARM_REQUIRED_FRAGMENTS: Final[tuple[str, ...]] = (
     "Battery:ExternControl",
 )
 
+# Battery charge/discharge control is intentionally MODBUS-only in this
+# integration. These REST IDs are kept out of write paths to avoid false
+# "accepted" writes that do not reliably change inverter behavior.
+_REST_MODBUS_ONLY_IDS: Final[frozenset[str]] = frozenset(
+    {
+        "Battery:ExternControl:AcPowerAbs",
+        "Battery:ChargePowerAcAbsolute",
+        "Battery:ChargeCurrentDcRel",
+        "Battery:ChargePowerAcRel",
+        "Battery:ChargeCurrentDcAbs",
+        "Battery:ChargePowerDcAbs",
+        "Battery:ChargePowerDcRel",
+    }
+)
+
+_REST_MODBUS_ONLY_FRAGMENTS: Final[tuple[str, ...]] = (
+    "Battery:ExternControl:",
+)
+
 
 def is_allowed_write_target(module_id: str, data_id: str) -> bool:
     """Return True if this module/data_id is allowed for writes."""
     if module_id != ModuleId.DEVICES_LOCAL:
         return False
+    if not is_rest_write_supported_target(data_id):
+        return False
     if data_id in _ALLOWED_WRITE_IDS:
         return True
     return any(data_id.startswith(prefix) for prefix in _ALLOWED_WRITE_PREFIXES)
+
+
+def is_rest_write_supported_target(data_id: str) -> bool:
+    """Return False for settings intentionally kept Modbus-only."""
+    if data_id in _REST_MODBUS_ONLY_IDS:
+        return False
+    return not any(fragment in data_id for fragment in _REST_MODBUS_ONLY_FRAGMENTS)
 
 
 def requires_advanced_write_arm(data_id: str) -> bool:

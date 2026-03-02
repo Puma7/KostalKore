@@ -45,6 +45,7 @@ from .helper import (
     ModbusException,
     get_hostname_id,
     is_allowed_write_target,
+    is_rest_write_supported_target,
     parse_modbus_exception,
     requires_advanced_write_arm,
     validate_cross_field_write_rules,
@@ -394,6 +395,10 @@ class DataUpdateCoordinatorMixin:
 
         # Security: explicit write allowlist
         for data_id in value:
+            if not is_rest_write_supported_target(data_id):
+                raise HomeAssistantError(
+                    f"REST write disabled for {data_id}. Use Modbus battery controls instead."
+                )
             if not is_allowed_write_target(module_id, data_id):
                 raise HomeAssistantError(
                     f"Write to unsupported target blocked: {module_id}/{data_id}"

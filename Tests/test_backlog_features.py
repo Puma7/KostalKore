@@ -19,6 +19,7 @@ from custom_components.kostal_kore.coordinator import (
 )
 from custom_components.kostal_kore.helper import (
     is_allowed_write_target,
+    is_rest_write_supported_target,
     requires_advanced_write_arm,
     validate_cross_field_write_rules,
 )
@@ -76,7 +77,11 @@ async def test_event_coordinator_dedup_and_snapshot(hass) -> None:
 def test_write_policy_helpers() -> None:
     """Allowlist/arming and cross-field validation helpers behave as expected."""
     assert is_allowed_write_target("devices:local", "Battery:MinSoc")
+    assert not is_allowed_write_target("devices:local", "Battery:ExternControl:AcPowerAbs")
     assert not is_allowed_write_target("scb:network", "Hostname")
+    assert not is_rest_write_supported_target("Battery:ExternControl:AcPowerAbs")
+    assert not is_rest_write_supported_target("Battery:ChargePowerDcAbs")
+    assert is_rest_write_supported_target("Battery:MinSoc")
 
     assert requires_advanced_write_arm("Battery:BackupMode:Enable")
     assert requires_advanced_write_arm("DigitalOutputs:Customer:ConfigurationFlags")
