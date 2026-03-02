@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -71,6 +71,36 @@ async def test_event_coordinator_dedup_and_snapshot(hass) -> None:
 
     assert first["last_event_code"] == 1001
     assert second["active_error_events_count"] == 1
+    assert len(coordinator.history) == 1
+
+
+@pytest.mark.asyncio
+async def test_event_coordinator_first_event_not_deduped_when_monotonic_zero(hass) -> None:
+    """First event should be recorded even if monotonic() returns 0."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "x"},
+    )
+    plenticore = MagicMock()
+    plenticore.client = MagicMock()
+    plenticore.client.get_events = AsyncMock(return_value=[_mk_event(2001)])
+
+    coordinator = EventDataUpdateCoordinator(
+        hass=hass,
+        config_entry=config_entry,
+        logger=logging.getLogger(__name__),
+        name="event-test-monotonic-zero",
+        update_interval=timedelta(seconds=30),
+        plenticore=plenticore,
+    )
+
+    with patch(
+        "custom_components.kostal_kore.coordinator.time.monotonic",
+        return_value=0.0,
+    ):
+        result = await coordinator._async_update_data()
+
+    assert result["last_event_code"] == 2001
     assert len(coordinator.history) == 1
 
 

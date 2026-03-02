@@ -865,8 +865,11 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _append_history_if_new(self, event: EventData) -> None:
         now = time.monotonic()
         signature = self._event_signature(event)
-        last_seen = self._last_signature_ts.get(signature, 0.0)
-        if (now - last_seen) < EVENT_DEDUP_COOLDOWN_SECONDS:
+        last_seen = self._last_signature_ts.get(signature)
+        if (
+            last_seen is not None
+            and (now - last_seen) < EVENT_DEDUP_COOLDOWN_SECONDS
+        ):
             return
         self._last_signature_ts[signature] = now
         self._history.appendleft(self._event_to_payload(event))
