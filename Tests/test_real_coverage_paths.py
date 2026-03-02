@@ -540,7 +540,10 @@ async def test_switch_helper_and_setup_error_branches(hass: HomeAssistant) -> No
         plenticore.client.get_settings = AsyncMock(side_effect=err)
         added: list[object] = []
         await async_setup_entry(hass, entry, lambda ents: added.extend(ents))
-        assert added == []
+        assert any(
+            getattr(entity, "unique_id", "").endswith("_advanced_write_arm")
+            for entity in added
+        )
 
     # shadow setup outer catch branches
     plenticore.client.get_settings = AsyncMock(return_value={"devices:local": []})

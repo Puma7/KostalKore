@@ -49,7 +49,7 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
-DEFAULT_TIMEOUT_SECONDS: Final[float] = 60.0
+DEFAULT_TIMEOUT_SECONDS: Final[float] = 12.0
 
 # Module prefix mapping for deterministic sensor translation keys.
 _MODULE_PREFIXES: Final[dict[str, str]] = {
@@ -1545,7 +1545,7 @@ async def async_setup_entry(
     # Slow down REST polling when Modbus is active (Modbus handles fast data)
     _rest_poll_interval = 10
     if _modbus_coord is not None:
-        _rest_poll_interval = 60
+        _rest_poll_interval = 30
         _LOGGER.info("Modbus active: REST process data polling slowed to %ds", _rest_poll_interval)
 
     process_data_update_coordinator = ProcessDataUpdateCoordinator(
