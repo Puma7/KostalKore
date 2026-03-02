@@ -183,6 +183,10 @@ async def test_coordinator_mixins_and_update_error_paths(hass: HomeAssistant) ->
     p._client.get_process_data_values = AsyncMock(side_effect=asyncio.TimeoutError())
     with pytest.raises(UpdateFailed):
         await proc._async_update_data()
+    proc._last_result = {"devices:local": {"P": "123"}}
+    p._client.get_process_data_values = AsyncMock(side_effect=asyncio.TimeoutError())
+    assert await proc._async_update_data() == {"devices:local": {"P": "123"}}
+    proc._last_result = {}
 
     p._client.get_process_data_values = AsyncMock(side_effect=ApiException("[503] internal communication error"))
     with pytest.raises(UpdateFailed):

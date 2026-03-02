@@ -717,6 +717,7 @@ class ProcessDataUpdateCoordinator(
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self._last_result: dict[str, dict[str, str]] = {}
         self._init_adaptive_polling(
             default_base_seconds=10,
             max_interval_floor_seconds=120,
@@ -745,6 +746,12 @@ class ProcessDataUpdateCoordinator(
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
             self._record_failure()
+            if self._last_result:
+                _LOGGER.warning(
+                    "Timeout fetching process data for %s - using last known values",
+                    self.name,
+                )
+                return self._last_result
             raise UpdateFailed("Timeout fetching process data") from None
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
@@ -785,6 +792,8 @@ class ProcessDataUpdateCoordinator(
                 _LOGGER.warning("Error processing module %s: %s", module_id, err)
                 result[module_id] = {}
 
+        if result:
+            self._last_result = result
         return result
 
 
