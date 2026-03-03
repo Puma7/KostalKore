@@ -369,19 +369,20 @@ class SystemHealthCheckButton(ButtonEntity):
                 detail="Alle Kreuz-Checks bestanden",
             )
 
-        # Isolation resistance sentinel
+        # Isolation resistance: absent means sentinel was filtered by quality guard
         iso = data.get("isolation_resistance")
-        if iso is not None:
+        if iso is None:
+            report.check(
+                "Isolationswiderstand",
+                True,
+                detail="nicht verfügbar — Firmware-Sentinel gefiltert "
+                "(normal bei Nacht/Standby, kein DC-Strom für Messung)",
+                level="info",
+            )
+        else:
             try:
                 fiso = float(iso)
-                if fiso >= 65_000_000:
-                    report.check(
-                        "Isolationswiderstand",
-                        True,
-                        detail=f"{fiso:,.0f} Ω — Firmware-Sentinel (kein DC-Strom, Messung nicht möglich)",
-                        level="info",
-                    )
-                elif fiso < 100_000:
+                if fiso < 100_000:
                     report.check(
                         "Isolationswiderstand",
                         False,
@@ -604,18 +605,15 @@ class SystemHealthCheckButton(ButtonEntity):
             except (TypeError, ValueError):
                 pass
 
-        # Pattern: isolation_resistance stuck at sentinel
-        iso = data.get("isolation_resistance")
-        if iso is not None:
-            try:
-                fiso = float(iso)
-                if fiso >= 65_000_000:
-                    issues.append(
-                        f"isolation_resistance={fiso:,.0f} Ω (Sentinel 0xFFFF) "
-                        "→ Messung nicht verfügbar (normal bei Nacht/Standby)"
-                    )
-            except (TypeError, ValueError):
-                pass
+        # Pattern: isolation_resistance absent (sentinel filtered by quality guard)
+        if "isolation_resistance" not in data:
+            dc_power = data.get("total_dc_power")
+            has_dc = dc_power is not None and float(dc_power) > 50
+            if has_dc:
+                issues.append(
+                    "isolation_resistance fehlt trotz DC-Leistung >50 W "
+                    "→ Sentinel-Wert gefiltert, Firmware meldet 0xFFFF"
+                )
 
         # Pattern: battery_net_capacity = 0 while gross > 0
         net_cap = data.get("battery_net_capacity")
