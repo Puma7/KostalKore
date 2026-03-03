@@ -32,6 +32,7 @@ from custom_components.kostal_kore.helper import (
     get_hostname_id,
     integration_entry_store,
     is_battery_control,
+    normalize_isolation_resistance_ohm,
     parse_modbus_exception,
     requires_installer_service_code,
 )
@@ -175,6 +176,32 @@ def test_generate_confirmation_code_uses_expected_alphabet() -> None:
     code = generate_confirmation_code()
     assert len(code) == 6
     assert all(c in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" for c in code)
+
+
+def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
+    assert normalize_isolation_resistance_ohm(
+        65.5, pv_active=True, inverter_state=6
+    ) == 65500.0
+    assert normalize_isolation_resistance_ohm(
+        65500.0, pv_active=True, inverter_state=6
+    ) == 65500.0
+    assert normalize_isolation_resistance_ohm(
+        65.5, pv_active=False, inverter_state=10
+    ) == 65.5
+    assert normalize_isolation_resistance_ohm(
+        65.5, pv_active=True, inverter_state=10
+    ) == 65.5
+    assert normalize_isolation_resistance_ohm(
+        float("nan"), pv_active=True, inverter_state=6
+    ) is None
+    assert normalize_isolation_resistance_ohm(
+        "bad", pv_active=True, inverter_state=6
+    ) is None
+
+
+def test_format_energy_clamps_negative_values() -> None:
+    assert PlenticoreDataFormatter.format_energy("-100") == 0.0
+    assert PlenticoreDataFormatter.format_energy("2500") == 2.5
 
 
 def test_ensure_installer_access() -> None:

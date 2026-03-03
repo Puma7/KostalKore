@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from .helper import normalize_isolation_resistance_ohm
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 MAX_DAILY_SNAPSHOTS: Final[int] = 730
@@ -278,11 +280,27 @@ class DegradationTracker:
     def update_from_modbus(self, data: dict[str, Any]) -> None:
         """Feed Modbus data into the degradation tracker."""
         now = time.time()
+        try:
+            total_dc = float(data.get("total_dc_power", 0.0))
+        except (TypeError, ValueError):
+            total_dc = 0.0
+        pv_active = total_dc > 50.0
+        try:
+            inverter_state_val = data.get("inverter_state")
+            inverter_state = int(float(inverter_state_val)) if inverter_state_val is not None else None
+        except (TypeError, ValueError):
+            inverter_state = None
 
         iso = data.get("isolation_resistance")
         if iso is not None:
             try:
-                self.isolation.record(float(iso) / 1000.0, now)
+                normalized_ohm = normalize_isolation_resistance_ohm(
+                    iso,
+                    pv_active=pv_active,
+                    inverter_state=inverter_state,
+                )
+                if normalized_ohm is not None:
+                    self.isolation.record(normalized_ohm / 1000.0, now)
             except (TypeError, ValueError):
                 pass
 
