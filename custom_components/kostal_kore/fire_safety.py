@@ -198,12 +198,15 @@ class FireSafetyMonitor:
         inverter_state = (
             int(inverter_state_raw) if inverter_state_raw is not None else None
         )
-        iso_ohm = normalize_isolation_resistance_ohm(
-            data.get("isolation_resistance"),
-            pv_active=pv_active,
-            inverter_state=inverter_state,
-        )
-        _try_append(self._iso_history, now, iso_ohm)
+        # Keep isolation history unit-stable for rate-of-change calculations:
+        # only append while PV is active (actual isolation measurement window).
+        if pv_active:
+            iso_ohm = normalize_isolation_resistance_ohm(
+                data.get("isolation_resistance"),
+                pv_active=True,
+                inverter_state=inverter_state,
+            )
+            _try_append(self._iso_history, now, iso_ohm)
         _try_append(self._ctrl_temp_history, now, data.get("controller_temp"))
         _try_append(self._bat_temp_history, now, data.get("battery_temperature"))
         _try_append(self._bat_voltage_history, now, data.get("battery_voltage"))
