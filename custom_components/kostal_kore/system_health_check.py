@@ -608,7 +608,10 @@ class SystemHealthCheckButton(ButtonEntity):
         # Pattern: isolation_resistance absent (sentinel filtered by quality guard)
         if "isolation_resistance" not in data:
             dc_power = data.get("total_dc_power")
-            has_dc = dc_power is not None and float(dc_power) > 50
+            try:
+                has_dc = dc_power is not None and float(dc_power) > 50
+            except (TypeError, ValueError):
+                has_dc = False
             if has_dc:
                 issues.append(
                     "isolation_resistance fehlt trotz DC-Leistung >50 W "
