@@ -360,9 +360,12 @@ async def async_setup_entry(
     )
     entry_store.setdefault(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, "")
 
+    from .system_health_check import SystemHealthCheckButton
+
     buttons: list[ButtonEntity] = [
         LegacyMigrationButton(entry),
         LegacyCleanupButton(entry),
+        SystemHealthCheckButton(entry, hass),
     ]
 
     if entry.options.get(CONF_MODBUS_ENABLED, False):
