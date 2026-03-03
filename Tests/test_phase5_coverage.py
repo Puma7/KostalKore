@@ -501,16 +501,16 @@ def test_helper_formatters_and_conversions() -> None:
     assert helper._safe_int_conversion("bad") == "bad"
     assert helper._safe_float_conversion("2.5") == 2.5
     assert helper._safe_float_conversion("bad") == "bad"
-    assert helper._handle_format_error("x", "round") == "x"
+    assert helper._handle_format_error("x", "round") is None
     assert helper.PlenticoreDataFormatter.format_round("4.2") == 4
-    assert helper.PlenticoreDataFormatter.format_round("bad") == "bad"
+    assert helper.PlenticoreDataFormatter.format_round("bad") is None
     assert helper.PlenticoreDataFormatter.format_round_back(4.0) == "4"
     assert helper.PlenticoreDataFormatter.format_round_back(4.4) == "4"
     assert helper.PlenticoreDataFormatter.format_float("1.5") == 1.5
-    assert helper.PlenticoreDataFormatter.format_float("bad") == "bad"
+    assert helper.PlenticoreDataFormatter.format_float("bad") is None
     assert helper.PlenticoreDataFormatter.format_float_back(2.5) == "2.5"
     assert helper.PlenticoreDataFormatter.format_energy("1000") == 1.0
-    assert helper.PlenticoreDataFormatter.format_energy("bad") == "bad"
+    assert helper.PlenticoreDataFormatter.format_energy("bad") is None
 
     assert helper.PlenticoreDataFormatter.format_inverter_state("1") == "Init"
     assert helper.PlenticoreDataFormatter.format_inverter_state("999") == "Unknown State 999"
