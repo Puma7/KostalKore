@@ -75,7 +75,6 @@ class SystemHealthCheckButton(ButtonEntity):
         self._attr_unique_id = f"{entry.entry_id}_system_health_check"
         self._attr_device_info = entry.runtime_data.device_info
         self._attr_extra_state_attributes: dict[str, Any] = {}
-        self._hass_ref = hass
 
     async def async_press(self) -> None:
         """Run all health checks and create persistent notification."""
@@ -446,11 +445,17 @@ class SystemHealthCheckButton(ButtonEntity):
                 detail_parts.append(
                     f"letzter Erfolg: {'ja' if last_success else 'nein'}"
                 )
+            if has_data:
+                severity = "fail"
+            elif key == "ksem_coordinator":
+                severity = "info"
+            else:
+                severity = "fail"
             report.check(
                 f"{name} Coordinator",
                 has_data,
                 detail=", ".join(detail_parts),
-                level="warn" if not has_data and key != "ksem_coordinator" else "fail",
+                level=severity,
             )
 
     def _check_entity_registry(self, report: _HealthReport, hass: HomeAssistant) -> None:
