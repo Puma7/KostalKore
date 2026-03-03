@@ -182,6 +182,10 @@ def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
     assert normalize_isolation_resistance_ohm(
         65.5, pv_active=True, inverter_state=6
     ) == 65500.0
+    # Critical low-ohm values must never be upscaled.
+    assert normalize_isolation_resistance_ohm(
+        5000.0, pv_active=True, inverter_state=6
+    ) == 5000.0
     assert normalize_isolation_resistance_ohm(
         65500.0, pv_active=True, inverter_state=6
     ) == 65500.0

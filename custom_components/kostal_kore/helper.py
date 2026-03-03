@@ -27,6 +27,9 @@ _KNOWN_HOSTNAME_IDS: Final[tuple[str, ...]] = (SettingId.HOSTNAME, "Hostname")
 HOSTNAME_ID_TIMEOUT_SECONDS: Final[float] = 30.0
 DEFAULT_CONFIRMATION_CODE_LEN: Final[int] = 6
 DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# Safety-first heuristic: only treat very small active-PV values as kOhm-reported.
+# This avoids masking critical low-ohm readings (e.g. 5000 Ohm).
+ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
@@ -65,7 +68,7 @@ def normalize_isolation_resistance_ohm(
         return numeric
     if inverter_state in (0, 1, 10, 15):
         return numeric
-    if 0 < abs(numeric) < 10_000:
+    if 0 < abs(numeric) < ISOLATION_KOHM_HEURISTIC_MAX:
         return numeric * 1000.0
     return numeric
 
