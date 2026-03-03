@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any, Final
 
+from .helper import normalize_isolation_resistance_ohm
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 MAX_HISTORY_SIZE: Final[int] = 2000
@@ -292,6 +294,12 @@ class InverterHealthMonitor:
         """Feed Modbus register data into the health monitor."""
         self._total_polls += 1
         self._apply_grid_profile(data)
+        total_dc = _safe_float(data.get("total_dc_power"))
+        pv_active = total_dc is not None and total_dc > 50
+        inverter_state_raw = _safe_float(data.get("inverter_state"))
+        inverter_state = (
+            int(inverter_state_raw) if inverter_state_raw is not None else None
+        )
 
         _map: dict[str, ParameterTracker] = {
             "isolation_resistance": self.isolation,
@@ -320,7 +328,14 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
-                        fval = fval / 1000.0
+                        normalized_ohm = normalize_isolation_resistance_ohm(
+                            val,
+                            pv_active=pv_active,
+                            inverter_state=inverter_state,
+                        )
+                        if normalized_ohm is None:
+                            continue
+                        fval = normalized_ohm / 1000.0
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass

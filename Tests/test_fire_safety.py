@@ -208,6 +208,23 @@ class TestFireSafetyMonitor:
         assert m.alert_count == 0
         assert m.current_risk_level == FireRiskLevel.SAFE
 
+    def test_isolation_history_only_updates_when_pv_active(self) -> None:
+        """Isolation history should avoid mixed-unit night/day entries."""
+        m = FireSafetyMonitor()
+        m._record_history(
+            {"isolation_resistance": 65.5, "total_dc_power": 5000.0, "inverter_state": 6},
+            1.0,
+        )
+        assert len(m._iso_history) == 1
+        assert m._iso_history[-1][1] == 65500.0
+
+        # Night/standby sample must not enter iso history.
+        m._record_history(
+            {"isolation_resistance": 65.5, "total_dc_power": 0.0, "inverter_state": 10},
+            2.0,
+        )
+        assert len(m._iso_history) == 1
+
 
 class TestHelpers:
 

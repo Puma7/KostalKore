@@ -45,6 +45,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Final
 
+from .helper import normalize_isolation_resistance_ohm
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 RATE_WINDOW_SECONDS: Final[float] = 300.0
@@ -190,7 +192,21 @@ class FireSafetyMonitor:
         return new_alerts
 
     def _record_history(self, data: dict[str, Any], now: float) -> None:
-        _try_append(self._iso_history, now, data.get("isolation_resistance"))
+        total_dc = _float(data.get("total_dc_power"))
+        pv_active = total_dc is not None and total_dc > 50
+        inverter_state_raw = _float(data.get("inverter_state"))
+        inverter_state = (
+            int(inverter_state_raw) if inverter_state_raw is not None else None
+        )
+        # Keep isolation history unit-stable for rate-of-change calculations:
+        # only append while PV is active (actual isolation measurement window).
+        if pv_active:
+            iso_ohm = normalize_isolation_resistance_ohm(
+                data.get("isolation_resistance"),
+                pv_active=True,
+                inverter_state=inverter_state,
+            )
+            _try_append(self._iso_history, now, iso_ohm)
         _try_append(self._ctrl_temp_history, now, data.get("controller_temp"))
         _try_append(self._bat_temp_history, now, data.get("battery_temperature"))
         _try_append(self._bat_voltage_history, now, data.get("battery_voltage"))
@@ -203,22 +219,25 @@ class FireSafetyMonitor:
 
     def _check_isolation(self, data: dict[str, Any], now: float) -> list[SafetyAlert]:
         alerts: list[SafetyAlert] = []
-        iso = _float(data.get("isolation_resistance"))
+        inverter_state_raw = _float(data.get("inverter_state"))
+        inverter_state = (
+            int(inverter_state_raw) if inverter_state_raw is not None else None
+        )
+        total_dc = _float(data.get("total_dc_power"))
+        pv_active = total_dc is not None and total_dc > 50
+        iso = normalize_isolation_resistance_ohm(
+            data.get("isolation_resistance"),
+            pv_active=pv_active,
+            inverter_state=inverter_state,
+        )
         if iso is None:
             return alerts
 
         # Inverter returns 0 or near-0 when in standby/off (no DC voltage = no measurement)
-        inverter_state = data.get("inverter_state")
-        total_dc = _float(data.get("total_dc_power"))
         if iso < 1000 and (total_dc is None or total_dc < 50):
             return alerts  # no PV power → measurement not valid
-        if inverter_state is not None:
-            try:
-                state_int = int(inverter_state)
-                if state_int in (0, 1, 10, 15) and iso < 1000:
-                    return alerts  # Off/Init/Standby/Shutdown → measurement not valid
-            except (TypeError, ValueError):
-                pass
+        if inverter_state is not None and inverter_state in (0, 1, 10, 15) and iso < 1000:
+            return alerts  # Off/Init/Standby/Shutdown → measurement not valid
 
         vals = {"isolation_resistance_ohm": iso}
 

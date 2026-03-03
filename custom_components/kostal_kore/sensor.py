@@ -50,6 +50,8 @@ PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 12.0
+REST_PROCESS_POLL_SECONDS_DEFAULT: Final[int] = 10
+REST_PROCESS_POLL_SECONDS_WITH_MODBUS: Final[int] = 5
 
 # Module prefix mapping for deterministic sensor translation keys.
 _MODULE_PREFIXES: Final[dict[str, str]] = {
@@ -1542,11 +1544,14 @@ async def async_setup_entry(
     # Generate DC sensor descriptions dynamically
     dc_descriptions = generate_dc_sensor_descriptions(dc_string_count)
     
-    # Slow down REST polling when Modbus is active (Modbus handles fast data)
-    _rest_poll_interval = 10
+    # Keep REST process polling responsive for decision-making.
+    _rest_poll_interval = REST_PROCESS_POLL_SECONDS_DEFAULT
     if _modbus_coord is not None:
-        _rest_poll_interval = 30
-        _LOGGER.info("Modbus active: REST process data polling slowed to %ds", _rest_poll_interval)
+        _rest_poll_interval = REST_PROCESS_POLL_SECONDS_WITH_MODBUS
+        _LOGGER.info(
+            "Modbus active: REST process data polling set to %ds",
+            _rest_poll_interval,
+        )
 
     process_data_update_coordinator = ProcessDataUpdateCoordinator(
         hass, entry, _LOGGER, "Process Data", timedelta(seconds=_rest_poll_interval), plenticore
@@ -2496,4 +2501,11 @@ class PlenticoreDataSensor(
             or self.data_id not in self.coordinator.data[self.module_id]
         ):
             return None
-        return cast(StateType, self._formatter(self.coordinator.data[self.module_id][self.data_id]))
+        value = self._formatter(self.coordinator.data[self.module_id][self.data_id])
+        if (
+            self.entity_description.state_class == SensorStateClass.TOTAL_INCREASING
+            and isinstance(value, (int, float))
+            and value < 0
+        ):
+            return cast(StateType, 0.0)
+        return cast(StateType, value)

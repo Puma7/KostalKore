@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import secrets
 from collections.abc import Callable
 from typing import Any, Final, cast
@@ -26,6 +27,9 @@ _KNOWN_HOSTNAME_IDS: Final[tuple[str, ...]] = (SettingId.HOSTNAME, "Hostname")
 HOSTNAME_ID_TIMEOUT_SECONDS: Final[float] = 30.0
 DEFAULT_CONFIRMATION_CODE_LEN: Final[int] = 6
 DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# Safety-first heuristic: only treat very small active-PV values as kOhm-reported.
+# This avoids masking critical low-ohm readings (e.g. 5000 Ohm).
+ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
@@ -40,6 +44,33 @@ def generate_confirmation_code(
 ) -> str:
     """Generate a short human-friendly confirmation code."""
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def normalize_isolation_resistance_ohm(
+    value: Any,
+    *,
+    pv_active: bool,
+    inverter_state: int | None = None,
+) -> float | None:
+    """Normalize isolation resistance to ohm across firmware unit variants.
+
+    Some firmware variants report isolation resistance in kOhm while others use
+    ohm. When PV is actively producing and a very small value (<10k) is seen, it
+    is treated as kOhm and converted to ohm.
+    """
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(numeric) or math.isinf(numeric):
+        return None
+    if not pv_active:
+        return numeric
+    if inverter_state in (0, 1, 10, 15):
+        return numeric
+    if 0 < abs(numeric) < ISOLATION_KOHM_HEURISTIC_MAX:
+        return numeric * 1000.0
+    return numeric
 
 # Inverter state constants
 INVERTER_STATE_OFF: Final[int] = 0
@@ -214,7 +245,11 @@ class PlenticoreDataFormatter:
     def format_energy(state: str) -> float | str:
         """Return the given state value as energy value, scaled to kWh."""
         try:
-            return round(float(state) / 1000, 1)
+            value = round(float(state) / 1000, 1)
+            if value < 0:
+                # Recorder rejects negative values for total_increasing sensors.
+                return 0.0
+            return value
         except (TypeError, ValueError):
             return _handle_format_error(state, "energy")
 
