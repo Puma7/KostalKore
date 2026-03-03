@@ -88,7 +88,11 @@ class FireAlertCountSensor(SensorEntity):
 
 
 class FireSafetyOkBinarySensor(BinarySensorEntity):
-    """Binary sensor: ON = system safe, OFF = safety alert active."""
+    """Binary sensor: ON = safety problem detected, OFF = system safe.
+
+    Follows Home Assistant BinarySensorDeviceClass.SAFETY convention:
+    is_on=True → unsafe / problem, is_on=False → safe / no problem.
+    """
 
     _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_has_entity_name = True
@@ -102,20 +106,20 @@ class FireSafetyOkBinarySensor(BinarySensorEntity):
     @property
     def is_on(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         level = self._monitor.current_risk_level
-        if level not in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR):
+        is_unsafe = level not in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR)
+        if is_unsafe:
             active = self._monitor.active_alerts
             if active:
-                import logging
-                logging.getLogger(__name__).warning(
+                _LOGGER.warning(
                     "PV System Safety is UNSAFE: risk=%s, alerts=%s",
                     level,
                     [(a.category, a.risk_level, a.title) for a in active[:3]],
                 )
-        return level in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR)
+        return is_unsafe
 
     @property
     def icon(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
-        return "mdi:shield-check" if self.is_on else "mdi:shield-alert"
+        return "mdi:shield-alert" if self.is_on else "mdi:shield-check"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]

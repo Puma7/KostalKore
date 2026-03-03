@@ -1525,16 +1525,11 @@ async def async_setup_entry(
                     continue
 
                 if expected_entry:
-                    # We already have the expected entry; disable the duplicate.
                     if entity_entry.entity_id != expected_entry.entity_id:
-                        _LOGGER.info(
-                            "Disabling duplicate number entity %s (expected one of %s)",
+                        _LOGGER.debug(
+                            "Found duplicate number entity %s (canonical: %s)",
                             entity_entry.entity_id,
-                            ", ".join(sorted(expected_unique_ids)),
-                        )
-                        entity_registry.async_update_entity(
-                            entity_entry.entity_id,
-                            disabled_by=RegistryEntryDisabler.INTEGRATION,
+                            expected_entry.entity_id,
                         )
                     continue
 

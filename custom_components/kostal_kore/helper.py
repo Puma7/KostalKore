@@ -142,19 +142,15 @@ def _safe_float_conversion(state: str) -> float | str:
         return state
 
 
-def _handle_format_error(state: str, formatter_name: str) -> str:
-    """
-    Handle formatting errors consistently with logging.
+def _handle_format_error(state: str, formatter_name: str) -> None:
+    """Handle formatting errors consistently with logging.
 
-    Args:
-        state: Input state that caused the error
-        formatter_name: Name of the formatter for logging
-
-    Returns:
-        Original state as fallback
+    Returns None so that numeric sensors report unknown/unavailable rather
+    than propagating a non-numeric string (which triggers HA ValueError
+    for energy/measurement sensors).
     """
     _LOGGER.debug("Error in %s formatter with input: %s", formatter_name, state)
-    return state
+    return None
 
 
 class PlenticoreDataFormatter:
@@ -203,12 +199,13 @@ class PlenticoreDataFormatter:
         return cast(Callable[[Any], Any], getattr(cls, name))
 
     @staticmethod
-    def format_round(state: str) -> int | str:
+    def format_round(state: str) -> int | None:
         """Return the given state value as rounded integer."""
         try:
             return round(float(state))
         except (TypeError, ValueError):
-            return _handle_format_error(state, "round")
+            _handle_format_error(state, "round")
+            return None
 
     @staticmethod
     def format_round_back(value: float) -> str:
@@ -226,12 +223,13 @@ class PlenticoreDataFormatter:
             return ""
 
     @staticmethod
-    def format_float(state: str) -> float | str:
+    def format_float(state: str) -> float | None:
         """Return the given state value as float rounded to three decimal places."""
         try:
             return round(float(state), 3)
         except (TypeError, ValueError):
-            return _handle_format_error(state, "float")
+            _handle_format_error(state, "float")
+            return None
 
     @staticmethod
     def format_float_back(value: float) -> str:
@@ -242,16 +240,16 @@ class PlenticoreDataFormatter:
             return str(value)
 
     @staticmethod
-    def format_energy(state: str) -> float | str:
+    def format_energy(state: str) -> float | None:
         """Return the given state value as energy value, scaled to kWh."""
         try:
             value = round(float(state) / 1000, 1)
             if value < 0:
-                # Recorder rejects negative values for total_increasing sensors.
                 return 0.0
             return value
         except (TypeError, ValueError):
-            return _handle_format_error(state, "energy")
+            _handle_format_error(state, "energy")
+            return None
 
     @staticmethod
     def format_inverter_state(state: str) -> str | None:

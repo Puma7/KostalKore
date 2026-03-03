@@ -52,6 +52,23 @@ UNAVAILABLE_STRIKES_THRESHOLD: Final[int] = 3
 UNAVAILABLE_RESET_INTERVAL: Final[int] = 120
 OUTLIER_ABS_LIMIT_DEFAULT: Final[float] = 10_000_000.0
 
+# Registers that hold identifiers/metadata/firmware, not telemetry measurements.
+# These can have arbitrary large numeric values and must not be outlier-filtered.
+OUTLIER_EXEMPT_ADDRESSES: Final[frozenset[int]] = frozenset({
+    525,   # battery_model_id
+    527,   # battery_serial_alt
+    529,   # battery_operation_mode
+    586,   # battery_fw_version
+    515,   # fw_maincontroller
+})
+
+# Per-register absolute outlier limits that override the default.
+OUTLIER_ABS_LIMIT_OVERRIDES: Final[dict[int, float]] = {
+    120: 100_000_000.0,    # isolation_resistance – 0xFFFF kΩ sentinel = 65535000 Ω
+    577: 100_000_000_000.0,  # generation_energy – lifetime Wh can reach GWh range
+    104: 100_000_000.0,    # em_state – status register, not a measurement
+}
+
 
 class ModbusExceptionCode(IntEnum):
     """Modbus standard exception codes (from Kostal docs Section 2.1.7)."""
@@ -402,19 +419,23 @@ class KostalModbusClient:
                 raise ModbusReadError(
                     f"Register {register.name} returned NaN/Infinity"
                 )
-            if abs(numeric_value) > OUTLIER_ABS_LIMIT_DEFAULT:
-                previous = self._last_good_values.get(register.address)
-                if previous is not None and self._outlier_policy == "keep_last":
-                    _LOGGER.debug(
-                        "Register %s outlier %s exceeds abs limit, keeping %s",
-                        register.name,
-                        numeric_value,
-                        previous,
-                    )
-                    return previous
-                raise ModbusReadError(
-                    f"Register {register.name} value {numeric_value} exceeds absolute outlier limit"
+            if register.address not in OUTLIER_EXEMPT_ADDRESSES:
+                abs_limit = OUTLIER_ABS_LIMIT_OVERRIDES.get(
+                    register.address, OUTLIER_ABS_LIMIT_DEFAULT
                 )
+                if abs(numeric_value) > abs_limit:
+                    previous = self._last_good_values.get(register.address)
+                    if previous is not None and self._outlier_policy == "keep_last":
+                        _LOGGER.debug(
+                            "Register %s outlier %s exceeds abs limit, keeping %s",
+                            register.name,
+                            numeric_value,
+                            previous,
+                        )
+                        return previous
+                    raise ModbusReadError(
+                        f"Register {register.name} value {numeric_value} exceeds absolute outlier limit"
+                    )
 
         return value
 

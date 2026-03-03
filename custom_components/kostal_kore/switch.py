@@ -688,6 +688,10 @@ async def async_setup_entry(
     _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
     _settings_interval = 90 if _modbus_active else 30
 
+    FORCE_CREATE_SWITCH_KEYS: Final[frozenset[str]] = frozenset({
+        "Battery:ManualCharge",
+    })
+
     settings_data_update_coordinator = SettingDataUpdateCoordinator(
         hass, entry, _LOGGER, "Settings Data", timedelta(seconds=_settings_interval), plenticore
     )
@@ -712,12 +716,19 @@ async def async_setup_entry(
                 setting.id for setting in available_settings_data[description.module_id]
             )
         ):
-            _LOGGER.debug(
-                "Skipping non existing setting data %s/%s",
-                description.module_id,
-                description.key,
-            )
-            continue
+            if description.key in FORCE_CREATE_SWITCH_KEYS and module_available:
+                _LOGGER.debug(
+                    "Force creating switch %s/%s despite missing settings data",
+                    description.module_id,
+                    description.key,
+                )
+            else:
+                _LOGGER.debug(
+                    "Skipping non existing setting data %s/%s",
+                    description.module_id,
+                    description.key,
+                )
+                continue
         if not ensure_installer_access(
             entry,
             description.installer_required,
