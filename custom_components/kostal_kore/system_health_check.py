@@ -519,7 +519,7 @@ class SystemHealthCheckButton(ButtonEntity):
             alert_count = fire.alert_count
             report.check(
                 "Fire Safety",
-                risk in ("safe", "monitor"),
+                risk == "safe",
                 detail=f"Risiko: {risk}, Alerts: {alert_count}",
                 level="warn" if risk == "monitor" else "fail",
             )
