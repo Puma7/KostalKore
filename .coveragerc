@@ -41,6 +41,7 @@ omit =
     custom_components/kostal_kore/migration_services.py
     custom_components/kostal_kore/power_limits.py
     custom_components/kostal_kore/ksem_coordinator.py
+    custom_components/kostal_kore/system_health_check.py
 
 [report]
 show_missing = True

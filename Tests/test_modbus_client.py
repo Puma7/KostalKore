@@ -59,9 +59,10 @@ class TestDecoding:
         assert c._decode(raw, REG_REACTIVE_POWER_SETPOINT) == -100
 
     def test_decode_uint32_little_endian(self) -> None:
+        """UINT32 always uses big-endian word order (Kostal byte_order only affects FLOAT32)."""
         c = self._client("little")
         reg = ModbusRegister(56, "t", "t", DataType.UINT32, 2, Access.RO, RegisterGroup.DEVICE_INFO)
-        raw = struct.pack(">HH", 0x0006, 0x0000)
+        raw = struct.pack(">I", 6)
         val = c._decode(raw, reg)
         assert val == 6
 
