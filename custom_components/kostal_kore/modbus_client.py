@@ -52,6 +52,11 @@ UNAVAILABLE_STRIKES_THRESHOLD: Final[int] = 3
 UNAVAILABLE_RESET_INTERVAL: Final[int] = 120
 OUTLIER_ABS_LIMIT_DEFAULT: Final[float] = 10_000_000.0
 
+# SunSpec standard models end at address ~480 (Model 65535 end marker).
+# Registers below this threshold honor the byte_order setting for UINT32/SINT32.
+# Vendor-specific registers at or above this threshold always use big-endian.
+_VENDOR_REGISTER_BASE: Final[int] = 500
+
 # Registers that hold identifiers/metadata/firmware, not telemetry measurements.
 # These can have arbitrary large numeric values and must not be outlier-filtered.
 OUTLIER_EXEMPT_ADDRESSES: Final[frozenset[int]] = frozenset({
@@ -635,8 +640,9 @@ class KostalModbusClient:
         """Decode raw bytes according to register data type and endianness.
 
         Kostal byte_order register (addr 5) controls word order for FLOAT32
-        only.  UINT32/SINT32 always use standard SunSpec big-endian word
-        order regardless of the byte_order setting.
+        and for UINT32/SINT32 within the SunSpec standard model area
+        (addresses < 500).  Vendor-specific registers at address >= 500
+        always use big-endian word order regardless of the byte_order setting.
         """
         dt = register.data_type
 
@@ -647,10 +653,19 @@ class KostalModbusClient:
             return struct.unpack(">h", raw[:2])[0]
 
         if dt == DataType.UINT32:
-            return struct.unpack(">I", raw[:4])[0]
+            if register.address >= _VENDOR_REGISTER_BASE or self._endianness == "big":
+                return struct.unpack(">I", raw[:4])[0]
+            hi, lo = struct.unpack(">HH", raw[:4])
+            return (lo << 16) | hi
 
         if dt == DataType.SINT32:
-            return struct.unpack(">i", raw[:4])[0]
+            if register.address >= _VENDOR_REGISTER_BASE or self._endianness == "big":
+                return struct.unpack(">i", raw[:4])[0]
+            hi, lo = struct.unpack(">HH", raw[:4])
+            val = (lo << 16) | hi
+            if val >= 0x80000000:
+                val -= 0x100000000
+            return val
 
         if dt == DataType.FLOAT32:
             if self._endianness == "big":
@@ -689,7 +704,12 @@ class KostalModbusClient:
             return struct.pack(">h", int(value))
 
         if dt == DataType.UINT32:
-            return struct.pack(">I", int(value))
+            v = int(value)
+            if register.address >= _VENDOR_REGISTER_BASE or self._endianness == "big":
+                return struct.pack(">I", v)
+            lo_word = v & 0xFFFF
+            hi_word = (v >> 16) & 0xFFFF
+            return struct.pack(">HH", lo_word, hi_word)
 
         if dt == DataType.FLOAT32:
             fv = float(value)
