@@ -36,7 +36,7 @@ PLAUSIBILITY_RANGES: Final[dict[str, tuple[float, float, str]]] = {
     "grid_frequency": (45.0, 65.0, "Hz"),
     "total_dc_power": (-1000.0, 60000.0, "W"),
     "total_ac_power": (-60000.0, 60000.0, "W"),
-    "isolation_resistance": (0.0, 50_000_000.0, "Ohm"),
+    "isolation_resistance": (0.0, 65_000_000.0, "Ohm"),
     "phase1_voltage": (100.0, 280.0, "V"),
     "phase2_voltage": (100.0, 280.0, "V"),
     "phase3_voltage": (100.0, 280.0, "V"),
@@ -374,7 +374,7 @@ class SystemHealthCheckButton(ButtonEntity):
         if iso is not None:
             try:
                 fiso = float(iso)
-                if fiso >= 50_000_000:
+                if fiso >= 65_000_000:
                     report.check(
                         "Isolationswiderstand",
                         True,
@@ -399,18 +399,30 @@ class SystemHealthCheckButton(ButtonEntity):
         # Inverter state
         inv_state = data.get("inverter_state")
         if inv_state is not None:
-            from .modbus_registers import INVERTER_STATES
+            try:
+                from .modbus_registers import INVERTER_STATES
 
-            state_name = INVERTER_STATES.get(int(inv_state), f"Unbekannt ({inv_state})")
-            report.check(
-                "Inverter-Status",
-                True,
-                detail=state_name,
-                level="info",
-            )
+                state_name = INVERTER_STATES.get(
+                    int(inv_state), f"Unbekannt ({inv_state})"
+                )
+                report.check(
+                    "Inverter-Status",
+                    True,
+                    detail=state_name,
+                    level="info",
+                )
+            except (TypeError, ValueError):
+                report.check(
+                    "Inverter-Status",
+                    False,
+                    detail=f"Ungültiger Wert: {inv_state}",
+                    level="warn",
+                )
 
         # Battery SoC
-        soc = data.get("battery_soc") or data.get("battery_state_of_charge")
+        soc = data.get("battery_soc")
+        if soc is None:
+            soc = data.get("battery_state_of_charge")
         if soc is not None:
             try:
                 fsoc = float(soc)
@@ -445,12 +457,7 @@ class SystemHealthCheckButton(ButtonEntity):
                 detail_parts.append(
                     f"letzter Erfolg: {'ja' if last_success else 'nein'}"
                 )
-            if has_data:
-                severity = "fail"
-            elif key == "ksem_coordinator":
-                severity = "info"
-            else:
-                severity = "fail"
+            severity = "info" if key == "ksem_coordinator" else "fail"
             report.check(
                 f"{name} Coordinator",
                 has_data,
