@@ -70,7 +70,7 @@ OUTLIER_EXEMPT_ADDRESSES: Final[frozenset[int]] = frozenset({
 
 # Per-register absolute outlier limits that override the default.
 OUTLIER_ABS_LIMIT_OVERRIDES: Final[dict[int, float]] = {
-    120: 100_000_000.0,    # isolation_resistance – sentinel can be very large
+    120: 500_000_000.0,    # isolation_resistance – healthy systems read 50-100 MΩ (up to 500 MΩ)
     577: 100_000_000_000.0,  # generation_energy – lifetime Wh can reach GWh range
     104: 100_000_000.0,    # em_state – status register, not a measurement
 }
@@ -396,18 +396,6 @@ class KostalModbusClient:
 
     def _apply_quality_filter(self, register: ModbusRegister, value: Any) -> Any:
         """Apply per-register quality guards (sentinel/outlier filtering)."""
-        # Isolation resistance: 65535 kΩ (FLOAT32 ≈ 65535000 Ω) is a firmware
-        # sentinel meaning "measurement not available" (no DC voltage).
-        if register.address == 120:
-            try:
-                if float(value) >= 65_000_000.0:
-                    raise ModbusReadError(
-                        f"Register {register.name} returned sentinel value "
-                        f"{value} (isolation measurement not available)"
-                    )
-            except (TypeError, ValueError):
-                pass
-
         # Known inverter quirk: register 575 can return 32767 as invalid/sentinel.
         if register.address == 575:
             try:

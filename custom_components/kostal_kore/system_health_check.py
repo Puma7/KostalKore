@@ -36,7 +36,7 @@ PLAUSIBILITY_RANGES: Final[dict[str, tuple[float, float, str]]] = {
     "grid_frequency": (45.0, 65.0, "Hz"),
     "total_dc_power": (-1000.0, 60000.0, "W"),
     "total_ac_power": (-60000.0, 60000.0, "W"),
-    "isolation_resistance": (0.0, 65_000_000.0, "Ohm"),
+    "isolation_resistance": (0.0, 200_000_000.0, "Ohm"),
     "phase1_voltage": (100.0, 280.0, "V"),
     "phase2_voltage": (100.0, 280.0, "V"),
     "phase3_voltage": (100.0, 280.0, "V"),
@@ -369,14 +369,13 @@ class SystemHealthCheckButton(ButtonEntity):
                 detail="Alle Kreuz-Checks bestanden",
             )
 
-        # Isolation resistance: absent means sentinel was filtered by quality guard
+        # Isolation resistance
         iso = data.get("isolation_resistance")
         if iso is None:
             report.check(
                 "Isolationswiderstand",
                 True,
-                detail="nicht verfügbar — Firmware-Sentinel gefiltert "
-                "(normal bei Nacht/Standby, kein DC-Strom für Messung)",
+                detail="nicht verfügbar (Register nicht gelesen oder Inverter im Standby)",
                 level="info",
             )
         else:
@@ -388,11 +387,18 @@ class SystemHealthCheckButton(ButtonEntity):
                         False,
                         detail=f"{fiso:,.0f} Ω — KRITISCH NIEDRIG (< 100 kΩ)",
                     )
+                elif fiso < 500_000:
+                    report.check(
+                        "Isolationswiderstand",
+                        False,
+                        detail=f"{fiso:,.0f} Ω — NIEDRIG (< 500 kΩ), prüfen!",
+                        level="warn",
+                    )
                 else:
                     report.check(
                         "Isolationswiderstand",
                         True,
-                        detail=f"{fiso:,.0f} Ω",
+                        detail=f"{fiso / 1_000_000:,.1f} MΩ",
                     )
             except (TypeError, ValueError):
                 pass
@@ -604,19 +610,6 @@ class SystemHealthCheckButton(ButtonEntity):
                     )
             except (TypeError, ValueError):
                 pass
-
-        # Pattern: isolation_resistance absent (sentinel filtered by quality guard)
-        if "isolation_resistance" not in data:
-            dc_power = data.get("total_dc_power")
-            try:
-                has_dc = dc_power is not None and float(dc_power) > 50
-            except (TypeError, ValueError):
-                has_dc = False
-            if has_dc:
-                issues.append(
-                    "isolation_resistance fehlt trotz DC-Leistung >50 W "
-                    "→ Sentinel-Wert gefiltert, Firmware meldet 0xFFFF"
-                )
 
         # Pattern: battery_net_capacity = 0 while gross > 0
         net_cap = data.get("battery_net_capacity")
