@@ -55,16 +55,17 @@ OUTLIER_ABS_LIMIT_DEFAULT: Final[float] = 10_000_000.0
 # Registers that hold identifiers/metadata/firmware, not telemetry measurements.
 # These can have arbitrary large numeric values and must not be outlier-filtered.
 OUTLIER_EXEMPT_ADDRESSES: Final[frozenset[int]] = frozenset({
+    54,    # power_id
+    515,   # fw_maincontroller
     525,   # battery_model_id
     527,   # battery_serial_alt
     529,   # battery_operation_mode
     586,   # battery_fw_version
-    515,   # fw_maincontroller
 })
 
 # Per-register absolute outlier limits that override the default.
 OUTLIER_ABS_LIMIT_OVERRIDES: Final[dict[int, float]] = {
-    120: 100_000_000.0,    # isolation_resistance – 0xFFFF kΩ sentinel = 65535000 Ω
+    120: 100_000_000.0,    # isolation_resistance – sentinel can be very large
     577: 100_000_000_000.0,  # generation_energy – lifetime Wh can reach GWh range
     104: 100_000_000.0,    # em_state – status register, not a measurement
 }
@@ -390,6 +391,18 @@ class KostalModbusClient:
 
     def _apply_quality_filter(self, register: ModbusRegister, value: Any) -> Any:
         """Apply per-register quality guards (sentinel/outlier filtering)."""
+        # Isolation resistance: 65535 kΩ (FLOAT32 ≈ 65535000 Ω) is a firmware
+        # sentinel meaning "measurement not available" (no DC voltage).
+        if register.address == 120:
+            try:
+                if float(value) >= 65_000_000.0:
+                    raise ModbusReadError(
+                        f"Register {register.name} returned sentinel value "
+                        f"{value} (isolation measurement not available)"
+                    )
+            except (TypeError, ValueError):
+                pass
+
         # Known inverter quirk: register 575 can return 32767 as invalid/sentinel.
         if register.address == 575:
             try:
@@ -619,7 +632,12 @@ class KostalModbusClient:
     # ------------------------------------------------------------------
 
     def _decode(self, raw: bytes, register: ModbusRegister) -> Any:
-        """Decode raw bytes according to register data type and endianness."""
+        """Decode raw bytes according to register data type and endianness.
+
+        Kostal byte_order register (addr 5) controls word order for FLOAT32
+        only.  UINT32/SINT32 always use standard SunSpec big-endian word
+        order regardless of the byte_order setting.
+        """
         dt = register.data_type
 
         if dt == DataType.UINT16:
@@ -629,19 +647,10 @@ class KostalModbusClient:
             return struct.unpack(">h", raw[:2])[0]
 
         if dt == DataType.UINT32:
-            if self._endianness == "big":
-                return struct.unpack(">I", raw[:4])[0]
-            hi, lo = struct.unpack(">HH", raw[:4])
-            return (lo << 16) | hi
+            return struct.unpack(">I", raw[:4])[0]
 
         if dt == DataType.SINT32:
-            if self._endianness == "big":
-                return struct.unpack(">i", raw[:4])[0]
-            hi, lo = struct.unpack(">HH", raw[:4])
-            val = (lo << 16) | hi
-            if val >= 0x80000000:
-                val -= 0x100000000
-            return val
+            return struct.unpack(">i", raw[:4])[0]
 
         if dt == DataType.FLOAT32:
             if self._endianness == "big":
@@ -680,12 +689,7 @@ class KostalModbusClient:
             return struct.pack(">h", int(value))
 
         if dt == DataType.UINT32:
-            v = int(value)
-            if self._endianness == "big":
-                return struct.pack(">I", v)
-            lo_word = v & 0xFFFF
-            hi_word = (v >> 16) & 0xFFFF
-            return struct.pack(">HH", lo_word, hi_word)
+            return struct.pack(">I", int(value))
 
         if dt == DataType.FLOAT32:
             fv = float(value)
