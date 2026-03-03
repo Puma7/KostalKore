@@ -58,13 +58,21 @@ class TestDecoding:
         raw = struct.pack(">h", -100)
         assert c._decode(raw, REG_REACTIVE_POWER_SETPOINT) == -100
 
-    def test_decode_uint32_little_endian(self) -> None:
-        """UINT32 always uses big-endian word order (Kostal byte_order only affects FLOAT32)."""
+    def test_decode_uint32_little_endian_sunspec(self) -> None:
+        """SunSpec registers (<500) honor byte_order for UINT32 word order."""
         c = self._client("little")
         reg = ModbusRegister(56, "t", "t", DataType.UINT32, 2, Access.RO, RegisterGroup.DEVICE_INFO)
-        raw = struct.pack(">I", 6)
+        raw = struct.pack(">HH", 0x0006, 0x0000)
         val = c._decode(raw, reg)
         assert val == 6
+
+    def test_decode_uint32_little_endian_vendor(self) -> None:
+        """Vendor registers (>=500) always use big-endian word order."""
+        c = self._client("little")
+        reg = ModbusRegister(512, "t", "t", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
+        raw = struct.pack(">I", 50)
+        val = c._decode(raw, reg)
+        assert val == 50
 
     def test_decode_uint32_big_endian(self) -> None:
         c = self._client("big")

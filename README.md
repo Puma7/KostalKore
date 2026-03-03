@@ -350,9 +350,56 @@ data:
   option: Battery:SmartBatteryControl:Enable
 ```
 
-## Energy Dashboard Tips
-- Use **Total Increasings** (e.g., battery charge/discharge totals) for Energy Dashboard entities.
-- If a sensor stays `unavailable`, check if the inverter exposes the matching REST data ID.
+## Energy Dashboard Configuration
+
+Use **Total**-Sensoren (`state_class: total_increasing`) for das HA Energy Dashboard — diese zählen stetig hoch und erzeugen keine Sprünge bei Tageswechsel.
+
+### Stromnetz
+
+| Dashboard-Feld | Entity | Formel |
+|---|---|---|
+| **Netzbezug** (Grid Consumption) | `Total Grid Consumption Total` | EnergyHomeGrid + EnergyChargeGrid |
+| **Netzeinspeisung** (Grid Return) | `Energy to Grid Total` | Yield − EnergyHomeBat − EnergyHomePv |
+| **Netzleistung** (Grid Power) | `Grid Power` | Echtzeit-Leistungsmessung (W) |
+
+### PV-Module
+
+| Dashboard-Feld | Entity | Hinweis |
+|---|---|---|
+| **PV-Erzeugung** String 1 | `Energy PV1 Total` | Pro DC-String einzeln |
+| **PV-Erzeugung** String 2 | `Energy PV2 Total` | |
+| **PV-Erzeugung** String 3 | `Energy PV3 Total` | Nur wenn 3. String vorhanden |
+
+> **Tipp:** Alternativ `Energy Yield Total` für die Gesamt-PV-Erzeugung (alle Strings kombiniert).
+
+### Batteriesystem
+
+| Dashboard-Feld | Entity | Formel |
+|---|---|---|
+| **In Batterie geladen** (Charge) | `Battery Charge Total Total` | EnergyChargePv + EnergyChargeGrid |
+| **Aus Batterie entladen** (Discharge) | `Battery Discharge Total Total` | EnergyHomeBat + EnergyDischargeGrid |
+| **Batterieleistung** (Power) | `Battery Power` | Echtzeit charge/discharge (W) |
+
+### Einrichtung Schritt für Schritt
+
+1. **Einstellungen → Dashboards → Energie**
+2. **Stromnetz:**
+   - Netzbezug → `Total Grid Consumption Total`
+   - Netzeinspeisung → `Energy to Grid Total`
+   - Netzleistung → `Grid Power`
+3. **PV-Module:**
+   - PV-Erzeugung hinzufügen → `Energy PV1 Total`, `Energy PV2 Total` (pro String)
+4. **Batteriesystem:**
+   - In Batterie geladen → `Battery Charge Total Total`
+   - Aus Batterie entladen → `Battery Discharge Total Total`
+   - Batterieleistung → `Battery Power`
+
+### Wichtige Hinweise
+
+- Immer **Total**-Sensoren verwenden (nicht Day/Month/Year), da `total_increasing` keine Resets erzeugt.
+- `Energy to Grid Total` enthält **PV- und Batterie-Einspeisung** kombiniert.
+- `Total Grid Consumption Total` enthält **Netzbezug für Haus und Batterie** kombiniert.
+- Nach Einrichtung kann es bis zu 2 Stunden dauern, bis Daten im Dashboard erscheinen.
 
 ## Debugging
 
