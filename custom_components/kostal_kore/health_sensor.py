@@ -92,7 +92,8 @@ class IsolationResistanceSensor(SensorEntity):
 
     _attr_icon = "mdi:resistor"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "kΩ"
+    _attr_native_unit_of_measurement = "Ω"
+    _attr_suggested_display_precision = 0
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_name = "Isolation Resistance (Health)"

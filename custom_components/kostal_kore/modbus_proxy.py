@@ -298,8 +298,8 @@ class ModbusTcpProxyServer:
         2. On cache miss (e.g. SunSpec registers at 40000+), forward the raw
            read to the real inverter through the existing Modbus connection.
         """
-        if len(pdu) < 5:
-            return self._error_response(pdu[0], 0x03)
+        if not pdu or len(pdu) < 5:
+            return self._error_response(pdu[0] if pdu else 0x01, 0x03)
 
         fc = pdu[0]
         start_addr = struct.unpack(">H", pdu[1:3])[0]

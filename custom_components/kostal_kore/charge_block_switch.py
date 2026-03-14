@@ -86,7 +86,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                      "notification_id": "kostal_charge_block"},
                 )
             except Exception:
-                pass
+                _LOGGER.debug("Failed to send charge block notification")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Restore normal charging using inverter-specific power limit."""
@@ -116,7 +116,10 @@ class BatteryChargeBlockSwitch(SwitchEntity):
 
     def _start_keepalive(self) -> None:
         self._cancel_keepalive()
-        self._keepalive_task = asyncio.ensure_future(self._run_keepalive())
+        self._keepalive_task = self.hass.async_create_task(
+            self._run_keepalive(),
+            "kostal_kore_charge_block_keepalive",
+        )
 
     def _cancel_keepalive(self) -> None:
         if self._keepalive_task and not self._keepalive_task.done():

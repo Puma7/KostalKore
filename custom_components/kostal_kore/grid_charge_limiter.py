@@ -103,7 +103,10 @@ class GridFeedInLimiterSwitch(SwitchEntity):
 
     def _start_control(self) -> None:
         self._cancel_control()
-        self._task = asyncio.ensure_future(self._control_loop())
+        self._task = self.hass.async_create_task(
+            self._control_loop(),
+            "kostal_kore_grid_feedin_control",
+        )
 
     def _cancel_control(self) -> None:
         if self._task and not self._task.done():

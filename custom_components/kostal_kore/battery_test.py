@@ -306,7 +306,7 @@ class BatteryTestSuite:
             s = self._summary(results)
             self._emit(s)
             self._emit("═" * 60)
-            self._flush_debug()
+            await self._flush_debug()
             await self._notify("Test beendet", s)
 
         return results
@@ -524,10 +524,17 @@ class BatteryTestSuite:
         self._log.append(msg)
         _LOGGER.info("[BatteryTest] %s", msg)
 
-    def _flush_debug(self) -> None:
+    def _flush_debug_sync(self) -> None:
+        """Write debug log synchronously (run in executor to avoid blocking)."""
+        with open(self._debug_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(self._dbg))
+
+    async def _flush_debug(self) -> None:
         try:
-            with open(self._debug_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(self._dbg))
+            if self._hass:
+                await self._hass.async_add_executor_job(self._flush_debug_sync)
+            else:
+                self._flush_debug_sync()
             self._emit(f"  📄 Debug: {self._debug_path} ({len(self._dbg)} Zeilen)")
         except Exception as e:
             self._emit(f"  ⚠️  Debug-Log: {e}")
@@ -564,4 +571,4 @@ class BatteryTestSuite:
                  "notification_id": "kostal_battery_test"},
             )
         except Exception:
-            pass
+            _LOGGER.debug("Failed to send battery test notification")
