@@ -968,8 +968,8 @@ async def async_setup_entry(
             )
             entities.append(limiter_switch)
             entry_data["grid_feedin_limiter"] = limiter_switch
-    except Exception:
-        pass
+    except Exception as err:
+        _LOGGER.error("Failed to create Modbus control entities: %s", err, exc_info=True)
 
     # New entities are created with entity_registry_enabled_default=False.
     # Users who deliberately enable entities keep their choice across restarts.

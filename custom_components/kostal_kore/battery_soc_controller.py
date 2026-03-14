@@ -132,7 +132,13 @@ class BatterySocController:
         )
 
         if self._task is None or self._task.done():
-            self._task = asyncio.ensure_future(self._run_loop())
+            if self._hass is not None:
+                self._task = self._hass.async_create_task(
+                    self._run_loop(),
+                    "kostal_kore_soc_controller",
+                )
+            else:
+                self._task = asyncio.ensure_future(self._run_loop())
 
     async def _stop(self) -> None:
         """Stop the controller and reset to automatic."""
@@ -312,8 +318,8 @@ class BatterySocController:
         if reg1038:
             try:
                 await self._coord.async_write_register(reg1038, 0.0)
-            except Exception:
-                pass
+            except Exception as err:
+                _LOGGER.debug("SoC Controller: secondary reg1038 write failed: %s", err)
         return True
 
     async def _write_normal(self) -> None:
@@ -328,8 +334,8 @@ class BatterySocController:
             if reg:
                 try:
                     await self._coord.async_write_register(reg, val)
-                except Exception:
-                    pass
+                except Exception as err:
+                    _LOGGER.warning("SoC Controller: failed to reset %s: %s", name, err)
 
     async def _read_soc(self) -> float | None:
         reg = REGISTER_BY_NAME.get("battery_soc")
@@ -368,4 +374,4 @@ class BatterySocController:
                  "notification_id": "kostal_soc_controller"},
             )
         except Exception:
-            pass
+            _LOGGER.debug("Failed to send SoC controller notification")

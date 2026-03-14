@@ -169,8 +169,8 @@ class InverterHealthMonitor:
         self._num_bidirectional: int = num_bidirectional
         # --- Electrical Safety ---
         self.isolation = ParameterTracker(
-            name="Isolation Resistance", unit="kΩ",
-            info_low=1000.0, warning_low=500.0, critical_low=100.0,
+            name="Isolation Resistance", unit="Ω",
+            info_low=1_000_000.0, warning_low=500_000.0, critical_low=100_000.0,
         )
 
         # --- Thermal ---
@@ -335,7 +335,7 @@ class InverterHealthMonitor:
                         )
                         if normalized_ohm is None:
                             continue
-                        fval = normalized_ohm / 1000.0
+                        fval = normalized_ohm
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass

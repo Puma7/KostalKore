@@ -341,13 +341,19 @@ class ModbusNumberEntity(
         self._keepalive_value = value
         if self._keepalive_task and not self._keepalive_task.done():
             return
-        self._keepalive_task = asyncio.ensure_future(self._run_keepalive())
+        self._keepalive_task = self.hass.async_create_task(
+            self._run_keepalive(),
+            f"kostal_kore_keepalive_{self._register.name}",
+        )
 
     async def _run_keepalive(self) -> None:
         """Re-write G3 limit values cyclically to prevent fallback."""
         try:
             while self._keepalive_value is not None:
-                interval = self._get_keepalive_interval()
+                try:
+                    interval = self._get_keepalive_interval()
+                except Exception:
+                    interval = G3_DEFAULT_FALLBACK_SECONDS // int(G3_KEEPALIVE_DIVISOR)
                 await asyncio.sleep(interval)
                 if self._keepalive_value is None:
                     break

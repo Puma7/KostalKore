@@ -63,7 +63,7 @@ async def dismiss(hass: HomeAssistant, notification_id: str) -> None:
             {"notification_id": full_id},
         )
     except Exception:
-        pass
+        _LOGGER.debug("Failed to dismiss notification %s", full_id)
 
 
 async def notify_modbus_probe_success(hass: HomeAssistant) -> None:

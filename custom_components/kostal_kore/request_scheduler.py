@@ -66,8 +66,9 @@ class RequestScheduler:
             async with scheduler.request("modbus_fast"):
                 await do_something()
         """
+        t0 = time.monotonic()
         try:
-            acquired = await asyncio.wait_for(
+            await asyncio.wait_for(
                 self._lock.acquire(), timeout=REQUEST_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -78,10 +79,9 @@ class RequestScheduler:
             )
             raise
 
-        if not acquired:
-            return
-
-        self._wait_count += 1 if self._lock.locked() else 0
+        waited = time.monotonic() - t0
+        if waited > 0.01:
+            self._wait_count += 1
 
         try:
             now = time.monotonic()
