@@ -110,7 +110,7 @@ class TestInverterHealthMonitor:
             "grid_frequency": 50.01,
             "battery_cycles": 150.0,
         })
-        assert m.isolation.current == 1000.0
+        assert m.isolation.current == 1000000.0
         assert m.controller_temp.current == 45.0
         assert m.battery_temp.current == 25.0
         assert m.grid_frequency.current == 50.01
@@ -226,7 +226,7 @@ class TestInverterHealthMonitor:
         assert "health_score" in summary
         assert "trackers" in summary
         assert "isolation_resistance" in summary["trackers"]
-        assert summary["trackers"]["isolation_resistance"]["current"] == 1500.0
+        assert summary["trackers"]["isolation_resistance"]["current"] == 1500000.0
         assert "dc_string_imbalance" in summary
         assert "phase_voltage_imbalance" in summary
 
@@ -280,7 +280,7 @@ class TestInverterHealthMonitor:
         m.update_from_modbus({"controller_temp": 64.0})
         assert m.controller_temp.level == HealthLevel.INFO
 
-    def test_isolation_converted_to_kohm(self) -> None:
+    def test_isolation_stored_in_ohm(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"isolation_resistance": 2000000.0})
-        assert m.isolation.current == 2000.0
+        assert m.isolation.current == 2000000.0
