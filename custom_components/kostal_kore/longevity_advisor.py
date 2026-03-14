@@ -178,10 +178,10 @@ class LongevityAdvisor:
 
         iso = h.isolation.current
         iso_trend = h.isolation.trend
-        if iso is not None and iso_trend == "falling" and iso < 1500:
+        if iso is not None and iso_trend == "falling" and iso < 1_500_000:
             tips.append(LongevityTip(
                 "pv", "hoch",
-                f"Isolationswiderstand sinkt ({iso:.0f} kΩ, Trend: fallend)",
+                f"Isolationswiderstand sinkt ({iso / 1000:.0f} kΩ, Trend: fallend)",
                 "Sinkender Isolationswiderstand deutet auf Kabelalerung oder Feuchtigkeitseintritt hin.",
                 "DC-Verkabelung bei nächster Wartung prüfen lassen. "
                 "Anschlusskasten auf Feuchtigkeit kontrollieren. "

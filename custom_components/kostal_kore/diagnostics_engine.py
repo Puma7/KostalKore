@@ -407,7 +407,7 @@ class DiagnosticsEngine:
                 return AreaDiagnosis(
                     "safety", DiagStatus.KRITISCH,
                     "Isolationsfehler erkannt",
-                    f"Isolationswiderstand: {iso / 1000:.0f} kΩ (sicher: >500kΩ). "
+                    f"Isolationswiderstand: {iso / 1000 if iso is not None else 0:.0f} kΩ (sicher: >500kΩ). "
                     "Mögliche Ursachen: beschädigtes Kabel, Wasser im Anschlusskasten, Tierbiss.",
                     "DC-Kabel und Stecker auf Beschädigungen prüfen. Anschlusskasten öffnen und "
                     "auf Feuchtigkeit, Korrosion oder Bissspuren kontrollieren. "
