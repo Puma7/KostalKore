@@ -343,6 +343,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 degradation_tracker.update_from_modbus(data)
                 new_alerts = fire_safety.analyze(data)
                 if new_alerts:
+                    _feed_health_data._clear_sent = False
                     from .notifications import notify_safety_alert, notify_safety_clear
                     for alert in new_alerts:
                         hass.async_create_task(
@@ -354,8 +355,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                             )
                         )
                 elif fire_safety.alert_count == 0 and fire_safety._total_polls > 0:
-                    from .notifications import notify_safety_clear
-                    hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
+                    if not getattr(_feed_health_data, "_clear_sent", False):
+                        _feed_health_data._clear_sent = True
+                        from .notifications import notify_safety_clear
+                        hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
         modbus_coordinator.async_add_listener(_feed_health_data)
         fire_safety._total_polls = 0
