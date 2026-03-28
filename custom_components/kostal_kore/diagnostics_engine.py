@@ -31,6 +31,7 @@ class DiagStatus:
     """Diagnostic status levels."""
 
     OK = "ok"
+    UNBEKANNT = "unbekannt"
     HINWEIS = "hinweis"
     WARNUNG = "warnung"
     KRITISCH = "kritisch"
@@ -126,6 +127,15 @@ class DiagnosticsEngine:
                 raw,
             )
 
+        if not raw:
+            return AreaDiagnosis(
+                "dc_solar", DiagStatus.UNBEKANNT,
+                "Keine DC-Daten verfügbar",
+                "Es liegen noch keine Messwerte der DC-Strings vor (Kaltstart oder Modbus nicht verbunden).",
+                "Abwarten bis erste Messwerte eintreffen. Bei anhaltender Meldung Modbus-Verbindung prüfen.",
+                raw,
+            )
+
         return AreaDiagnosis(
             "dc_solar", DiagStatus.OK,
             "DC-Solaranlage arbeitet normal",
@@ -218,6 +228,15 @@ class DiagnosticsEngine:
                 raw,
             )
 
+        if not raw:
+            return AreaDiagnosis(
+                "ac_grid", DiagStatus.UNBEKANNT,
+                "Keine Netzdaten verfügbar",
+                "Es liegen noch keine Messwerte für Spannung, Frequenz oder Leistungsfaktor vor.",
+                "Abwarten bis erste Messwerte eintreffen. Bei anhaltender Meldung Modbus-Verbindung prüfen.",
+                raw,
+            )
+
         return AreaDiagnosis(
             "ac_grid", DiagStatus.OK,
             "Netzanbindung normal",
@@ -295,6 +314,15 @@ class DiagnosticsEngine:
                 raw,
             )
 
+        if temp is None and soh is None and cycles is None and voltage is None:
+            return AreaDiagnosis(
+                "battery", DiagStatus.UNBEKANNT,
+                "Keine Batteriedaten verfügbar",
+                "Es liegen noch keine Messwerte für Temperatur, SoH oder Spannung vor.",
+                "Abwarten bis erste Messwerte eintreffen. Prüfen ob eine Batterie angeschlossen ist.",
+                raw,
+            )
+
         return AreaDiagnosis(
             "battery", DiagStatus.OK,
             "Batterie arbeitet normal",
@@ -365,6 +393,15 @@ class DiagnosticsEngine:
                 raw,
             )
 
+        if ctrl_temp is None and errors is None and warnings is None:
+            return AreaDiagnosis(
+                "inverter", DiagStatus.UNBEKANNT,
+                "Keine Wechselrichter-Daten verfügbar",
+                "Es liegen noch keine Messwerte für Temperatur oder Fehlerstatus vor.",
+                "Abwarten bis erste Messwerte eintreffen. Bei anhaltender Meldung Verbindung prüfen.",
+                raw,
+            )
+
         return AreaDiagnosis(
             "inverter", DiagStatus.OK,
             "Wechselrichter arbeitet normal",
@@ -392,28 +429,50 @@ class DiagnosticsEngine:
 
         iso_alerts = [a for a in s.active_alerts if a.category == "isolation"]
 
+        # Sort alerts by severity: EMERGENCY > HIGH > ELEVATED > MONITOR > SAFE
+        _RISK_ORDER = {
+            FireRiskLevel.EMERGENCY: 0,
+            FireRiskLevel.HIGH: 1,
+            FireRiskLevel.ELEVATED: 2,
+            FireRiskLevel.MONITOR: 3,
+            FireRiskLevel.SAFE: 4,
+        }
+        sorted_alerts = sorted(
+            s.active_alerts,
+            key=lambda a: _RISK_ORDER.get(a.risk_level, 99),
+        )
+        worst_alert = sorted_alerts[0] if sorted_alerts else None
+
         if s.current_risk_level == FireRiskLevel.EMERGENCY:
             return AreaDiagnosis(
                 "safety", DiagStatus.KRITISCH,
                 "SICHERHEITSWARNUNG: Sofortiges Handeln erforderlich",
-                f"Risikostufe: NOTFALL. {s.active_alerts[0].detail if s.active_alerts else ''}",
-                s.active_alerts[0].action if s.active_alerts else "Anlage prüfen und ggf. abschalten.",
+                f"Risikostufe: NOTFALL. {worst_alert.detail if worst_alert else ''}",
+                worst_alert.action if worst_alert else "Anlage prüfen und ggf. abschalten.",
                 raw,
             )
 
-        if iso_alerts:
-            worst = iso_alerts[0]
-            if worst.risk_level == FireRiskLevel.HIGH:
-                return AreaDiagnosis(
-                    "safety", DiagStatus.KRITISCH,
-                    "Isolationsfehler erkannt",
+        if s.current_risk_level == FireRiskLevel.HIGH:
+            # Any HIGH alert (isolation, battery thermal, controller, grid)
+            detail = worst_alert.detail if worst_alert else ""
+            action = worst_alert.action if worst_alert else "Anlage prüfen und Fachbetrieb kontaktieren."
+            if iso_alerts and any(a.risk_level == FireRiskLevel.HIGH for a in iso_alerts):
+                detail = (
                     f"Isolationswiderstand: {iso / 1000 if iso is not None else 0:.0f} kΩ (sicher: >500kΩ). "
-                    "Mögliche Ursachen: beschädigtes Kabel, Wasser im Anschlusskasten, Tierbiss.",
+                    "Mögliche Ursachen: beschädigtes Kabel, Wasser im Anschlusskasten, Tierbiss."
+                )
+                action = (
                     "DC-Kabel und Stecker auf Beschädigungen prüfen. Anschlusskasten öffnen und "
                     "auf Feuchtigkeit, Korrosion oder Bissspuren kontrollieren. "
-                    "Solarteur oder Elektriker hinzuziehen.",
-                    raw,
+                    "Solarteur oder Elektriker hinzuziehen."
                 )
+            return AreaDiagnosis(
+                "safety", DiagStatus.KRITISCH,
+                "Sicherheitswarnung: Erhöhtes Risiko erkannt",
+                detail,
+                action,
+                raw,
+            )
 
         if iso is not None and iso < 800_000:
             return AreaDiagnosis(
@@ -421,6 +480,15 @@ class DiagnosticsEngine:
                 "Isolationswiderstand leicht unter Optimalwert",
                 f"Isolationswiderstand: {iso / 1000:.0f} kΩ. Sicher, aber nicht optimal (>1000kΩ ideal).",
                 "Bei nächster Wartung DC-Kabel und Stecker prüfen lassen.",
+                raw,
+            )
+
+        if iso is None and s.alert_count == 0 and not s._alerts:
+            return AreaDiagnosis(
+                "safety", DiagStatus.UNBEKANNT,
+                "Keine Sicherheitsdaten verfügbar",
+                "Es liegen noch keine Messwerte für Isolationswiderstand oder Brandschutz vor.",
+                "Abwarten bis erste Messwerte eintreffen. Bei anhaltender Meldung Modbus-Verbindung prüfen.",
                 raw,
             )
 

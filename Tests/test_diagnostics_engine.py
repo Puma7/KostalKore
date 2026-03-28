@@ -36,10 +36,10 @@ class TestDCDiagnostics:
         d = e.diagnose_dc_solar()
         assert d.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH, DiagStatus.HINWEIS)
 
-    def test_dc_ok_when_no_data(self) -> None:
+    def test_dc_unknown_when_no_data(self) -> None:
         e = _make_engine()
         d = e.diagnose_dc_solar()
-        assert d.status == DiagStatus.OK
+        assert d.status == DiagStatus.UNBEKANNT
 
 
 class TestACDiagnostics:
@@ -194,6 +194,6 @@ class TestDiagnoseAll:
         assert set(result.keys()) == {"dc_solar", "ac_grid", "battery", "inverter", "safety"}
         for area, diag in result.items():
             assert diag.area == area
-            assert diag.status in (DiagStatus.OK, DiagStatus.HINWEIS, DiagStatus.WARNUNG, DiagStatus.KRITISCH)
+            assert diag.status in (DiagStatus.OK, DiagStatus.UNBEKANNT, DiagStatus.HINWEIS, DiagStatus.WARNUNG, DiagStatus.KRITISCH)
             assert diag.title
             assert diag.action

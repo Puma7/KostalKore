@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import logging
 import time
@@ -27,6 +28,8 @@ LEGACY_CLEANUP_CHALLENGE_TTL_SECONDS: Final[int] = 300
 LEGACY_CLEANUP_FINAL_CONFIRM_TTL_SECONDS: Final[int] = 60
 LEGACY_CLEANUP_CODE_LEN: Final[int] = 6
 LEGACY_CLEANUP_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+LEGACY_IMPORT_CONFIRM_TTL_SECONDS: Final[int] = 60
+DATA_KEY_LEGACY_IMPORT_GUARD: Final[str] = "legacy_import_guard"
 
 
 class LegacyMigrationButton(ButtonEntity):
@@ -47,7 +50,44 @@ class LegacyMigrationButton(ButtonEntity):
         }
 
     async def async_press(self) -> None:
-        """Migrate legacy entry, then show result via persistent notification."""
+        """Migrate legacy entry with confirmation guard.
+
+        First press: arm confirmation window.
+        Second press within TTL: execute migration.
+        """
+        store = integration_entry_store(self.hass, self._entry_id)
+        guard = store.get(DATA_KEY_LEGACY_IMPORT_GUARD, {})
+        armed_at = float(guard.get("armed_at", 0.0))
+        now = time.monotonic()
+
+        if now - armed_at > LEGACY_IMPORT_CONFIRM_TTL_SECONDS:
+            # First press or expired → arm confirmation
+            store[DATA_KEY_LEGACY_IMPORT_GUARD] = {"armed_at": now}
+            self._attr_extra_state_attributes = {
+                "last_status": "awaiting_confirm",
+                "last_run": datetime.now().isoformat(),
+                "confirmation_expires_in_s": LEGACY_IMPORT_CONFIRM_TTL_SECONDS,
+            }
+            self.async_write_ha_state()
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "KOSTAL KORE migration confirmation required",
+                    "message": (
+                        "Legacy import will overwrite the current entry's data/options "
+                        "and rebind entities from the legacy entry.\n\n"
+                        f"Press **Import Legacy Plenticore Data** again within "
+                        f"{LEGACY_IMPORT_CONFIRM_TTL_SECONDS} seconds to confirm."
+                    ),
+                    "notification_id": f"kostal_kore_migration_{self._entry_id}",
+                },
+                blocking=True,
+            )
+            return
+
+        # Second press within TTL → execute
+        store.pop(DATA_KEY_LEGACY_IMPORT_GUARD, None)
         try:
             result = await migrate_legacy_plenticore_entry(
                 self.hass,
@@ -125,6 +165,7 @@ class LegacyCleanupButton(ButtonEntity):
         self._attr_extra_state_attributes: dict[str, Any] = {
             "last_status": "idle",
         }
+        self._press_lock = asyncio.Lock()
 
     async def _show_confirmation_step1(self, code: str) -> None:
         """Show first critical confirmation popup with copy/paste challenge."""
@@ -208,7 +249,15 @@ class LegacyCleanupButton(ButtonEntity):
         store[DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] = ""
 
     async def async_press(self) -> None:
-        """Delete remaining legacy artifacts."""
+        """Delete remaining legacy artifacts (reentrancy-safe)."""
+        if self._press_lock.locked():
+            _LOGGER.debug("Cleanup button press ignored (already in progress)")
+            return
+        async with self._press_lock:
+            await self._handle_press()
+
+    async def _handle_press(self) -> None:
+        """Inner cleanup state machine."""
         store = integration_entry_store(self.hass, self._entry_id)
         guard = dict(
             store.get(
