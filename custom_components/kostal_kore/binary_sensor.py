@@ -7,7 +7,7 @@ from typing import Final
 
 from homeassistant.core import HomeAssistant
 
-from homeassistant.helpers.entity import Entity
+from homeassistant.components.binary_sensor import BinarySensorEntity
 
 from .const import AddConfigEntryEntitiesCallback, CONF_MODBUS_ENABLED, DOMAIN
 from .coordinator import PlenticoreConfigEntry
@@ -26,7 +26,7 @@ async def async_setup_entry(
 
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     plenticore = entry.runtime_data
-    entities: list[Entity] = []
+    entities: list[BinarySensorEntity] = []
 
     health_monitor = entry_data.get("health_monitor")
     if health_monitor is not None:

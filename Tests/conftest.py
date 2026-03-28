@@ -109,10 +109,13 @@ try:
         "system_health_check",
         "text",
     ):
-        module = importlib.import_module(f"custom_components.kostal_kore.{_sub}")
-        sys.modules[f"{_ha_prefix}.{_sub}"] = module
-        sys.modules[f"homeassistant.components.kostal_plenticore.{_sub}"] = module
-        sys.modules[f"kostal_plenticore.{_sub}"] = module
+        try:
+            module = importlib.import_module(f"custom_components.kostal_kore.{_sub}")
+            sys.modules[f"{_ha_prefix}.{_sub}"] = module
+            sys.modules[f"homeassistant.components.kostal_plenticore.{_sub}"] = module
+            sys.modules[f"kostal_plenticore.{_sub}"] = module
+        except ImportError as sub_err:
+            print(f"Warning: Could not import submodule '{_sub}': {sub_err}")
 
 except ImportError as e:
     print(f"Warning: Could not import Platinum version: {e}")
