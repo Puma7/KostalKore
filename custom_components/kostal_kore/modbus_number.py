@@ -366,7 +366,7 @@ class ModbusNumberEntity(
                         "G3 keepalive: re-wrote %s = %s",
                         self._register.name, self._keepalive_value,
                     )
-                except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
+                except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                     _LOGGER.warning(
                         "G3 keepalive write failed for %s: %s",
                         self._register.name, err,

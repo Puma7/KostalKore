@@ -104,7 +104,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, 0.0)
-            except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("Failed to block charging: %s", err)
 
     async def _write_normal(self) -> None:
@@ -112,7 +112,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, self._normal_limit_w)
-            except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("Failed to restore charging: %s", err)
 
     def _start_keepalive(self) -> None:
