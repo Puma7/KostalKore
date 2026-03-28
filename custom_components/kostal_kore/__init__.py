@@ -394,12 +394,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 _LOGGER.warning("Modbus platform setup incomplete: %s", modbus_err)
     except Exception as err:
         _handle_init_error(err, "platform setup")
+        # Rollback runtime objects that were started before platform forwarding
+        await _rollback_setup(hass, entry, plenticore)
         _log_setup_metrics(start_time, False)
         return False
 
     async_register_migration_services(hass)
     _log_setup_metrics(start_time, True)
     return True
+
+
+async def _rollback_setup(
+    hass: HomeAssistant,
+    entry: PlenticoreConfigEntry,
+    plenticore: Plenticore,
+) -> None:
+    """Clean up runtime objects after a failed platform-forwarding attempt."""
+    entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    cleanup: list[tuple[str, Awaitable[object]]] = []
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:
+        cleanup.append(("SoC controller stop", soc_ctrl.stop()))
+    proxy = entry_data.get("modbus_proxy")
+    if proxy:
+        cleanup.append(("Modbus proxy stop", proxy.stop()))
+    mqtt = entry_data.get("mqtt_bridge")
+    if mqtt:
+        cleanup.append(("MQTT bridge stop", mqtt.async_stop()))
+    if cleanup:
+        await asyncio.gather(
+            *(_await_cleanup_step(label, step) for label, step in cleanup)
+        )
+    await plenticore.async_unload()
+    _LOGGER.warning("Rolled back partial setup for %s", entry.title)
 
 
 async def _async_options_updated(

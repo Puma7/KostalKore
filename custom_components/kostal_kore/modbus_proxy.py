@@ -287,6 +287,13 @@ class ModbusTcpProxyServer:
 
         fc = pdu[0]
 
+        if unit_id != self._unit_id:
+            _LOGGER.debug(
+                "Proxy: rejecting request for unit %d (expected %d)",
+                unit_id, self._unit_id,
+            )
+            return self._error_response(fc, 0x0B)  # Gateway Target Device Failed to Respond
+
         if fc in (FC_READ_HOLDING, FC_READ_INPUT):
             return await self._handle_read(pdu)
         elif fc == FC_WRITE_SINGLE:
@@ -327,7 +334,8 @@ class ModbusTcpProxyServer:
             byte_count = len(raw)
             return struct.pack(">BB", fc, byte_count) + raw
 
-        return self._error_response(fc, 0x02)
+        # 0x04 = Server Device Failure (transient), not 0x02 (illegal address)
+        return self._error_response(fc, 0x04)
 
     async def _forward_read(
         self, start_addr: int, quantity: int
@@ -423,7 +431,7 @@ class ModbusTcpProxyServer:
         raw_result = await self._forward_write_single(address, value)
         if raw_result:
             return pdu[:5]
-        return self._error_response(FC_WRITE_SINGLE, 0x02)
+        return self._error_response(FC_WRITE_SINGLE, 0x04)
 
     async def _forward_write_single(self, address: int, value: int) -> bool:
         """Forward a single-register write to the real inverter."""
@@ -447,6 +455,9 @@ class ModbusTcpProxyServer:
         start_addr = struct.unpack(">H", pdu[1:3])[0]
         quantity = struct.unpack(">H", pdu[3:5])[0]
         byte_count = pdu[5]
+
+        if quantity < 1 or quantity > 123 or byte_count != quantity * 2:
+            return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
         if len(pdu) < 6 + byte_count:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
@@ -498,7 +509,7 @@ class ModbusTcpProxyServer:
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)
         if raw_result:
             return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
-        return self._error_response(FC_WRITE_MULTIPLE, 0x02)
+        return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
     async def _forward_write_multiple(
         self, start_addr: int, quantity: int, data: bytes
