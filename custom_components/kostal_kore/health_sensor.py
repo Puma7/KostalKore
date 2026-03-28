@@ -46,7 +46,14 @@ class HealthScoreSensor(SensorEntity):
         self._attr_device_info = device_info
 
     @property
-    def native_value(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """Only available once health data has been collected."""
+        return self._monitor.overall_health != HealthLevel.UNKNOWN
+
+    @property
+    def native_value(self) -> int | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self._monitor.overall_health == HealthLevel.UNKNOWN:
+            return None
         return self._monitor.health_score
 
     @property
@@ -84,6 +91,10 @@ class HealthLevelSensor(SensorEntity):
             return "mdi:shield-alert"
         if level == HealthLevel.WARNING:
             return "mdi:shield-half-full"
+        if level == HealthLevel.INFO:
+            return "mdi:shield-outline"
+        if level == HealthLevel.UNKNOWN:
+            return "mdi:shield-off-outline"
         return "mdi:shield-check"
 
 
@@ -228,7 +239,13 @@ class CommunicationReliabilitySensor(SensorEntity):
         self._attr_device_info = device_info
 
     @property
-    def native_value(self) -> float:  # pyright: ignore[reportIncompatibleVariableOverride]
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor._total_polls > 0
+
+    @property
+    def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self._monitor._total_polls == 0:
+            return None
         return round(self._monitor.communication_reliability, 1)
 
 
