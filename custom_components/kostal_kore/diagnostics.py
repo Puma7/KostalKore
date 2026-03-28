@@ -166,6 +166,11 @@ async def async_get_config_entry_diagnostics(
             .get(STRING_COUNT_SETTING, 0)
         )
         string_count = max(0, min(raw_count, MAX_SANE_STRING_COUNT))
+        if raw_count != string_count:
+            _LOGGER.warning(
+                "StringCnt value %d out of sane range, clamped to %d",
+                raw_count, string_count,
+            )
     except (ValueError, AttributeError):
         string_count = 0
 
