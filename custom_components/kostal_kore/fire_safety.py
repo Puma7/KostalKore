@@ -159,6 +159,9 @@ class FireSafetyMonitor:
         total_dc = _float(data.get("total_dc_power"))
         pv_active = total_dc is not None and total_dc > 50
 
+        # Always run stale-alert cleanup, even during standby/off
+        self.clear_stale_alerts(pv_active)
+
         # Skip ALL checks when inverter is off/standby
         inverter_state = data.get("inverter_state")
         if inverter_state is not None:
@@ -171,9 +174,6 @@ class FireSafetyMonitor:
 
         new_alerts: list[SafetyAlert] = []
 
-        # Clear stale isolation/DC alerts when PV is off (night)
-        self.clear_stale_alerts(pv_active)
-
         # Isolation + DC checks ONLY when PV is active (need DC voltage for measurement)
         if pv_active:
             new_alerts.extend(self._check_isolation(data, now))
@@ -182,14 +182,25 @@ class FireSafetyMonitor:
         new_alerts.extend(self._check_controller_thermal(data, now))
         new_alerts.extend(self._check_grid_emergency(data, now))
 
+        # Deduplicate: only append if no active alert with same category+risk exists
+        active_keys = {
+            (a.category, a.risk_level)
+            for a in self.active_alerts
+        }
+        deduplicated: list[SafetyAlert] = []
         for alert in new_alerts:
+            key = (alert.category, alert.risk_level)
+            if key in active_keys:
+                continue
+            active_keys.add(key)
             self._alerts.append(alert)
+            deduplicated.append(alert)
             _LOGGER.warning(
                 "FIRE SAFETY [%s] %s: %s (values: %s)",
                 alert.risk_level.upper(), alert.category, alert.title, alert.register_values,
             )
 
-        return new_alerts
+        return deduplicated
 
     def _record_history(self, data: dict[str, Any], now: float) -> None:
         total_dc = _float(data.get("total_dc_power"))

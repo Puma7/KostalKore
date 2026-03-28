@@ -38,7 +38,7 @@
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "no_discovered_inverter": "No inverter found automatically. Enter the host/IP manually.",
-      "timeout": "[%key:common::config_flow::error::cannot_connect%]",
+      "timeout": "Connection timed out. The inverter may be overloaded or unreachable — try again later.",
       "unknown": "[%key:common::config_flow::error::unknown%]",
       "invalid_inverter_model": "Inverter model not supported or incompatible",
       "inverter_error": "Inverter internal error, check device status",
@@ -46,8 +46,9 @@
     },
     "step": {
       "reauth_confirm": {
+        "description": "Re-enter your credentials. The host from the existing configuration will be used.",
         "data": {
-          "host": "Host/IP (optional for auto-discovery)",
+          "host": "Host/IP (read-only, uses existing entry)",
           "password": "[%key:common::config_flow::data::password%]",
           "service_code": "[%key:component::kostal_kore::config::step::user::data::service_code%]"
         }
