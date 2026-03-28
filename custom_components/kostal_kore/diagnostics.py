@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_SERVICE_CODE, DOMAIN
+from .const import CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
@@ -159,7 +159,6 @@ async def async_get_config_entry_diagnostics(
         lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, STRING_COUNT_SETTING)
     )
     
-    MAX_SANE_STRING_COUNT = 10
     string_count = 0
     try:
         raw_count = int(

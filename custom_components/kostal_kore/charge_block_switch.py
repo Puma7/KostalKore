@@ -176,4 +176,12 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if self._is_on:
             self._is_on = False
             await self._write_normal(self._restore_limit())
+            if self._hass_ref:
+                try:
+                    await self._hass_ref.services.async_call(
+                        "persistent_notification", "dismiss",
+                        {"notification_id": f"kostal_charge_block_{self._entry_id}"},
+                    )
+                except Exception:
+                    _LOGGER.debug("Failed to dismiss charge block notification on removal")
         await super().async_will_remove_from_hass()

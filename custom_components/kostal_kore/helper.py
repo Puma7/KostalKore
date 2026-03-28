@@ -35,15 +35,23 @@ ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
     """Return mutable per-entry integration state store.
 
-    Uses .get() instead of .setdefault() to avoid resurrecting a store
-    after async_unload_entry has already removed it from hass.data.
+    During normal operation the store lives in hass.data[DOMAIN][entry_id].
+    After async_unload_entry has popped the entry, callers may still fire
+    (e.g. lingering callbacks). In that case we return a detached empty dict
+    so writes are harmless no-ops instead of resurrecting the store.
     """
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
-        domain_data = hass.data.setdefault(DOMAIN, {})
+        # Integration not set up at all — should not happen during normal
+        # operation, but return detached dict to be safe.
+        _LOGGER.debug("integration_entry_store called but DOMAIN not in hass.data")
+        return {}
     entry_data = domain_data.get(entry_id)
     if entry_data is None:
-        entry_data = domain_data.setdefault(entry_id, {})
+        # Entry not (or no longer) in domain data. Return detached dict
+        # to avoid re-creating a ghost store after unload.
+        _LOGGER.debug("integration_entry_store: entry %s not in domain data", entry_id)
+        return {}
     return cast(dict[str, Any], entry_data)
 
 

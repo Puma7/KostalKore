@@ -309,15 +309,21 @@ class FireSafetyMonitor:
         if avg_power < 100:
             return alerts
 
-        # Track the ratio between strings over time for baseline learning.
+        # Track per-string share of total power for baseline learning.
         # Steady-state differences (different orientations, Y-adapters) are normal
         # and should NOT trigger alerts. Only sudden deviations from the
-        # established ratio indicate a real problem.
-        # Use min/max ratio so this works for 2-string AND 3-string systems.
+        # established baseline indicate a real problem.
+        # We record the max deviation of any string's share from its equal share
+        # (1/N). This metric works for 2-string AND 3-string systems alike,
+        # unlike a simple min/max ratio which becomes unstable with 3+ strings.
         if len(powers) >= 2:
-            vals_sorted = sorted(powers.values())
-            ratio = vals_sorted[0] / vals_sorted[-1] if vals_sorted[-1] > 0 else 0
-            self._dc_ratio_history.append((now, ratio))
+            total = sum(powers.values())
+            if total > 0:
+                equal_share = 1.0 / len(powers)
+                max_share_dev = max(
+                    abs(p / total - equal_share) for p in powers.values()
+                )
+                self._dc_ratio_history.append((now, max_share_dev))
 
         for string, power in powers.items():
             deviation = abs(power - avg_power) / avg_power * 100
@@ -363,15 +369,22 @@ class FireSafetyMonitor:
         return alerts
 
     def _is_stable_ratio(self, now: float) -> bool:
-        """Check if the DC string power ratio has been stable (normal installation difference)."""
-        window = [r for t, r in self._dc_ratio_history if now - t < 1800]
+        """Check if DC string power distribution has been stable.
+
+        Uses max-deviation-from-equal-share metric recorded in
+        _dc_ratio_history. The distribution is "stable" when the metric
+        has not jumped around much over the last 30 minutes, i.e. the
+        installation has a consistent (even if asymmetric) layout.
+        """
+        window = [d for t, d in self._dc_ratio_history if now - t < 1800]
         if len(window) < 10:
             return False
-        avg_ratio = sum(window) / len(window)
-        if avg_ratio == 0:
-            return False
-        max_dev = max(abs(r - avg_ratio) / avg_ratio for r in window)
-        return max_dev < 0.25
+        avg_dev = sum(window) / len(window)
+        # Check whether the deviation metric itself has been stable.
+        # A stable installation has a consistent share pattern even if
+        # the absolute values fluctuate with irradiance.
+        max_jitter = max(abs(d - avg_dev) for d in window)
+        return max_jitter < 0.10
 
     # ------------------------------------------------------------------
     # Check 3: Battery thermal runaway precursors

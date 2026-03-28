@@ -33,6 +33,10 @@ DEFAULT_MODBUS_PROXY_BIND: Final[str] = "127.0.0.1"
 DEFAULT_KSEM_PORT: Final[int] = 502
 DEFAULT_KSEM_UNIT_ID: Final[int] = 71
 
+# Kostal inverters have at most 3 DC string inputs. Use a generous upper
+# bound to reject corrupted firmware values without blocking future models.
+MAX_SANE_STRING_COUNT: Final[int] = 6
+
 # High-impact write arming window (seconds)
 ADVANCED_WRITE_ARM_TTL_SECONDS: Final[int] = 120
 

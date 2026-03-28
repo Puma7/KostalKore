@@ -696,7 +696,7 @@ async def async_setup_entry(
         settings_fetch_ok = False
     available_settings_data = available_settings_data or {}
 
-    from .const import CONF_MODBUS_ENABLED
+    from .const import CONF_MODBUS_ENABLED, MAX_SANE_STRING_COUNT
     _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
     _settings_interval = 90 if _modbus_active else 30
 
@@ -785,7 +785,6 @@ async def async_setup_entry(
                 _LOGGER.warning("Could not get string count: %s", err)
             string_count_setting = {}
 
-        MAX_SANE_STRING_COUNT = 6
         try:
             raw_count = int(
                 string_count_setting.get(ModuleId.DEVICES_LOCAL, {}).get(
