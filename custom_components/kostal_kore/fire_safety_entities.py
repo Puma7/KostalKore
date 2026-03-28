@@ -36,7 +36,13 @@ class FireRiskSensor(SensorEntity):
         self._attr_device_info = device_info
 
     @property
-    def native_value(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor._total_polls > 0
+
+    @property
+    def native_value(self) -> str | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self._monitor._total_polls == 0:
+            return None
         return self._monitor.current_risk_level
 
     @property
@@ -83,6 +89,10 @@ class FireAlertCountSensor(SensorEntity):
         self._attr_device_info = device_info
 
     @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor._total_polls > 0
+
+    @property
     def native_value(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
         return self._monitor.alert_count
 
@@ -104,7 +114,13 @@ class FireSafetyOkBinarySensor(BinarySensorEntity):
         self._attr_device_info = device_info
 
     @property
-    def is_on(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor._total_polls > 0
+
+    @property
+    def is_on(self) -> bool | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        if self._monitor._total_polls == 0:
+            return None
         level = self._monitor.current_risk_level
         is_unsafe = level not in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR)
         if is_unsafe:

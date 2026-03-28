@@ -170,18 +170,25 @@ async def async_get_config_entry_diagnostics(
 
     # Generate feature IDs dynamically based on string count
     feature_ids = [STRING_FEATURE_PATTERN.format(index=idx) for idx in range(string_count)]
+    config_fetch_error: str | None = None
     if feature_ids:
-        configuration_settings = await _get_diagnostics_data_safe(
-            plenticore,
-            "configuration settings",
-            lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, feature_ids)
-        )
+        try:
+            configuration_settings = await asyncio.wait_for(
+                plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, feature_ids),
+                timeout=DIAGNOSTICS_TIMEOUT_SECONDS,
+            )
+        except Exception as err:
+            _handle_diagnostics_error(err, "configuration settings")
+            configuration_settings = {}
+            config_fetch_error = f"{type(err).__name__}: {err}"
     else:
         configuration_settings = {}
 
-    data["configuration"] = {
-        **configuration_settings,
-    }
+    configuration_settings = configuration_settings or {}
+    config_block: dict[str, Any] = {**configuration_settings}
+    if config_fetch_error is not None:
+        config_block["_error"] = config_fetch_error
+    data["configuration"] = config_block
 
     device_info = {**plenticore.device_info}
     device_info[ATTR_IDENTIFIERS] = REDACTED  # contains serial number
