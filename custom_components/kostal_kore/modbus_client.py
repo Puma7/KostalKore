@@ -64,7 +64,7 @@ OUTLIER_EXEMPT_ADDRESSES: Final[frozenset[int]] = frozenset({
     515,   # fw_maincontroller
     525,   # battery_model_id
     527,   # battery_serial_alt
-    529,   # battery_operation_mode
+    529,   # battery_work_capacity_sunspec
     586,   # battery_fw_version
 })
 

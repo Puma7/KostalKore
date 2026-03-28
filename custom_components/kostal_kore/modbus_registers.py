@@ -219,7 +219,7 @@ REG_FW_MAINCONTROLLER = ModbusRegister(515, "fw_maincontroller", "Firmware mainc
 REG_BATTERY_MANUFACTURER = ModbusRegister(517, "battery_manufacturer", "Battery manufacturer", DataType.STRING, 8, Access.RO, RegisterGroup.BATTERY)
 REG_BATTERY_MODEL_ID = ModbusRegister(525, "battery_model_id", "Battery model ID", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
 REG_BATTERY_SERIAL_ALT = ModbusRegister(527, "battery_serial_alt", "Battery serial number (alt)", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
-REG_BATTERY_OPERATION_MODE = ModbusRegister(529, "battery_operation_mode", "Battery operation mode", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
+REG_BATTERY_WORK_CAPACITY_SUNSPEC = ModbusRegister(529, "battery_work_capacity_sunspec", "Battery work capacity (SunSpec)", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY, "Wh")
 REG_BATTERY_NET_CAPACITY = ModbusRegister(580, "battery_net_capacity", "Battery net capacity", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY, "Ah")
 REG_BATTERY_FW_VERSION = ModbusRegister(586, "battery_fw_version", "Battery firmware", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)
 
@@ -310,7 +310,7 @@ ALL_REGISTERS: Final[tuple[ModbusRegister, ...]] = (
     REG_PM_L3_CURRENT, REG_PM_L3_ACTIVE, REG_PM_L3_REACTIVE, REG_PM_L3_APPARENT, REG_PM_L3_VOLTAGE,
     REG_PSSB_FUSE_STATE, REG_BATTERY_READY_FLAG,
     REG_FW_MAINCONTROLLER, REG_BATTERY_MANUFACTURER, REG_BATTERY_MODEL_ID,
-    REG_BATTERY_SERIAL_ALT, REG_BATTERY_OPERATION_MODE, REG_BATTERY_NET_CAPACITY,
+    REG_BATTERY_SERIAL_ALT, REG_BATTERY_WORK_CAPACITY_SUNSPEC, REG_BATTERY_NET_CAPACITY,
     REG_BATTERY_FW_VERSION,
     REG_ACTIVE_POWER_SETPOINT, REG_REACTIVE_POWER_SETPOINT,
     REG_DELTA_COS_PHI, REG_LOW_PRIO_ACTIVE_POWER,
