@@ -1,4 +1,4 @@
-"""Binary sensor platform for Kostal Plenticore health warnings."""
+"""Binary sensor platform for Kostal Plenticore health and fire-safety warnings."""
 
 from __future__ import annotations
 
