@@ -20,6 +20,11 @@ from .request_scheduler import RequestScheduler
 _LOGGER: Final = logging.getLogger(__name__)
 
 
+_HTTP_METHODS: Final[frozenset[str]] = frozenset(
+    {"get", "post", "put", "patch", "delete", "head", "options"}
+)
+
+
 class ScheduledSession:
     """Proxy around aiohttp.ClientSession that serializes requests via scheduler."""
 
@@ -32,6 +37,12 @@ class ScheduledSession:
         return _ScheduledRequest(self._session, self._scheduler, method, url, kwargs)
 
     def __getattr__(self, name: str) -> Any:
+        # Intercept convenience methods (get, post, etc.) so they also
+        # go through the scheduler instead of bypassing it.
+        if name in _HTTP_METHODS:
+            def _method_proxy(url: Any, **kwargs: Any) -> Any:
+                return _ScheduledRequest(self._session, self._scheduler, name.upper(), url, kwargs)
+            return _method_proxy
         return getattr(self._session, name)
 
 

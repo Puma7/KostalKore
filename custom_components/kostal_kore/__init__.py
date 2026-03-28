@@ -158,10 +158,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         _log_setup_metrics(start_time, False)
         return False
 
-    clear_issue(hass, "auth_failed")
-    clear_issue(hass, "api_unreachable")
-    clear_issue(hass, "inverter_busy")
-    clear_issue(hass, "installer_required")
+    clear_issue(hass, "auth_failed", entry_id=entry.entry_id)
+    clear_issue(hass, "api_unreachable", entry_id=entry.entry_id)
+    clear_issue(hass, "inverter_busy", entry_id=entry.entry_id)
+    clear_issue(hass, "installer_required", entry_id=entry.entry_id)
 
     entry.runtime_data = plenticore
 

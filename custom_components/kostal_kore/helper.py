@@ -633,9 +633,9 @@ def ensure_installer_access(
             data_id,
         )
         if hass is not None:
-            create_installer_required_issue(hass)
+            create_installer_required_issue(hass, entry_id=getattr(entry, "entry_id", ""))
         return False
 
     if hass is not None:
-        clear_issue(hass, "installer_required")
+        clear_issue(hass, "installer_required", entry_id=getattr(entry, "entry_id", ""))
     return True
