@@ -143,7 +143,7 @@ def _classify_exception_response(resp: Any) -> ModbusClientError:
     """Classify a Modbus exception response into the right error type."""
     exc_code = getattr(resp, "exception_code", None)
     if exc_code is None:
-        return ModbusReadError(f"Unknown Modbus error: {resp}")
+        return ModbusClientError(f"Unknown Modbus error: {resp}")
 
     message = EXCEPTION_MESSAGES.get(exc_code, f"Unknown exception code 0x{exc_code:02X}")
     func_code = getattr(resp, "function_code", 0)
@@ -156,7 +156,7 @@ def _classify_exception_response(resp: Any) -> ModbusClientError:
         return ModbusPermanentError(
             f"Modbus permanent error (func=0x{func_code:02X}, exc=0x{exc_code:02X}): {message}"
         )
-    return ModbusReadError(
+    return ModbusClientError(
         f"Modbus error (func=0x{func_code:02X}, exc=0x{exc_code:02X}): {message}"
     )
 
@@ -552,6 +552,11 @@ class KostalModbusClient:
                     exc_code = getattr(resp, "exception_code", None)
                     self._last_exc_code = exc_code
                     raise _classify_exception_response(resp)
+                if len(resp.registers) != count:
+                    raise ModbusReadError(
+                        f"Truncated response at address {address}: "
+                        f"expected {count} registers, got {len(resp.registers)}"
+                    )
                 raw = b""
                 for reg_val in resp.registers:
                     raw += struct.pack(">H", reg_val)
