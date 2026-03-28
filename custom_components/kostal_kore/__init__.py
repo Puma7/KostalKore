@@ -345,11 +345,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                             notify_safety_alert(
                                 hass, alert.risk_level, alert.title,
                                 alert.detail, alert.action,
+                                entry_id=entry.entry_id,
+                                category=getattr(alert, "category", ""),
                             )
                         )
                 elif fire_safety.alert_count == 0 and fire_safety._total_polls > 0:
                     from .notifications import notify_safety_clear
-                    hass.async_create_task(notify_safety_clear(hass))
+                    hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
         modbus_coordinator.async_add_listener(_feed_health_data)
         fire_safety._total_polls = 0
