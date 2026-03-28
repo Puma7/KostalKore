@@ -114,6 +114,8 @@ DEFAULT_PHASES: Final[list[TestPhase]] = [
 
 class BatteryTestSuite:
 
+    _DEFAULT_LIMIT_W: Final = 20000.0
+
     def __init__(
         self, coordinator: ModbusDataUpdateCoordinator, hass: Any = None,
     ) -> None:
@@ -124,6 +126,8 @@ class BatteryTestSuite:
         self._log: list[str] = []
         self._debug_path = os.path.join(DEBUG_LOG_DIR, "battery_test_debug.log")
         self._dbg: list[str] = []
+        self._original_charge_limit: float | None = None
+        self._original_discharge_limit: float | None = None
 
     @property
     def running(self) -> bool:
@@ -208,10 +212,23 @@ class BatteryTestSuite:
         return ok1 and ok2
 
     async def _write_normal(self) -> None:
-        """Reset to automatic. evcc mode 1: REG 1034 = 0."""
+        """Reset to automatic. Restore original limits if snapshotted."""
         await self._wr("bat_charge_dc_abs_power", 0.0)
-        await self._wr("bat_max_charge_limit", 20000.0)
-        await self._wr("bat_max_discharge_limit", 20000.0)
+        charge_limit = self._DEFAULT_LIMIT_W
+        discharge_limit = self._DEFAULT_LIMIT_W
+        if self._original_charge_limit is not None:
+            try:
+                charge_limit = float(self._original_charge_limit)
+            except (TypeError, ValueError):
+                pass
+        if self._original_discharge_limit is not None:
+            try:
+                discharge_limit = float(self._original_discharge_limit)
+            except (TypeError, ValueError):
+                pass
+        self._emit(f"  Restore: charge_limit={charge_limit}, discharge_limit={discharge_limit}")
+        await self._wr("bat_max_charge_limit", charge_limit)
+        await self._wr("bat_max_discharge_limit", discharge_limit)
         self._emit("  🔄 Reset: REG 1034=0, REG 1038/1040=20000 (Automatik)")
 
     async def _keepalive(self, phase: TestPhase) -> bool:
@@ -390,6 +407,11 @@ class BatteryTestSuite:
             if temp > MAX_BATTERY_TEMP_C:
                 r.ok = False
                 r.errors.append(f"Batterie {temp:.1f}°C > {MAX_BATTERY_TEMP_C}°C")
+
+        # Snapshot current limits before any writes
+        self._original_charge_limit = await self._rd("bat_max_charge_limit")
+        self._original_discharge_limit = await self._rd("bat_max_discharge_limit")
+        self._emit(f"  Snapshot Limits: charge={self._original_charge_limit}, discharge={self._original_discharge_limit}")
 
         # Write test — this is the real gate-keeper (not register 1080)
         # If writes succeed, external control is working regardless of mode register

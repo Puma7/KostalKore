@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import logging
 import time
 from typing import Any, Final, cast
@@ -157,6 +158,7 @@ def _resolve_target_entry_id(hass: HomeAssistant, call: ServiceCall) -> str:
 def _normalise_mapping_rows(rows: list[dict[str, str]]) -> list[tuple[str, str]]:
     mapping: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
+    target_sources: dict[str, str] = {}
     for row in rows:
         old_entity_id = str(row.get(_CONF_OLD_ENTITY_ID, "")).strip()
         new_entity_id = str(row.get(_CONF_NEW_ENTITY_ID, "")).strip()
@@ -165,6 +167,14 @@ def _normalise_mapping_rows(rows: list[dict[str, str]]) -> list[tuple[str, str]]
         pair = (old_entity_id, new_entity_id)
         if pair in seen:
             continue
+        # Reject many-to-one: multiple old entities mapping to the same target
+        if new_entity_id in target_sources:
+            raise vol.Invalid(
+                f"Conflicting mapping: both '{target_sources[new_entity_id]}' and "
+                f"'{old_entity_id}' map to '{new_entity_id}'. Each target may only "
+                f"have one source."
+            )
+        target_sources[new_entity_id] = old_entity_id
         seen.add(pair)
         mapping.append(pair)
     return mapping
@@ -190,6 +200,7 @@ async def _ensure_guard_confirmed(
     dry_run: bool,
     confirmation_code: str | None,
     final_confirm: bool,
+    payload_fingerprint: str = "",
 ) -> bool:
     """Enforce multi-step confirmation with code challenge for destructive actions."""
     if dry_run:
@@ -222,6 +233,7 @@ async def _ensure_guard_confirmed(
         guard["phase"] = _GUARD_PHASE_AWAITING_CODE
         guard["code"] = code
         guard["expires_at"] = now + _GUARD_CHALLENGE_TTL_SECONDS
+        guard["payload_fingerprint"] = payload_fingerprint
         await _notify(
             hass,
             notification_id,
@@ -233,6 +245,18 @@ async def _ensure_guard_confirmed(
                 f"- `{_CONF_CONFIRMATION_CODE}: {code}`\n"
                 f"- `{_CONF_DRY_RUN}: false`"
             ),
+        )
+        return False
+
+    stored_fingerprint = str(guard.get("payload_fingerprint", ""))
+    if payload_fingerprint and stored_fingerprint and payload_fingerprint != stored_fingerprint:
+        _reset_guard(hass, entry_id, action)
+        await _notify(
+            hass,
+            notification_id,
+            "KOSTAL KORE migration payload changed",
+            "The migration parameters changed since the challenge was issued. "
+            "Re-run the service to start a new challenge.",
         )
         return False
 
@@ -492,6 +516,10 @@ async def _handle_adopt_service(hass: HomeAssistant, call: ServiceCall) -> None:
     confirmation_code = cast(str | None, call.data.get(_CONF_CONFIRMATION_CODE))
     final_confirm = bool(call.data[_CONF_FINAL_CONFIRM])
 
+    fp = hashlib.sha256(
+        f"adopt:{target_entry_id}:{source_entry_id}".encode()
+    ).hexdigest()[:16]
+
     if not await _ensure_guard_confirmed(
         hass,
         entry_id=target_entry_id,
@@ -499,6 +527,7 @@ async def _handle_adopt_service(hass: HomeAssistant, call: ServiceCall) -> None:
         dry_run=dry_run,
         confirmation_code=confirmation_code,
         final_confirm=final_confirm,
+        payload_fingerprint=fp,
     ):
         return
 
@@ -564,6 +593,11 @@ async def _handle_copy_history_service(hass: HomeAssistant, call: ServiceCall) -
         )
         return
 
+    mapping_str = "|".join(f"{o}->{n}" for o, n in sorted(mapping))
+    fp = hashlib.sha256(
+        f"copy:{target_entry_id}:{mapping_str}".encode()
+    ).hexdigest()[:16]
+
     if not await _ensure_guard_confirmed(
         hass,
         entry_id=target_entry_id,
@@ -571,6 +605,7 @@ async def _handle_copy_history_service(hass: HomeAssistant, call: ServiceCall) -
         dry_run=dry_run,
         confirmation_code=confirmation_code,
         final_confirm=final_confirm,
+        payload_fingerprint=fp,
     ):
         return
 
