@@ -296,6 +296,10 @@ class BatteryTestButton(ButtonEntity):
 
         self._suite = BatteryTestSuite(self._coordinator, hass=self.hass, entry_id=self._entry_id)
 
+        # Register in hass.data so SoC controller can detect a running test
+        if isinstance(own_entry_data, dict):
+            own_entry_data["battery_test"] = self._suite
+
         try:
             results = await self._suite.run()
             passed = sum(1 for r in results if r.success)
@@ -314,6 +318,8 @@ class BatteryTestButton(ButtonEntity):
                 "error": str(err),
             })
         finally:
+            if isinstance(own_entry_data, dict):
+                own_entry_data.pop("battery_test", None)
             self.async_write_ha_state()
 
 

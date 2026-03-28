@@ -113,11 +113,29 @@ class BatterySocController:
         )
         _LOGGER.info("SoC Controller: max discharge power = %.0f W", self._max_discharge_w)
 
+    def _is_battery_test_running(self) -> bool:
+        """Check if a battery test is currently running."""
+        if self._hass is None:
+            return False
+        try:
+            from .const import DOMAIN
+            entry_store = self._hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+            battery_test = entry_store.get("battery_test")
+            return battery_test is not None and battery_test.running
+        except Exception:
+            return False
+
     async def set_target(self, soc: float | None) -> None:
         """Set target SoC. None or <SAFE_MIN_SOC = stop controller.
 
         Values are clamped to SAFE_MIN_SOC..SAFE_MAX_SOC (10-95%).
         """
+        if soc is not None and self._is_battery_test_running():
+            _LOGGER.warning(
+                "SoC Controller: cannot start — battery test is running"
+            )
+            return
+
         if soc is not None and soc < SAFE_MIN_SOC:
             soc = None
         if soc is not None:

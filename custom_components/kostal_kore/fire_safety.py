@@ -85,6 +85,10 @@ class FireSafetyMonitor:
     monitors would miss.
     """
 
+    # After this many consecutive polls with no usable safety data,
+    # log a warning so the user knows the safety monitor is blind.
+    STALE_DATA_THRESHOLD: Final = 12  # ~60s at 5s interval
+
     def __init__(self, *, num_bidirectional: int = 0) -> None:
         self._alerts: deque[SafetyAlert] = deque(maxlen=500)
         self._iso_history: deque[tuple[float, float]] = deque(maxlen=100)
@@ -99,6 +103,7 @@ class FireSafetyMonitor:
         self._total_polls: int = 0
         self._num_bidirectional: int = num_bidirectional
         self._dc_ratio_history: deque[tuple[float, float]] = deque(maxlen=200)
+        self._consecutive_empty_polls: int = 0
 
     @property
     def alerts(self) -> list[SafetyAlert]:
@@ -155,6 +160,22 @@ class FireSafetyMonitor:
         self._total_polls += 1
 
         self._record_history(data, now)
+
+        # Stale-data detection: if key safety sensors are missing for too long,
+        # the safety monitor is effectively blind.
+        bat_temp = _float(data.get("battery_temperature"))
+        ctrl_temp = _float(data.get("controller_temperature"))
+        has_safety_data = bat_temp is not None or ctrl_temp is not None
+        if has_safety_data:
+            self._consecutive_empty_polls = 0
+        else:
+            self._consecutive_empty_polls += 1
+            if self._consecutive_empty_polls == self.STALE_DATA_THRESHOLD:
+                _LOGGER.warning(
+                    "Fire safety: no temperature data for %d consecutive polls — "
+                    "safety monitoring is degraded",
+                    self._consecutive_empty_polls,
+                )
 
         # Determine if PV is producing (DC power > 50W)
         total_dc = _float(data.get("total_dc_power"))

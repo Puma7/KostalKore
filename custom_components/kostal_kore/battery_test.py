@@ -246,9 +246,26 @@ class BatteryTestSuite:
     # Main
     # ------------------------------------------------------------------
 
+    def _is_soc_controller_active(self) -> bool:
+        """Check if the SoC controller is actively controlling the battery."""
+        if self._hass is None:
+            return False
+        try:
+            from .const import DOMAIN
+            entry_store = self._hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+            soc_ctrl = entry_store.get("soc_controller")
+            return soc_ctrl is not None and soc_ctrl.active
+        except Exception:
+            return False
+
     async def run(self, phases: list[TestPhase] | None = None) -> list[PhaseResult]:
         if self._running:
             raise RuntimeError("Already running")
+        if self._is_soc_controller_active():
+            raise RuntimeError(
+                "SoC Controller ist aktiv — Batterietest kann nicht gleichzeitig laufen. "
+                "Bitte zuerst den Ziel-SoC auf 0 setzen."
+            )
         self._running = True
         self._abort_requested = False
         self._log.clear()
