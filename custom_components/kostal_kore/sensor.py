@@ -1507,7 +1507,7 @@ async def async_setup_entry(
     
     # Discover DC string count -- try Modbus first (faster, no auth needed),
     # fall back to REST API if Modbus is not available
-    dc_string_count = 1  # Minimum fallback
+    dc_string_count = 0  # 0 = not yet discovered; triggers REST fallback below
 
     from .const import DOMAIN as _DOMAIN
     _entry_store = hass.data.get(_DOMAIN, {}).get(entry.entry_id, {})
