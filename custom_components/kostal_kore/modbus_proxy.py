@@ -218,14 +218,20 @@ class ModbusTcpProxyServer:
 
     async def stop(self) -> None:
         """Stop the proxy server and disconnect all clients."""
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-
+        # Cancel client tasks first so they don't block server close
         for task in self._clients:
             task.cancel()
+        if self._clients:
+            await asyncio.gather(*self._clients, return_exceptions=True)
         self._clients.clear()
+
+        if self._server is not None:
+            self._server.close()
+            try:
+                await asyncio.wait_for(self._server.wait_closed(), timeout=2.0)
+            except asyncio.TimeoutError:
+                _LOGGER.debug("Modbus proxy wait_closed timed out, forcing shutdown")
+            self._server = None
 
         _LOGGER.info("Modbus TCP proxy stopped")
 

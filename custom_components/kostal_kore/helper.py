@@ -55,8 +55,9 @@ def normalize_isolation_resistance_ohm(
     """Normalize isolation resistance to ohm across firmware unit variants.
 
     Some firmware variants report isolation resistance in kOhm while others use
-    ohm. When PV is actively producing and a very small value (<10k) is seen, it
-    is treated as kOhm and converted to ohm.
+    ohm.  The kOhm heuristic is applied regardless of PV/inverter state so that
+    the reported unit stays consistent and does not flip between Ω and kΩ in
+    Home Assistant's long-term statistics.
     """
     try:
         numeric = float(value)
@@ -64,10 +65,8 @@ def normalize_isolation_resistance_ohm(
         return None
     if math.isnan(numeric) or math.isinf(numeric):
         return None
-    if not pv_active:
-        return numeric
-    if inverter_state in (0, 1, 10, 15):
-        return numeric
+    # Always apply the kΩ→Ω heuristic to keep the unit stable.
+    # Values of exactly 0 are skipped (no measurement / standby).
     if 0 < abs(numeric) < ISOLATION_KOHM_HEURISTIC_MAX:
         return numeric * 1000.0
     return numeric

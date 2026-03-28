@@ -92,7 +92,7 @@ PLATFORM_SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
 EVENT_POLL_INTERVAL_SECONDS: Final[int] = 30
 
 # Performance metrics constants
-MEMORY_CLEANUP_MAX_MS: Final[int] = 500
+MEMORY_CLEANUP_MAX_MS: Final[int] = 3000
 
 
 def _handle_init_error(err: Exception, operation: str) -> bool:
@@ -445,17 +445,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     """
     start_time = time.time()
 
-    # Clean up SoC Controller + Modbus proxy + MQTT bridge
+    # Clean up SoC Controller + Modbus proxy + MQTT bridge (concurrently)
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    parallel_cleanup: list[tuple[str, Awaitable[object]]] = []
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
+        parallel_cleanup.append(("SoC controller stop", soc_ctrl.stop()))
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
-        await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
+        parallel_cleanup.append(("Modbus proxy stop", modbus_proxy.stop()))
     mqtt_bridge = entry_data.get("mqtt_bridge")
     if mqtt_bridge:
-        await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
+        parallel_cleanup.append(("MQTT bridge stop", mqtt_bridge.async_stop()))
+    if parallel_cleanup:
+        await asyncio.gather(
+            *(
+                _await_cleanup_step(label, step)
+                for label, step in parallel_cleanup
+            )
+        )
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
         try:

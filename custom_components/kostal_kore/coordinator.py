@@ -56,8 +56,8 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_HISTORY_MAX: int = 50
 EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
-SETUP_FETCH_TIMEOUT_SECONDS: float = 8.0
-SETUP_PREWARM_TIMEOUT_SECONDS: float = 8.0
+SETUP_FETCH_TIMEOUT_SECONDS: float = 5.0
+SETUP_PREWARM_TIMEOUT_SECONDS: float = 5.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",

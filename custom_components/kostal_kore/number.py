@@ -92,7 +92,7 @@ DEFAULT_PERCENTAGE_STEP: Final[int] = 1
 DEFAULT_TIME_MAX_SECONDS: Final[int] = 86400
 DEFAULT_TIME_MIN_SECONDS: Final[int] = 0
 DEFAULT_TIME_STEP_SECONDS: Final[int] = 1
-SETTINGS_TIMEOUT_SECONDS: Final[float] = 8.0
+SETTINGS_TIMEOUT_SECONDS: Final[float] = 5.0
 
 # Battery-specific constants
 BATTERY_MAX_POWER_WATTS: Final[int] = 1000000
@@ -1295,9 +1295,9 @@ async def async_setup_entry(
 
     if not available_settings_data:
         _LOGGER.warning(
-            "Initial number settings fetch failed, retrying in 2 seconds..."
+            "Initial number settings fetch failed, retrying in 1 second..."
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         available_settings_data = await _get_settings_data_safe(
             plenticore, "number settings (retry)"
         )
