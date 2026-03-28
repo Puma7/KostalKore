@@ -854,7 +854,15 @@ async def test_rollback_setup_cleans_up_all_objects() -> None:
 
     plenticore = AsyncMock()
 
-    with patch("custom_components.kostal_kore.__init__._await_cleanup_step", new_callable=lambda: AsyncMock):
+    async def _noop_cleanup(label, step, timeout=5.0):
+        # Consume the coroutine to avoid warnings
+        if asyncio.iscoroutine(step):
+            try:
+                await step
+            except Exception:
+                pass
+
+    with patch("custom_components.kostal_kore.__init__._await_cleanup_step", side_effect=_noop_cleanup):
         await kp_init._rollback_setup(hass, entry, plenticore)
 
     soc_ctrl.stop.assert_called_once()
@@ -1046,6 +1054,39 @@ async def test_select_option_write_error_rollback_also_fails(
 
     with pytest.raises(RuntimeError, match="always fails"):
         await select_entity.async_select_option("None")
+
+
+@pytest.mark.asyncio
+async def test_select_option_write_error_skips_rollback_for_none(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test write failure skips rollback when previous_option is None (covers select.py:342->350)."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _settings_with_data(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _settings_with_data):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
+
+    # current_option returns None when not available (no coordinator data)
+    # so previous_option will be None → rollback is skipped
+    select_entity.coordinator.async_write_data = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await select_entity.async_select_option("Battery:SmartBatteryControl:Enable")
 
 
 @pytest.mark.asyncio
