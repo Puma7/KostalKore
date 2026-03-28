@@ -384,7 +384,7 @@ class DiagnosticsEngine:
 
         iso = h.isolation.current
         if iso is not None:
-            raw["isolation_kohm"] = round(iso, 0)
+            raw["isolation_kohm"] = round(iso / 1000, 0)
             raw["isolation_trend"] = h.isolation.trend
 
         raw["fire_risk_level"] = s.current_risk_level
@@ -407,7 +407,7 @@ class DiagnosticsEngine:
                 return AreaDiagnosis(
                     "safety", DiagStatus.KRITISCH,
                     "Isolationsfehler erkannt",
-                    f"Isolationswiderstand: {iso:.0f} kΩ (sicher: >500kΩ). "
+                    f"Isolationswiderstand: {iso / 1000 if iso is not None else 0:.0f} kΩ (sicher: >500kΩ). "
                     "Mögliche Ursachen: beschädigtes Kabel, Wasser im Anschlusskasten, Tierbiss.",
                     "DC-Kabel und Stecker auf Beschädigungen prüfen. Anschlusskasten öffnen und "
                     "auf Feuchtigkeit, Korrosion oder Bissspuren kontrollieren. "
@@ -415,11 +415,11 @@ class DiagnosticsEngine:
                     raw,
                 )
 
-        if iso is not None and iso < 800:
+        if iso is not None and iso < 800_000:
             return AreaDiagnosis(
                 "safety", DiagStatus.HINWEIS,
                 "Isolationswiderstand leicht unter Optimalwert",
-                f"Isolationswiderstand: {iso:.0f} kΩ. Sicher, aber nicht optimal (>1000kΩ ideal).",
+                f"Isolationswiderstand: {iso / 1000:.0f} kΩ. Sicher, aber nicht optimal (>1000kΩ ideal).",
                 "Bei nächster Wartung DC-Kabel und Stecker prüfen lassen.",
                 raw,
             )

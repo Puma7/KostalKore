@@ -23,6 +23,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import REGISTER_BY_NAME
 from .power_limits import get_device_power_limit_w
@@ -85,8 +86,8 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                                 "Switch ausschalten um Ladung wieder zu erlauben.",
                      "notification_id": "kostal_charge_block"},
                 )
-            except Exception:
-                pass
+            except Exception:  # notification is non-critical, keep broad
+                _LOGGER.debug("Failed to send charge block notification")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Restore normal charging using inverter-specific power limit."""
@@ -103,7 +104,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, 0.0)
-            except Exception as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("Failed to block charging: %s", err)
 
     async def _write_normal(self) -> None:
@@ -111,12 +112,15 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, self._normal_limit_w)
-            except Exception as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("Failed to restore charging: %s", err)
 
     def _start_keepalive(self) -> None:
         self._cancel_keepalive()
-        self._keepalive_task = asyncio.ensure_future(self._run_keepalive())
+        self._keepalive_task = self.hass.async_create_task(
+            self._run_keepalive(),
+            "kostal_kore_charge_block_keepalive",
+        )
 
     def _cancel_keepalive(self) -> None:
         if self._keepalive_task and not self._keepalive_task.done():

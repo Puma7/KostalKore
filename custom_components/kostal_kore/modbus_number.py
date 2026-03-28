@@ -28,6 +28,7 @@ from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
     ModbusRegister,
@@ -75,7 +76,7 @@ async def _probe_modbus_access(coordinator: ModbusDataUpdateCoordinator) -> bool
             soc_value,
         )
         return True
-    except Exception as err:
+    except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
         _LOGGER.debug("Battery management registers not readable: %s", err)
         return False
 
@@ -328,7 +329,7 @@ class ModbusNumberEntity(
                     "Read-back mismatch for %s: wrote %s, read %s",
                     self._register.name, value, readback,
                 )
-        except Exception:
+        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
             _LOGGER.debug("Read-back verification skipped for %s", self._register.name)
 
         await self.coordinator.async_request_refresh()
@@ -341,13 +342,19 @@ class ModbusNumberEntity(
         self._keepalive_value = value
         if self._keepalive_task and not self._keepalive_task.done():
             return
-        self._keepalive_task = asyncio.ensure_future(self._run_keepalive())
+        self._keepalive_task = self.hass.async_create_task(
+            self._run_keepalive(),
+            f"kostal_kore_keepalive_{self._register.name}",
+        )
 
     async def _run_keepalive(self) -> None:
         """Re-write G3 limit values cyclically to prevent fallback."""
         try:
             while self._keepalive_value is not None:
-                interval = self._get_keepalive_interval()
+                try:
+                    interval = self._get_keepalive_interval()
+                except (TypeError, ValueError, ZeroDivisionError):
+                    interval = G3_DEFAULT_FALLBACK_SECONDS // int(G3_KEEPALIVE_DIVISOR)
                 await asyncio.sleep(interval)
                 if self._keepalive_value is None:
                     break
@@ -359,7 +366,7 @@ class ModbusNumberEntity(
                         "G3 keepalive: re-wrote %s = %s",
                         self._register.name, self._keepalive_value,
                     )
-                except Exception as err:
+                except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                     _LOGGER.warning(
                         "G3 keepalive write failed for %s: %s",
                         self._register.name, err,
