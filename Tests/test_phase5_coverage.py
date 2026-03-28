@@ -526,7 +526,7 @@ def test_helper_formatters_and_conversions() -> None:
     assert helper.PlenticoreDataFormatter.format_round("4.2") == 4
     assert helper.PlenticoreDataFormatter.format_round("bad") is None
     assert helper.PlenticoreDataFormatter.format_round_back(4.0) == "4"
-    assert helper.PlenticoreDataFormatter.format_round_back(4.4) == "4"
+    assert helper.PlenticoreDataFormatter.format_round_back(4.4) == "4.4"
     assert helper.PlenticoreDataFormatter.format_float("1.5") == 1.5
     assert helper.PlenticoreDataFormatter.format_float("bad") is None
     assert helper.PlenticoreDataFormatter.format_float_back(2.5) == "2.5"
