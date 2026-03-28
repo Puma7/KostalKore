@@ -229,22 +229,22 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _probe_tcp_port(host: str, port: int) -> bool:
-    """Return True if host:port is reachable."""
+async def _probe_kostal_api(host: str, hass: HomeAssistant) -> bool:
+    """Return True if host responds to the unauthenticated Kostal version endpoint."""
     try:
-        _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=DISCOVERY_PROBE_TIMEOUT_SECONDS,
-        )
-    except (OSError, TimeoutError, asyncio.TimeoutError):
+        session = async_get_clientsession(hass)
+        async with ApiClient(session, host) as client:
+            version = await asyncio.wait_for(
+                client.get_version(),
+                timeout=DISCOVERY_PROBE_TIMEOUT_SECONDS,
+            )
+            # Verify response looks like a Kostal device
+            return (
+                getattr(version, "api_version", None) is not None
+                and getattr(version, "sw_version", None) is not None
+            )
+    except Exception:
         return False
-
-    writer.close()
-    try:
-        await writer.wait_closed()
-    except OSError:
-        pass
-    return True
 
 
 async def _build_discovery_candidates(hass: HomeAssistant) -> list[str]:
@@ -307,7 +307,7 @@ async def discover_inverter_hosts(hass: HomeAssistant) -> list[str]:
 
     async def _probe_candidate(host: str) -> str | None:
         async with semaphore:
-            if await _probe_tcp_port(host, DISCOVERY_HTTP_PORT):
+            if await _probe_kostal_api(host, hass):
                 return host
             return None
 
@@ -362,11 +362,9 @@ async def test_connection_safe(
     service_code = data.get(CONF_SERVICE_CODE)
 
     session = async_get_clientsession(hass)
-    async with ApiClient(session, host) as client:
-        await asyncio.wait_for(
-            client.login(password, service_code=service_code),
-            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
-        )
+
+    async def _validate(client: ApiClient) -> ConnectionCheckResult:
+        await client.login(password, service_code=service_code)
 
         hostname_id = await get_hostname_id(client)
         values = await client.get_setting_values(NETWORK_MODULE, hostname_id)
@@ -388,6 +386,12 @@ async def test_connection_safe(
             installer_access=_installer_access_from_role(
                 access_role, str(service_code) if service_code else None
             ),
+        )
+
+    async with ApiClient(session, host) as client:
+        return await asyncio.wait_for(
+            _validate(client),
+            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
 
 
@@ -477,6 +481,7 @@ async def run_modbus_connection_test(
             (REG_TOTAL_DC_POWER, "DC Power"),
             (REG_BATTERY_MGMT_MODE, "Battery Mgmt"),
         ]
+        reg_failures = 0
         for reg, label in test_regs:
             try:
                 val = await client.read_register(reg)
@@ -489,7 +494,12 @@ async def run_modbus_connection_test(
                     val = f"{val} W"
                 test_log.append(f"{label}: {val}")
             except Exception as reg_err:
+                reg_failures += 1
                 test_log.append(f"{label}: ERROR - {reg_err}")
+
+        if reg_failures == len(test_regs):
+            test_passed = False
+            test_log.append(f"All {reg_failures} register reads failed.")
 
         await client.disconnect()
         test_log.append("")
@@ -652,21 +662,28 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             auth_input = _sanitize_auth_input(user_input)
+            # Reauth must use the existing host to prevent accidental rebinding
+            entry_id = self.context.get("entry_id")
+            existing_entry = (
+                self.hass.config_entries.async_get_entry(entry_id)
+                if entry_id
+                else None
+            )
+            if existing_entry and existing_entry.data.get(CONF_HOST):
+                auth_input[CONF_HOST] = existing_entry.data[CONF_HOST]
+
             try:
                 connection_result = await resolve_connection_safe(self.hass, auth_input)
             except Exception as err:
                 errors = _handle_config_flow_error(err, "reauth")
             else:
-                entry_id = self.context.get("entry_id")
-                if entry_id:
-                    entry = self.hass.config_entries.async_get_entry(entry_id)
-                    if entry is not None:
-                        self.hass.config_entries.async_update_entry(
-                            entry,
-                            title=connection_result.hostname,
-                            data=_build_entry_data(auth_input, connection_result),
-                        )
-                        await self.hass.config_entries.async_reload(entry.entry_id)
+                if existing_entry is not None:
+                    self.hass.config_entries.async_update_entry(
+                        existing_entry,
+                        title=connection_result.hostname,
+                        data=_build_entry_data(auth_input, connection_result),
+                    )
+                    await self.hass.config_entries.async_reload(existing_entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
