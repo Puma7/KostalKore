@@ -157,6 +157,10 @@ class HighErrorRateWarning(BinarySensorEntity):
         self._attr_device_info = device_info
 
     @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor._total_polls > 0
+
+    @property
     def is_on(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         return self._monitor.error_rate_per_hour > 5.0
 
@@ -231,6 +235,10 @@ class ActiveErrorsWarning(BinarySensorEntity):
         self._monitor = monitor
         self._attr_unique_id = f"{entry_id}_health_warn_active_errors"
         self._attr_device_info = device_info
+
+    @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._monitor.active_error_count.current is not None
 
     @property
     def is_on(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
