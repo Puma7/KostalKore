@@ -275,6 +275,7 @@ class InverterHealthMonitor:
             "phase2_voltage": self.phase2_voltage,
             "phase3_voltage": self.phase3_voltage,
             "cos_phi": self.cos_phi,
+            "pm_cos_phi": self.pm_cos_phi,
             "dc1_voltage": self.dc1_voltage,
             "dc2_voltage": self.dc2_voltage,
             "dc3_voltage": self.dc3_voltage,

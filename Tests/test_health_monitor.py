@@ -247,7 +247,7 @@ class TestInverterHealthMonitor:
         assert "phase1_voltage" in trackers
         assert "dc1_power" in trackers
         assert "active_errors" in trackers
-        assert len(trackers) == 21
+        assert len(trackers) == 22
 
     def test_dc_string_imbalance(self) -> None:
         m = InverterHealthMonitor()
