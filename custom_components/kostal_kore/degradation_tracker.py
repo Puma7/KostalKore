@@ -100,12 +100,50 @@ class TrackedParameter:
         return sum(s.avg for s in baseline) / len(baseline)
 
     @property
-    def current_avg(self) -> float | None:
-        """Average of the last 7 days."""
-        recent = self.snapshots[-7:]
+    def baseline_peak(self) -> float | None:
+        """Average of daily peaks for the first BASELINE_DAYS days."""
+        baseline = self.snapshots[:BASELINE_DAYS]
+        if len(baseline) < BASELINE_DAYS:
+            return None
+        return sum(s.max_val for s in baseline) / len(baseline)
+
+    @property
+    def current_peak(self) -> float | None:
+        """Average of daily peaks for the last 7 days (including today)."""
+        recent = list(self.snapshots[-7:])
+        if self._current_snapshot and self._current_snapshot.count > 0:
+            if recent and recent[-1].day == self._current_snapshot.day:
+                recent[-1] = self._current_snapshot
+            else:
+                recent.append(self._current_snapshot)
+                if len(recent) > 7:
+                    recent = recent[-7:]
         if not recent:
-            if self._current_snapshot and self._current_snapshot.count > 0:
-                return self._current_snapshot.avg
+            return None
+        return sum(s.max_val for s in recent) / len(recent)
+
+    @property
+    def peak_deviation_pct(self) -> float | None:
+        """Percentage change of daily peak from baseline peak."""
+        base = self.baseline_peak
+        curr = self.current_peak
+        if base is None or curr is None or base == 0:
+            return None
+        return ((curr - base) / abs(base)) * 100.0
+
+    @property
+    def current_avg(self) -> float | None:
+        """Average of the last 7 days (including today's in-progress data)."""
+        recent = list(self.snapshots[-7:])
+        if self._current_snapshot and self._current_snapshot.count > 0:
+            # Replace the last snapshot if it's the same day, else append
+            if recent and recent[-1].day == self._current_snapshot.day:
+                recent[-1] = self._current_snapshot
+            else:
+                recent.append(self._current_snapshot)
+                if len(recent) > 7:
+                    recent = recent[-7:]
+        if not recent:
             return None
         return sum(s.avg for s in recent) / len(recent)
 
@@ -291,8 +329,10 @@ class DegradationTracker:
         except (TypeError, ValueError):
             inverter_state = None
 
+        # Only record isolation when PV is active to avoid mixed-unit
+        # day/night values (firmware may report kΩ or Ω).
         iso = data.get("isolation_resistance")
-        if iso is not None:
+        if iso is not None and pv_active:
             try:
                 normalized_ohm = normalize_isolation_resistance_ohm(
                     iso,
@@ -384,14 +424,21 @@ class DegradationTracker:
                     "rate": f"{rate:+.1f} {param.unit}/Monat",
                 })
 
-            elif name in ("dc1_peak", "dc2_peak") and dev is not None and dev < -10:
-                alerts.append({
-                    "parameter": param.name,
-                    "severity": "hinweis",
-                    "message": f"{param.name} ist {abs(dev):.0f}% unter Baseline. "
-                               "Module reinigen oder auf Degradation prüfen.",
-                    "rate": f"{rate:+.1f} {param.unit}/Monat",
-                })
+            elif name in ("dc1_peak", "dc2_peak"):
+                # Use peak-based deviation and prefer seasonal correction
+                # to avoid false positives from winter/summer variation.
+                peak_dev = param.peak_deviation_pct
+                seasonal_dev = param.seasonal_deviation_pct
+                effective_dev = seasonal_dev if seasonal_dev is not None else peak_dev
+                if effective_dev is not None and effective_dev < -10:
+                    label = "saisonbereinigt " if seasonal_dev is not None else ""
+                    alerts.append({
+                        "parameter": param.name,
+                        "severity": "hinweis",
+                        "message": f"{param.name} ist {label}{abs(effective_dev):.0f}% unter Referenzwert. "
+                                   "Module reinigen oder auf Degradation prüfen.",
+                        "rate": f"{rate:+.1f} {param.unit}/Monat",
+                    })
 
         return alerts
 

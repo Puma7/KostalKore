@@ -36,7 +36,7 @@ UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 DC_STRING_FEATURE_DATA_ID: Final[str] = STRING_FEATURE_TEMPLATE
 SHADOW_MANAGEMENT_SUPPORT: Final[int] = 1
 SHADOW_MANAGEMENT_ADVANCED: Final[int] = 3
-SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 8.0
+SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 6.0
 
 # Security defaults
 DEFAULT_ENTITY_REGISTRY_ENABLED: Final[bool] = False
@@ -88,6 +88,37 @@ def _handle_api_error(err: Exception, operation: str, context: str = "") -> None
             f" ({context})" if context else "",
             err,
         )
+
+
+async def _fetch_switch_settings(plenticore: Any) -> dict[str, Any]:
+    """Fetch switch settings with timeout protection."""
+    try:
+        settings_getter = (
+            plenticore.async_get_settings_cached
+            if hasattr(plenticore, "async_get_settings_cached")
+            else plenticore.client.get_settings
+        )
+        return await asyncio.wait_for(
+            settings_getter(),
+            timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _LOGGER.warning(
+            "Timeout fetching settings data for switch setup"
+        )
+        return {}
+    except (ApiException, ClientError, TimeoutError) as err:
+        error_msg = str(err)
+        if "Unknown API response [500]" in error_msg:
+            _LOGGER.error(
+                "Inverter API returned 500 error - feature not supported on this model"
+            )
+        elif isinstance(err, ApiException):
+            modbus_err = parse_modbus_exception(err)
+            _LOGGER.error("Could not get settings data: %s", modbus_err.message)
+        else:
+            _LOGGER.error("Could not get settings data: %s", err)
+        return {}
 
 
 def create_switch_description(
@@ -651,40 +682,21 @@ async def async_setup_entry(
         )
     )
 
-    # Fetch fresh settings data
-    try:
-        settings_getter = (
-            plenticore.async_get_settings_cached
-            if hasattr(plenticore, "async_get_settings_cached")
-            else plenticore.client.get_settings
-        )
-        available_settings_data = await asyncio.wait_for(
-            settings_getter(),
-            timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
+    # Fetch fresh settings data with retry
+    available_settings_data = await _fetch_switch_settings(plenticore)
+
+    if not available_settings_data:
         _LOGGER.warning(
-            "Timeout fetching settings data for switch setup - "
-            "continuing with minimal switch set"
+            "Initial switch settings fetch failed, retrying in 1 second..."
         )
+        await asyncio.sleep(1)
+        available_settings_data = await _fetch_switch_settings(plenticore)
+
+    if not available_settings_data:
         settings_fetch_ok = False
-        available_settings_data = {}
-    except (ApiException, ClientError, TimeoutError) as err:
-        settings_fetch_ok = False
-        error_msg = str(err)
-        if "Unknown API response [500]" in error_msg:
-            _LOGGER.error(
-                "Inverter API returned 500 error - feature not supported on this model"
-            )
-        elif isinstance(err, ApiException):
-            modbus_err = parse_modbus_exception(err)
-            _LOGGER.error("Could not get settings data: %s", modbus_err.message)
-        else:
-            _LOGGER.error("Could not get settings data: %s", err)
-        available_settings_data = {}
     available_settings_data = available_settings_data or {}
 
-    from .const import CONF_MODBUS_ENABLED
+    from .const import CONF_MODBUS_ENABLED, MAX_SANE_STRING_COUNT
     _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
     _settings_interval = 90 if _modbus_active else 30
 
@@ -754,8 +766,11 @@ async def async_setup_entry(
     # This ensures basic switches (Battery Strategy, Battery Manual Charge) are always created
     if settings_fetch_ok:
         try:
-            string_count_setting = await plenticore.client.get_setting_values(
-                ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
+            string_count_setting = await asyncio.wait_for(
+                plenticore.client.get_setting_values(
+                    ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
+                ),
+                timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
             )
         except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
             error_msg = str(err)
@@ -771,11 +786,17 @@ async def async_setup_entry(
             string_count_setting = {}
 
         try:
-            string_count = int(
+            raw_count = int(
                 string_count_setting.get(ModuleId.DEVICES_LOCAL, {}).get(
                     SettingId.STRING_COUNT, 0
                 )
             )
+            string_count = max(0, min(raw_count, MAX_SANE_STRING_COUNT))
+            if raw_count != string_count:
+                _LOGGER.warning(
+                    "StringCnt value %d out of sane range, clamped to %d",
+                    raw_count, string_count,
+                )
         except (ValueError, AttributeError):
             string_count = 0
 
@@ -812,9 +833,12 @@ async def async_setup_entry(
                 )
                 dc_string_features = cast(
                     dict[str, dict[str, str]],
-                    await plenticore.client.get_setting_values(
-                        PlenticoreShadowMgmtSwitch.MODULE_ID,
-                        dc_string_feature_ids,
+                    await asyncio.wait_for(
+                        plenticore.client.get_setting_values(
+                            PlenticoreShadowMgmtSwitch.MODULE_ID,
+                            dc_string_feature_ids,
+                        ),
+                        timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
                     ),
                 )
                 _LOGGER.debug(
@@ -851,9 +875,12 @@ async def async_setup_entry(
                                 dc_string + 1,
                                 feature_id,
                             )
-                            single_feature = await plenticore.client.get_setting_values(
-                                PlenticoreShadowMgmtSwitch.MODULE_ID,
-                                (feature_id,),
+                            single_feature = await asyncio.wait_for(
+                                plenticore.client.get_setting_values(
+                                    PlenticoreShadowMgmtSwitch.MODULE_ID,
+                                    (feature_id,),
+                                ),
+                                timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
                             )
                             if single_feature:
                                 dc_string_features.setdefault(

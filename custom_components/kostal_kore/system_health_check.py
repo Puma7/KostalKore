@@ -527,14 +527,17 @@ class SystemHealthCheckButton(ButtonEntity):
 
         health: Any = entry_data.get("health_monitor")
         if health is not None:
-            warnings = getattr(health, "active_warnings", [])
+            tracker = getattr(health, "active_warning_count", None)
+            warning_count = 0
+            if tracker is not None and hasattr(tracker, "samples") and tracker.samples:
+                warning_count = int(tracker.samples[-1].value)
             report.check(
                 "Health Monitor",
-                len(warnings) == 0,
-                detail=f"{len(warnings)} aktive Warnungen"
-                if warnings
+                warning_count == 0,
+                detail=f"{warning_count} aktive Warnungen"
+                if warning_count
                 else "keine Warnungen",
-                level="warn" if warnings else "fail",
+                level="warn" if warning_count else "fail",
             )
 
         fire: Any = entry_data.get("fire_safety")
@@ -671,6 +674,7 @@ class _HealthReport:
         self.pass_count: int = 0
         self.warn_count: int = 0
         self.fail_count: int = 0
+        self.info_count: int = 0
 
     def section(self, name: str) -> None:
         if self._current_section:
@@ -694,7 +698,7 @@ class _HealthReport:
             self.warn_count += 1
         elif level == "info":
             icon = "ℹ️"
-            self.pass_count += 1
+            self.info_count += 1
         else:
             icon = "❌"
             self.fail_count += 1

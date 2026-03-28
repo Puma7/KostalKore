@@ -8,7 +8,9 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from .longevity_advisor import LongevityAdvisor
+from .longevity_advisor import LongevityAdvisor, LongevityTip
+
+_PRIORITY_ORDER: Final[dict[str, int]] = {"hoch": 0, "mittel": 1, "niedrig": 2}
 
 
 class BatteryLongevitySensor(SensorEntity):
@@ -23,6 +25,10 @@ class BatteryLongevitySensor(SensorEntity):
         self._advisor = advisor
         self._attr_unique_id = f"{entry_id}_longevity_battery"
         self._attr_device_info = device_info
+
+    @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._advisor.has_battery and self._advisor._health._total_polls > 0
 
     @property
     def native_value(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -53,6 +59,10 @@ class InverterLongevitySensor(SensorEntity):
         self._attr_device_info = device_info
 
     @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._advisor._health._total_polls > 0
+
+    @property
     def native_value(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
         return self._advisor.get_inverter_temp_assessment()
 
@@ -79,15 +89,24 @@ class PVLongevitySensor(SensorEntity):
         self._attr_device_info = device_info
 
     @property
-    def native_value(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return self._advisor._health._total_polls > 0
+
+    def _pv_tips_sorted(self) -> list[LongevityTip]:
         tips = [t for t in self._advisor.get_tips() if t.component == "pv"]
+        tips.sort(key=lambda t: _PRIORITY_ORDER.get(t.priority, 99))
+        return tips
+
+    @property
+    def native_value(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+        tips = self._pv_tips_sorted()
         if not tips:
             return "Keine Auffälligkeiten"
         return tips[0].title
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
-        tips = [t for t in self._advisor.get_tips() if t.component == "pv"]
+        tips = self._pv_tips_sorted()
         return {
             "tip_count": len(tips),
             "tips": [{"priority": t.priority, "title": t.title, "action": t.action} for t in tips],

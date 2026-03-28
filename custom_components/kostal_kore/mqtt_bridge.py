@@ -108,6 +108,7 @@ class KostalMqttBridge:
         self._topic_base = f"{TOPIC_PREFIX}/{device_id}/modbus"
         self._proxy_base = f"{TOPIC_PREFIX}/{device_id}/proxy"
         self._unsub_command: list[Any] = []
+        self._unsub_coordinator: Any = None
         self._started = False
         self._last_write: dict[str, float] = {}
         self._write_lock = asyncio.Lock()
@@ -122,6 +123,9 @@ class KostalMqttBridge:
 
     async def async_start(self) -> None:
         """Start publishing data and subscribing to commands."""
+        if self._started:
+            return
+
         if not _has_mqtt(self._hass):
             _LOGGER.warning(
                 "MQTT integration not available – Modbus MQTT bridge disabled. "
@@ -149,7 +153,9 @@ class KostalMqttBridge:
             )
             self._unsub_command.append(unsub)
 
-        self._coordinator.async_add_listener(self._on_coordinator_update)
+        self._unsub_coordinator = self._coordinator.async_add_listener(
+            self._on_coordinator_update
+        )
         self._started = True
 
         await self._publish_register_metadata()
@@ -163,6 +169,10 @@ class KostalMqttBridge:
         """Stop the bridge and publish offline status."""
         if not self._started:
             return
+
+        if self._unsub_coordinator is not None:
+            self._unsub_coordinator()
+            self._unsub_coordinator = None
 
         for unsub in self._unsub_command:
             unsub()
@@ -368,9 +378,7 @@ class KostalMqttBridge:
 
     async def _execute_write(self, reg: ModbusRegister, payload: str, source: str) -> None:
         """Validate, rate-limit, arbitrate, and execute a register write."""
-        if not self._check_rate_limit(reg.name):
-            return
-
+        # --- Validate BEFORE consuming the rate-limit slot ---
         if reg.name in self._BATTERY_REG_NAMES and not self._installer_access:
             _LOGGER.warning(
                 "MQTT command rejected: installer access required for %s (source: %s)",
@@ -384,7 +392,7 @@ class KostalMqttBridge:
             ctrl = self._soc_controller
             if ctrl is not None and getattr(ctrl, "active", False):
                 _LOGGER.warning(
-                    "MQTT command REJECTED: %s (SoC Controller active, target=%.0f%%). "
+                    "MQTT command rejected: %s (SoC Controller active, target=%.0f%%). "
                     "Stop the SoC Controller first. (source: %s)",
                     reg.name, ctrl.target_soc or 0, source,
                 )
@@ -397,6 +405,15 @@ class KostalMqttBridge:
             except (json.JSONDecodeError, ValueError):
                 value = payload
 
+            # json.loads can produce bool, None, list, dict — reject all
+            # non-numeric types before they reach the Modbus write path.
+            if isinstance(value, bool) or value is None or isinstance(value, (list, dict)):
+                _LOGGER.warning(
+                    "MQTT command rejected: unsupported type %s for %s (source: %s)",
+                    type(value).__name__, reg.name, source,
+                )
+                return
+
             if isinstance(value, str):
                 try:
                     value = float(value)
@@ -407,11 +424,15 @@ class KostalMqttBridge:
                     )
                     return
 
-            if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            if isinstance(value, (int, float)) and (math.isnan(value) or math.isinf(value)):
                 _LOGGER.warning(
                     "MQTT command rejected: NaN/Infinity for %s (source: %s)",
                     reg.name, source,
                 )
+                return
+
+            # --- Rate-limit AFTER validation passes ---
+            if not self._check_rate_limit(reg.name):
                 return
 
             async with self._write_lock:
@@ -428,4 +449,5 @@ class KostalMqttBridge:
             _LOGGER.error(
                 "MQTT command failed for %s: %s (source: %s)",
                 reg.name, err, source,
+                exc_info=True,
             )

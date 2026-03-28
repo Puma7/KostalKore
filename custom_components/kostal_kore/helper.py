@@ -33,8 +33,26 @@ ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
-    """Return mutable per-entry integration state store."""
-    return cast(dict[str, Any], hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {}))
+    """Return mutable per-entry integration state store.
+
+    During normal operation the store lives in hass.data[DOMAIN][entry_id].
+    After async_unload_entry has popped the entry, callers may still fire
+    (e.g. lingering callbacks). In that case we return a detached empty dict
+    so writes are harmless no-ops instead of resurrecting the store.
+    """
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        # Integration not set up at all — should not happen during normal
+        # operation, but return detached dict to be safe.
+        _LOGGER.debug("integration_entry_store called but DOMAIN not in hass.data")
+        return {}
+    entry_data = domain_data.get(entry_id)
+    if entry_data is None:
+        # Entry not (or no longer) in domain data. Return detached dict
+        # to avoid re-creating a ghost store after unload.
+        _LOGGER.debug("integration_entry_store: entry %s not in domain data", entry_id)
+        return {}
+    return cast(dict[str, Any], entry_data)
 
 
 def generate_confirmation_code(
@@ -226,7 +244,10 @@ class PlenticoreDataFormatter:
     def format_float(state: str) -> float | None:
         """Return the given state value as float rounded to three decimal places."""
         try:
-            return round(float(state), 3)
+            value = round(float(state), 3)
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return value
         except (TypeError, ValueError):
             _handle_format_error(state, "float")
             return None
@@ -244,6 +265,8 @@ class PlenticoreDataFormatter:
         """Return the given state value as energy value, scaled to kWh."""
         try:
             value = round(float(state) / 1000, 1)
+            if math.isnan(value) or math.isinf(value):
+                return None
             if value < 0:
                 return 0.0
             return value
@@ -354,10 +377,10 @@ async def get_hostname_id(client: ApiClient) -> str:
         )
     except asyncio.TimeoutError:
         _LOGGER.error("Timeout getting settings for hostname ID")
-        raise ApiException("Timeout getting settings")  # type: ignore[no-untyped-call]
+        raise
     except (ApiException, ClientError, TimeoutError) as err:
         _LOGGER.error("Could not get settings for hostname ID: %s", err)
-        raise ApiException(f"Could not get settings: {err}") from err  # type: ignore[no-untyped-call]
+        raise
 
     network_settings = all_settings.get("scb:network", [])
     if not network_settings:
@@ -628,9 +651,9 @@ def ensure_installer_access(
             data_id,
         )
         if hass is not None:
-            create_installer_required_issue(hass)
+            create_installer_required_issue(hass, entry_id=getattr(entry, "entry_id", ""))
         return False
 
     if hass is not None:
-        clear_issue(hass, "installer_required")
+        clear_issue(hass, "installer_required", entry_id=getattr(entry, "entry_id", ""))
     return True

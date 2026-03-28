@@ -12,7 +12,8 @@
   "integration_type": "device",
   "iot_class": "local_polling",
   "loggers": [
-    "kostal"
+    "custom_components.kostal_kore",
+    "pykoplenti"
   ],
   "requirements": [
     "pykoplenti==1.5.0",

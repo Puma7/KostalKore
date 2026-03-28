@@ -36,10 +36,10 @@ class TestDCDiagnostics:
         d = e.diagnose_dc_solar()
         assert d.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH, DiagStatus.HINWEIS)
 
-    def test_dc_ok_when_no_data(self) -> None:
+    def test_dc_unknown_when_no_data(self) -> None:
         e = _make_engine()
         d = e.diagnose_dc_solar()
-        assert d.status == DiagStatus.OK
+        assert d.status == DiagStatus.UNBEKANNT
 
 
 class TestACDiagnostics:
@@ -160,13 +160,13 @@ class TestSafetyDiagnostics:
 
     def test_safety_ok(self) -> None:
         e = _make_engine()
-        e._health.update_from_modbus({"isolation_resistance": 2000000.0})
+        e._health.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
         d = e.diagnose_safety()
         assert d.status == DiagStatus.OK
 
     def test_safety_kritisch_isolation(self) -> None:
         e = _make_engine()
-        e._health.update_from_modbus({"isolation_resistance": 80000.0})
+        e._health.update_from_modbus({"isolation_resistance": 80000.0, "total_dc_power": 5000.0})
         e._safety._check_interval = 0.0
         e._safety.analyze({"isolation_resistance": 80000.0, "total_dc_power": 5000.0, "inverter_state": 6})
         d = e.diagnose_safety()
@@ -181,7 +181,7 @@ class TestSafetyDiagnostics:
 
     def test_safety_hinweis_low_iso(self) -> None:
         e = _make_engine()
-        e._health.update_from_modbus({"isolation_resistance": 700000.0})
+        e._health.update_from_modbus({"isolation_resistance": 700000.0, "total_dc_power": 5000.0})
         d = e.diagnose_safety()
         assert d.status == DiagStatus.HINWEIS
 
@@ -194,6 +194,6 @@ class TestDiagnoseAll:
         assert set(result.keys()) == {"dc_solar", "ac_grid", "battery", "inverter", "safety"}
         for area, diag in result.items():
             assert diag.area == area
-            assert diag.status in (DiagStatus.OK, DiagStatus.HINWEIS, DiagStatus.WARNUNG, DiagStatus.KRITISCH)
+            assert diag.status in (DiagStatus.OK, DiagStatus.UNBEKANNT, DiagStatus.HINWEIS, DiagStatus.WARNUNG, DiagStatus.KRITISCH)
             assert diag.title
             assert diag.action

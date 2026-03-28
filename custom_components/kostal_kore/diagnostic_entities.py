@@ -82,27 +82,41 @@ class AreaDiagnosticSensor(SensorEntity):
         self._icon_ok = icon_ok
         self._icon_warn = icon_warn
         self._icon_crit = icon_crit
+        self._entry_id = entry_id
         self._attr_name = name
         self._attr_unique_id = f"{entry_id}_diag_{area}"
         self._attr_device_info = device_info
         self._last_diagnosis: AreaDiagnosis | None = None
 
+    def _diagnosis_changed(self, old: AreaDiagnosis | None, new: AreaDiagnosis) -> bool:
+        """Return True if the diagnosis changed in status or content."""
+        if old is None:
+            return new.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH)
+        if old.status != new.status:
+            return True
+        return (old.title, old.detail, old.action) != (new.title, new.detail, new.action)
+
     def _get_diagnosis(self) -> AreaDiagnosis:
         all_diag = self._engine.diagnose_all()
         diag = all_diag.get(self._area)
         if diag is not None:
-            old_status = self._last_diagnosis.status if self._last_diagnosis else DiagStatus.OK
+            old = self._last_diagnosis
+            old_status = old.status if old else DiagStatus.OK
             self._last_diagnosis = diag
-            if diag.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH) and old_status != diag.status:
+            if diag.status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH) and self._diagnosis_changed(old, diag):
                 if self.hass is not None:
                     from .notifications import notify_diagnosis
                     self.hass.async_create_task(
-                        notify_diagnosis(self.hass, self._area, diag.status, diag.title, diag.detail, diag.action)
+                        notify_diagnosis(
+                            self.hass, self._area, diag.status, diag.title,
+                            diag.detail, diag.action, entry_id=self._entry_id,
+                        )
                     )
             elif diag.status == DiagStatus.OK and old_status in (DiagStatus.WARNUNG, DiagStatus.KRITISCH):
                 if self.hass is not None:
                     from .notifications import dismiss
-                    self.hass.async_create_task(dismiss(self.hass, f"diag_{self._area}"))
+                    scope = f"{self._entry_id}_" if self._entry_id else ""
+                    self.hass.async_create_task(dismiss(self.hass, f"{scope}diag_{self._area}"))
         return self._last_diagnosis or AreaDiagnosis(
             self._area, DiagStatus.OK, "Initialisierung...", "", "", {}
         )

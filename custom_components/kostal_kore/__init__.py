@@ -92,7 +92,7 @@ PLATFORM_SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
 EVENT_POLL_INTERVAL_SECONDS: Final[int] = 30
 
 # Performance metrics constants
-MEMORY_CLEANUP_MAX_MS: Final[int] = 500
+MEMORY_CLEANUP_MAX_MS: Final[int] = 3000
 
 
 def _handle_init_error(err: Exception, operation: str) -> bool:
@@ -154,13 +154,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         setup_success = _handle_init_error(err, "setup")
 
     if not setup_success:
+        await plenticore.async_unload()
         _log_setup_metrics(start_time, False)
         return False
 
-    clear_issue(hass, "auth_failed")
-    clear_issue(hass, "api_unreachable")
-    clear_issue(hass, "inverter_busy")
-    clear_issue(hass, "installer_required")
+    clear_issue(hass, "auth_failed", entry_id=entry.entry_id)
+    clear_issue(hass, "api_unreachable", entry_id=entry.entry_id)
+    clear_issue(hass, "inverter_busy", entry_id=entry.entry_id)
+    clear_issue(hass, "installer_required", entry_id=entry.entry_id)
 
     entry.runtime_data = plenticore
 
@@ -228,7 +229,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         # SoC Controller (must be created before MQTT bridge + proxy for arbitration)
         if modbus_coordinator is not None:  # pragma: no cover
             from .battery_soc_controller import BatterySocController
-            soc_controller = BatterySocController(modbus_coordinator, hass=hass)
+            soc_controller = BatterySocController(modbus_coordinator, hass=hass, entry_id=entry.entry_id)
 
         if modbus_coordinator and entry.options.get(
             CONF_MQTT_BRIDGE_ENABLED, False
@@ -344,11 +345,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                             notify_safety_alert(
                                 hass, alert.risk_level, alert.title,
                                 alert.detail, alert.action,
+                                entry_id=entry.entry_id,
+                                category=getattr(alert, "category", ""),
                             )
                         )
                 elif fire_safety.alert_count == 0 and fire_safety._total_polls > 0:
                     from .notifications import notify_safety_clear
-                    hass.async_create_task(notify_safety_clear(hass))
+                    hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
         modbus_coordinator.async_add_listener(_feed_health_data)
         fire_safety._total_polls = 0
@@ -393,12 +396,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 _LOGGER.warning("Modbus platform setup incomplete: %s", modbus_err)
     except Exception as err:
         _handle_init_error(err, "platform setup")
+        # Rollback runtime objects that were started before platform forwarding
+        await _rollback_setup(hass, entry, plenticore)
         _log_setup_metrics(start_time, False)
         return False
 
     async_register_migration_services(hass)
     _log_setup_metrics(start_time, True)
     return True
+
+
+async def _rollback_setup(
+    hass: HomeAssistant,
+    entry: PlenticoreConfigEntry,
+    plenticore: Plenticore,
+) -> None:
+    """Clean up runtime objects after a failed platform-forwarding attempt."""
+    entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    cleanup: list[tuple[str, Awaitable[object]]] = []
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:
+        cleanup.append(("SoC controller stop", soc_ctrl.stop()))
+    proxy = entry_data.get("modbus_proxy")
+    if proxy:
+        cleanup.append(("Modbus proxy stop", proxy.stop()))
+    mqtt = entry_data.get("mqtt_bridge")
+    if mqtt:
+        cleanup.append(("MQTT bridge stop", mqtt.async_stop()))
+    if cleanup:
+        await asyncio.gather(
+            *(_await_cleanup_step(label, step) for label, step in cleanup)
+        )
+    await plenticore.async_unload()
+    _LOGGER.warning("Rolled back partial setup for %s", entry.title)
 
 
 async def _async_options_updated(
@@ -445,17 +475,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     """
     start_time = time.time()
 
-    # Clean up SoC Controller + Modbus proxy + MQTT bridge
+    # Clean up SoC Controller + Modbus proxy + MQTT bridge (concurrently)
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    parallel_cleanup: list[tuple[str, Awaitable[object]]] = []
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
+        parallel_cleanup.append(("SoC controller stop", soc_ctrl.stop()))
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
-        await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
+        parallel_cleanup.append(("Modbus proxy stop", modbus_proxy.stop()))
     mqtt_bridge = entry_data.get("mqtt_bridge")
     if mqtt_bridge:
-        await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
+        parallel_cleanup.append(("MQTT bridge stop", mqtt_bridge.async_stop()))
+    if parallel_cleanup:
+        await asyncio.gather(
+            *(
+                _await_cleanup_step(label, step)
+                for label, step in parallel_cleanup
+            )
+        )
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
         try:

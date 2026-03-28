@@ -33,17 +33,22 @@ class LegacyCleanupConfirmationCodeText(TextEntity):
 
     @property
     def native_value(self) -> str:
-        """Return currently entered confirmation code."""
+        """Return masked placeholder -- the real code is only in hass.data, not entity state."""
         if self.hass is None:
             return ""
-        entry_store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
-        return str(entry_store.get(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, ""))
+        entry_store = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        code = entry_store.get(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, "")
+        # Return length indicator instead of actual code to avoid leaking
+        # the OTP into recorder history, templates, and automations.
+        return "*" * len(code) if code else ""
 
     async def async_set_value(self, value: str) -> None:
         """Store user entered confirmation code."""
         if self.hass is None:
             return
-        entry_store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
+        entry_store = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if entry_store is None:
+            return
         entry_store[DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] = value.strip().upper()
         if self.entity_id is not None:
             self.async_write_ha_state()

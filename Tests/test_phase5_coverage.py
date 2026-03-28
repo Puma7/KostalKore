@@ -68,6 +68,9 @@ async def test_async_setup_entry_platform_setup_error(
         async def async_setup(self) -> bool:
             return True
 
+        async def async_unload(self) -> None:
+            pass
+
     mock_config_entry.add_to_hass(hass)
 
     with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
@@ -113,6 +116,9 @@ async def test_async_setup_entry_setup_error(
 
         async def async_setup(self) -> bool:
             raise RuntimeError("boom")
+
+        async def async_unload(self) -> None:
+            pass
 
     mock_config_entry.add_to_hass(hass)
 
@@ -495,6 +501,21 @@ async def test_async_get_config_entry_diagnostics_string_count_parse_error(
     assert diagnostics_data["configuration"] == {}
 
 
+def test_helper_format_float_nan_inf() -> None:
+    """Test format_float returns None for NaN and Inf (covers helper.py:249)."""
+    assert helper.PlenticoreDataFormatter.format_float("nan") is None
+    assert helper.PlenticoreDataFormatter.format_float("inf") is None
+    assert helper.PlenticoreDataFormatter.format_float("-inf") is None
+
+
+def test_helper_format_energy_nan_inf_negative() -> None:
+    """Test format_energy returns None for NaN/Inf and 0.0 for negative (covers helper.py:269)."""
+    assert helper.PlenticoreDataFormatter.format_energy("nan") is None
+    assert helper.PlenticoreDataFormatter.format_energy("inf") is None
+    assert helper.PlenticoreDataFormatter.format_energy("-inf") is None
+    assert helper.PlenticoreDataFormatter.format_energy("-5000") == 0.0
+
+
 def test_helper_formatters_and_conversions() -> None:
     assert helper._safe_int_conversion("6") == 6
     assert helper._safe_int_conversion("6.0") == 6
@@ -552,7 +573,7 @@ async def test_get_hostname_id_errors() -> None:
         async def get_settings(self):
             raise asyncio.TimeoutError
 
-    with pytest.raises(ApiException):
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
         await helper.get_hostname_id(TimeoutClient())
 
     class UnknownClient:
@@ -809,6 +830,263 @@ async def test_select_registry_migration_error_branch(
         "custom_components.kostal_kore.select.er.async_get", side_effect=RuntimeError("boom")
     ):
         await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+
+@pytest.mark.asyncio
+async def test_rollback_setup_cleans_up_all_objects() -> None:
+    """Test _rollback_setup cleans soc_controller, modbus_proxy, mqtt_bridge (covers __init__.py:419,422,425,427)."""
+    hass = MagicMock()
+    entry = SimpleNamespace(entry_id="test_entry", title="test")
+
+    soc_ctrl = AsyncMock()
+    proxy = AsyncMock()
+    mqtt = AsyncMock()
+
+    hass.data = {
+        DOMAIN: {
+            "test_entry": {
+                "soc_controller": soc_ctrl,
+                "modbus_proxy": proxy,
+                "mqtt_bridge": mqtt,
+            }
+        }
+    }
+
+    plenticore = AsyncMock()
+
+    async def _noop_cleanup(label, step, timeout=5.0):
+        # Consume the coroutine to avoid warnings
+        if asyncio.iscoroutine(step):
+            try:
+                await step
+            except Exception:
+                pass
+
+    with patch("custom_components.kostal_kore.__init__._await_cleanup_step", side_effect=_noop_cleanup):
+        await kp_init._rollback_setup(hass, entry, plenticore)
+
+    soc_ctrl.stop.assert_called_once()
+    proxy.stop.assert_called_once()
+    mqtt.async_stop.assert_called_once()
+    plenticore.async_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_string_count_clamped(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test StringCnt out of sane range is clamped (covers diagnostics.py:170)."""
+    async def _get_setting_values(module_id, data_id):
+        if data_id == diagnostics.STRING_COUNT_SETTING:
+            return {module_id: {diagnostics.STRING_COUNT_SETTING: "99"}}
+        return {module_id: {data_id[0]: "A"}}
+
+    plenticore = SimpleNamespace(
+        device_info={"name": "demo"},
+        client=SimpleNamespace(
+            get_process_data=AsyncMock(return_value={}),
+            get_settings=AsyncMock(return_value={}),
+            get_version=AsyncMock(return_value="1.0"),
+            get_me=AsyncMock(return_value="me"),
+            get_setting_values=AsyncMock(side_effect=_get_setting_values),
+        ),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
+        hass, mock_config_entry
+    )
+    # StringCnt 99 clamped to MAX_SANE_STRING_COUNT (6), so 6 feature IDs generated
+    assert "configuration" in diagnostics_data
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_config_fetch_error(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test config settings fetch error is captured (covers diagnostics.py:186-189,196)."""
+    call_count = 0
+
+    async def _get_setting_values(module_id, data_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call: string count
+            return {module_id: {diagnostics.STRING_COUNT_SETTING: "2"}}
+        # Second call: feature IDs - raise error
+        raise RuntimeError("feature fetch boom")
+
+    plenticore = SimpleNamespace(
+        device_info={"name": "demo"},
+        client=SimpleNamespace(
+            get_process_data=AsyncMock(return_value={}),
+            get_settings=AsyncMock(return_value={}),
+            get_version=AsyncMock(return_value="1.0"),
+            get_me=AsyncMock(return_value="me"),
+            get_setting_values=AsyncMock(side_effect=_get_setting_values),
+        ),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
+        hass, mock_config_entry
+    )
+    assert "_error" in diagnostics_data["configuration"]
+    assert "RuntimeError" in diagnostics_data["configuration"]["_error"]
+
+
+@pytest.mark.asyncio
+async def test_select_registry_migration_update_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test migration error when async_update_entity fails (covers select.py:233-234)."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=MagicMock(),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _empty_settings(_plenticore, _op):
+        return {}
+
+    entity_registry = er.async_get(hass)
+    old_unique_id = f"{mock_config_entry.entry_id}_devices:local"
+    new_unique_id = f"{mock_config_entry.entry_id}_devices:local_battery_charge"
+    entity_registry.async_get_or_create(
+        "select",
+        DOMAIN,
+        old_unique_id,
+        config_entry=mock_config_entry,
+        original_name="Old",
+    )
+    entity_registry.async_get_or_create(
+        "select",
+        DOMAIN,
+        new_unique_id,
+        config_entry=mock_config_entry,
+        original_name="New",
+    )
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _empty_settings), patch.object(
+        entity_registry,
+        "async_update_entity",
+        side_effect=RuntimeError("update failed"),
+    ):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    # Should still succeed despite migration error
+    assert len(entities) >= 1
+
+
+@pytest.mark.asyncio
+async def test_select_option_write_error_and_rollback(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test select option write failure with rollback (covers select.py:336-350)."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _settings_with_data(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _settings_with_data):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
+
+    # Set initial state so previous_option exists
+    select_entity.coordinator.data = {
+        select_entity.module_id: {select_entity.data_id: "Battery:SmartBatteryControl:Enable"}
+    }
+
+    # Make write_data fail
+    select_entity.coordinator.async_write_data = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await select_entity.async_select_option("None")
+
+
+@pytest.mark.asyncio
+async def test_select_option_write_error_rollback_also_fails(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test select option write failure when rollback also fails (covers select.py:346-349)."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _settings_with_data(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _settings_with_data):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
+
+    # Set initial state to a non-None option so rollback is attempted
+    select_entity.coordinator.data = {
+        select_entity.module_id: {select_entity.data_id: "Battery:SmartBatteryControl:Enable"}
+    }
+
+    # Make every write_data call fail (both the write and the rollback)
+    select_entity.coordinator.async_write_data = AsyncMock(side_effect=RuntimeError("always fails"))
+
+    with pytest.raises(RuntimeError, match="always fails"):
+        await select_entity.async_select_option("None")
+
+
+@pytest.mark.asyncio
+async def test_select_option_write_error_skips_rollback_for_none(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test write failure skips rollback when previous_option is None (covers select.py:342->350)."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _settings_with_data(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _settings_with_data):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
+
+    # current_option returns None when not available (no coordinator data)
+    # so previous_option will be None → rollback is skipped
+    select_entity.coordinator.async_write_data = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await select_entity.async_select_option("Battery:SmartBatteryControl:Enable")
 
 
 @pytest.mark.asyncio

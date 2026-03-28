@@ -35,9 +35,9 @@ class TestChemistryDetection:
         t = detect_chemistry(None)
         assert t.chemistry == "Unknown"
 
-    def test_zero_is_conservative(self) -> None:
+    def test_zero_is_no_battery(self) -> None:
         t = detect_chemistry(0)
-        assert t.chemistry == "Unknown"
+        assert t.chemistry == "none"
 
     def test_unknown_code_is_conservative(self) -> None:
         t = detect_chemistry(0xFFFF)

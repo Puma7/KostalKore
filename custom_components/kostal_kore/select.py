@@ -31,7 +31,7 @@ PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
 SELECT_UPDATE_INTERVAL_SECONDS: Final[int] = 30
-SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 8.0
+SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 6.0
 UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 NONE_OPTION_VALUE: Final[str] = "None"
 
@@ -144,8 +144,17 @@ async def async_setup_entry(
     """Add kostal plenticore Select widget."""
     plenticore = entry.runtime_data
 
-    # Fetch fresh settings data with timeout protection
-    available_settings_data = await _get_settings_data_safe(plenticore, "settings data")
+    # Fetch fresh settings data with timeout protection and retry
+    available_settings_data = await _get_settings_data_safe(plenticore, "settings data for select")
+
+    if not available_settings_data:
+        _LOGGER.warning(
+            "Initial select settings fetch failed, retrying in 1 second..."
+        )
+        await asyncio.sleep(1)
+        available_settings_data = await _get_settings_data_safe(
+            plenticore, "settings data for select (retry)"
+        )
     available_settings_data = available_settings_data or {}
     
     from .const import CONF_MODBUS_ENABLED
@@ -211,14 +220,22 @@ async def async_setup_entry(
                 new_entry = entries_by_unique_id.get(new_unique_id)
 
                 # If both exist, prefer the old entity_id to preserve history.
-                # Remove the new entry, then migrate the old entry to the new unique_id.
+                # Remove the new duplicate only after successfully migrating the old one.
                 if old_entry and new_entry:
+                    # Temporarily remove the duplicate so unique_id is free for the update.
                     entity_registry.async_remove(new_entry.entity_id)
-                    entity_registry.async_update_entity(
-                        old_entry.entity_id,
-                        new_unique_id=new_unique_id,
-                        disabled_by=None,
-                    )
+                    try:
+                        entity_registry.async_update_entity(
+                            old_entry.entity_id,
+                            new_unique_id=new_unique_id,
+                            disabled_by=None,
+                        )
+                    except Exception as update_err:
+                        _LOGGER.warning(
+                            "Select migration: failed to update %s to %s: %s. "
+                            "The duplicate entity will be recreated on next restart.",
+                            old_unique_id, new_unique_id, update_err,
+                        )
                     continue
 
                 if old_entry:
@@ -303,13 +320,34 @@ class PlenticoreDataSelect(
         if option not in self.options:
             raise ValueError(f"Invalid select option for {self.entity_id}: {option}")
 
-        for all_option in self.options:
-            if all_option != "None":
+        # Snapshot current state for rollback on partial failure.
+        previous_option = self.current_option
+
+        try:
+            for all_option in self.options:
+                if all_option != "None":
+                    await self.coordinator.async_write_data(
+                        self.module_id, {all_option: "0"}
+                    )
+            if option != "None":
                 await self.coordinator.async_write_data(
-                    self.module_id, {all_option: "0"}
+                    self.module_id, {option: "1"}
                 )
-        if option != "None":
-            await self.coordinator.async_write_data(self.module_id, {option: "1"})
+        except Exception:
+            _LOGGER.warning(
+                "Select write failed for %s, attempting rollback to '%s'",
+                self.entity_id, previous_option,
+            )
+            try:
+                if previous_option and previous_option != "None":
+                    await self.coordinator.async_write_data(
+                        self.module_id, {previous_option: "1"}
+                    )
+            except Exception as rb_err:
+                _LOGGER.error(
+                    "Rollback also failed for %s: %s", self.entity_id, rb_err,
+                )
+            raise
         self.async_write_ha_state()
 
     @property

@@ -92,6 +92,7 @@ class ModbusDiagnosticsButton(ButtonEntity):
 
         ok_count = 0
         skip_count = 0
+        suppressed_count = 0
         error_count = 0
         register_results: dict[str, dict[str, Any]] = {}
 
@@ -120,8 +121,13 @@ class ModbusDiagnosticsButton(ButtonEntity):
                 }
                 ok_count += 1
             except ModbusPermanentError:
-                register_results[reg.name] = {"address": reg.address, "status": "not_available"}
-                skip_count += 1
+                is_suppressed = reg.address in client.unavailable_registers
+                if is_suppressed:
+                    register_results[reg.name] = {"address": reg.address, "status": "suppressed"}
+                    suppressed_count += 1
+                else:
+                    register_results[reg.name] = {"address": reg.address, "status": "not_available"}
+                    skip_count += 1
             except ModbusClientError as err:
                 register_results[reg.name] = {"address": reg.address, "status": "error", "error": str(err)}
                 error_count += 1
@@ -171,12 +177,22 @@ class ModbusDiagnosticsButton(ButtonEntity):
 
         report_lines.append("### Zusammenfassung")
         report_lines.append(f"- Register OK: **{ok_count}**")
-        report_lines.append(f"- Nicht verfügbar/übersprungen: **{skip_count}**")
+        report_lines.append(f"- Nicht verfügbar (Modell): **{skip_count}**")
+        if suppressed_count > 0:
+            report_lines.append(f"- Temporär unterdrückt (Cache): **{suppressed_count}**")
         report_lines.append(f"- Fehler: **{error_count}**")
 
-        if error_count == 0:
+        if error_count == 0 and suppressed_count == 0:
             report_lines.append("")
             report_lines.append("**✓ Alle Tests bestanden**")
+        elif error_count == 0:
+            report_lines.append("")
+            report_lines.append(
+                f"**⚠ Tests bestanden, aber {suppressed_count} Register aus dem "
+                "Suppression-Cache übersprungen.** Diese Register wurden nach "
+                "früheren Fehlern temporär deaktiviert. Ein Neustart der Integration "
+                "oder 'Register-Cache zurücksetzen' kann das beheben."
+            )
         else:
             report_lines.append("")
             report_lines.append(f"**✗ {error_count} Fehler gefunden -- siehe oben**")
@@ -185,13 +201,15 @@ class ModbusDiagnosticsButton(ButtonEntity):
 
         report_data["registers"] = register_results
         report_data["summary"] = {
-            "ok": ok_count, "skipped": skip_count, "errors": error_count,
+            "ok": ok_count, "skipped": skip_count,
+            "suppressed": suppressed_count, "errors": error_count,
         }
 
         self._attr_extra_state_attributes = {
             "last_run": datetime.now().isoformat(),
             "registers_ok": ok_count,
             "registers_skipped": skip_count,
+            "registers_suppressed": suppressed_count,
             "registers_errors": error_count,
             "report_json": json.dumps(report_data, default=str),
         }
@@ -261,23 +279,22 @@ class BatteryTestButton(ButtonEntity):
             self.async_write_ha_state()
             return
 
-        # Block if SoC controller is active (avoid conflicting writes)
+        # Block if SoC controller is active on THIS entry (avoid conflicting writes)
         from .const import DOMAIN
-        entry_data = self.hass.data.get(DOMAIN, {})
-        for eid, edata in entry_data.items():
-            if isinstance(edata, dict):
-                ctrl = edata.get("soc_controller")
-                if ctrl is not None and getattr(ctrl, "active", False):
-                    _LOGGER.warning("Battery test blocked: SoC controller is active")
-                    self._attr_extra_state_attributes["status"] = "blocked: SoC Controller aktiv"
-                    self.async_write_ha_state()
-                    return
+        own_entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if isinstance(own_entry_data, dict):
+            ctrl = own_entry_data.get("soc_controller")
+            if ctrl is not None and getattr(ctrl, "active", False):
+                _LOGGER.warning("Battery test blocked: SoC controller is active on this entry")
+                self._attr_extra_state_attributes["status"] = "blocked: SoC Controller aktiv"
+                self.async_write_ha_state()
+                return
 
         self._attr_extra_state_attributes["status"] = "running"
         self._attr_extra_state_attributes["started"] = datetime.now().isoformat()
         self.async_write_ha_state()
 
-        self._suite = BatteryTestSuite(self._coordinator, hass=self.hass)
+        self._suite = BatteryTestSuite(self._coordinator, hass=self.hass, entry_id=self._entry_id)
 
         try:
             results = await self._suite.run()

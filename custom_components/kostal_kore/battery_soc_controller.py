@@ -54,9 +54,11 @@ class BatterySocController:
         self,
         coordinator: ModbusDataUpdateCoordinator,
         hass: Any = None,
+        entry_id: str = "",
     ) -> None:
         self._coord = coordinator
         self._hass = hass
+        self._entry_id = entry_id
         self._device_power_limit_w = get_device_power_limit_w(
             coordinator, fallback_w=DEFAULT_CONTROL_LIMIT_W
         )
@@ -71,6 +73,8 @@ class BatterySocController:
         self._task_lock = asyncio.Lock()
         self._status: str = "idle"
         self._last_write: float = 0.0
+        self._original_charge_limit: float | None = None
+        self._original_discharge_limit: float | None = None
 
     @property
     def target_soc(self) -> float | None:
@@ -169,6 +173,23 @@ class BatterySocController:
     # Main control loop
     # ------------------------------------------------------------------
 
+    async def _snapshot_limits(self) -> None:
+        """Read current charge/discharge limits before taking control."""
+        for name, attr in (
+            ("bat_max_charge_limit", "_original_charge_limit"),
+            ("bat_max_discharge_limit", "_original_discharge_limit"),
+        ):
+            reg = REGISTER_BY_NAME.get(name)
+            if not reg:
+                continue
+            try:
+                val = float(await self._coord.client.read_register(reg))
+                if not (math.isnan(val) or math.isinf(val)):
+                    setattr(self, attr, val)
+                    _LOGGER.debug("SoC Controller: snapshot %s = %.0f W", name, val)
+            except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError) as err:
+                _LOGGER.debug("SoC Controller: could not snapshot %s: %s", name, err)
+
     async def _run_loop(self) -> None:
         """Main loop: monitor SoC and control battery until target reached.
 
@@ -176,6 +197,7 @@ class BatterySocController:
             Charging:    stop if current_soc >= target  (at or above)
             Discharging: stop if current_soc <= target  (at or below)
         """
+        await self._snapshot_limits()
         was_charging = False
         consecutive_read_fails = 0
         consecutive_write_fails = 0
@@ -225,14 +247,12 @@ class BatterySocController:
                         "SoC Controller: Ziel erreicht! SoC=%.0f%% (Ziel=%.0f%%)",
                         current_soc, target,
                     )
-                    await self._write_normal()
                     await self._notify(
                         "Ziel-SoC erreicht",
                         f"Batterie bei {current_soc:.0f}% (Ziel: {target:.0f}%).\n"
                         f"Automatik-Modus wiederhergestellt.",
                     )
-                    self._target_soc = None
-                    self._status = "idle"
+                    # finally block handles _target_soc=None, _task=None, _write_normal()
                     return
 
                 # ── SAFETY CHECKS ──
@@ -290,6 +310,9 @@ class BatterySocController:
             _LOGGER.error("SoC Controller error: %s", err)
             self._status = f"error: {err}"
         finally:
+            self._target_soc = None
+            self._task = None
+            self._status = self._status if "error" in self._status else "idle"
             await self._write_normal()
 
     # ------------------------------------------------------------------
@@ -329,12 +352,14 @@ class BatterySocController:
         return True
 
     async def _write_normal(self) -> None:
-        """Reset to automatic mode."""
-        restore_limit = self._device_power_limit_w
+        """Reset to automatic mode, restoring original limits if available."""
+        fallback = self._device_power_limit_w
+        charge_limit = self._original_charge_limit if self._original_charge_limit is not None else fallback
+        discharge_limit = self._original_discharge_limit if self._original_discharge_limit is not None else fallback
         for name, val in (
             ("bat_charge_dc_abs_power", 0.0),
-            ("bat_max_charge_limit", restore_limit),
-            ("bat_max_discharge_limit", restore_limit),
+            ("bat_max_charge_limit", charge_limit),
+            ("bat_max_discharge_limit", discharge_limit),
         ):
             reg = REGISTER_BY_NAME.get(name)
             if reg:
@@ -342,6 +367,8 @@ class BatterySocController:
                     await self._coord.async_write_register(reg, val)
                 except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                     _LOGGER.warning("SoC Controller: failed to reset %s: %s", name, err)
+        self._original_charge_limit = None
+        self._original_discharge_limit = None
 
     async def _read_soc(self) -> float | None:
         reg = REGISTER_BY_NAME.get("battery_soc")
@@ -377,7 +404,7 @@ class BatterySocController:
             await self._hass.services.async_call(
                 "persistent_notification", "create",
                 {"title": f"🔋 {title}", "message": msg,
-                 "notification_id": "kostal_soc_controller"},
+                 "notification_id": f"kostal_soc_controller_{self._entry_id}"},
             )
         except Exception:  # notification is non-critical, keep broad
             _LOGGER.debug("Failed to send SoC controller notification")

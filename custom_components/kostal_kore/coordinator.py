@@ -56,8 +56,8 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_HISTORY_MAX: int = 50
 EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
-SETUP_FETCH_TIMEOUT_SECONDS: float = 8.0
-SETUP_PREWARM_TIMEOUT_SECONDS: float = 8.0
+SETUP_FETCH_TIMEOUT_SECONDS: float = 5.0
+SETUP_PREWARM_TIMEOUT_SECONDS: float = 5.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",
@@ -189,16 +189,16 @@ class Plenticore:
             _LOGGER.error(
                 "Authentication exception connecting to %s: %s", self.host, err
             )
-            create_auth_failed_issue(self.hass)
+            create_auth_failed_issue(self.hass, entry_id=self.config_entry.entry_id)
             return False
         except (ClientError, TimeoutError) as err:
             _LOGGER.error("Error connecting to %s", self.host)
-            create_api_unreachable_issue(self.hass)
+            create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
             raise ConfigEntryNotReady from err
         except ApiException as err:
             modbus_err = parse_modbus_exception(err)
             _LOGGER.error("API error during login to %s: %s", self.host, modbus_err.message)
-            create_api_unreachable_issue(self.hass)
+            create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
             raise ConfigEntryNotReady from err
         
         _LOGGER.debug("Log-in successfully to %s", self.host)
@@ -387,7 +387,7 @@ class DataUpdateCoordinatorMixin:
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear transient inverter_busy issue on successful recovery.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
-                clear_issue(hass, "inverter_busy")
+                clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
             return data
         except (ApiException, ClientError, TimeoutError) as err:
             # Parse into specific MODBUS exceptions for better error handling
@@ -404,7 +404,7 @@ class DataUpdateCoordinatorMixin:
 
             # Handle 503 errors (internal communication error)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
-                 create_inverter_busy_issue(self._plenticore.hass)
+                 create_inverter_busy_issue(self._plenticore.hass, entry_id=self._plenticore.config_entry.entry_id)
                  _LOGGER.warning("Inverter internal communication error (503) reading %s:%s - retrying later", module_id, data_id)
                  return None
 
@@ -614,6 +614,7 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         )
         # data ids to poll
         self._fetch: dict[str, list[str]] = defaultdict(list)
+        self._fetch_refcount: dict[tuple[str, str], int] = defaultdict(int)
         self._plenticore = plenticore
 
     def start_fetch_data(self, module_id: str, data_id: str) -> CALLBACK_TYPE:
@@ -626,10 +627,14 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         Returns:
             Callback function to cancel the scheduled refresh.
         """
-        if module_id in self._fetch and data_id in self._fetch[module_id]:
-            _LOGGER.debug("Data %s/%s already being fetched, skipping duplicate", module_id, data_id)
-            # Return a cleanup callback that removes the data_id when the
-            # entity is removed -- even for duplicates.
+        key = (module_id, data_id)
+        self._fetch_refcount[key] += 1
+
+        if self._fetch_refcount[key] > 1:
+            _LOGGER.debug(
+                "Data %s/%s already being fetched (refcount=%d), skipping duplicate registration",
+                module_id, data_id, self._fetch_refcount[key],
+            )
             def _stop() -> None:
                 self.stop_fetch_data(module_id, data_id)
             return _stop
@@ -652,12 +657,16 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
 
     def stop_fetch_data(self, module_id: str, data_id: str) -> None:
         """Stop fetching the given data (module-id and data-id)."""
-        if module_id in self._fetch and data_id in self._fetch[module_id]:
-            try:
-                self._fetch[module_id].remove(data_id)
-            except ValueError:
-                # Data ID already removed, ignore error
-                pass
+        key = (module_id, data_id)
+        if self._fetch_refcount[key] > 0:
+            self._fetch_refcount[key] -= 1
+        if self._fetch_refcount[key] <= 0:
+            self._fetch_refcount.pop(key, None)
+            if module_id in self._fetch and data_id in self._fetch[module_id]:
+                try:
+                    self._fetch[module_id].remove(data_id)
+                except ValueError:
+                    pass
 
 
 class AdaptivePollingCoordinatorMixin:
@@ -741,7 +750,7 @@ class ProcessDataUpdateCoordinator(
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy after a successful process-data roundtrip.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
-                clear_issue(hass, "inverter_busy")
+                clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
             self._record_success()
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
@@ -855,7 +864,7 @@ class SettingDataUpdateCoordinator(
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy once settings communication recovers.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
-                clear_issue(hass, "inverter_busy")
+                clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
             self._record_success()
             return result
         except (ApiException, ClientError, TimeoutError) as err:
@@ -871,7 +880,7 @@ class SettingDataUpdateCoordinator(
                      )
                      return self._last_result
 
-                 create_inverter_busy_issue(self._plenticore.hass)
+                 create_inverter_busy_issue(self._plenticore.hass, entry_id=self._plenticore.config_entry.entry_id)
                  _LOGGER.warning(
                      "Inverter internal communication error (503) fetching settings - retrying later"
                  )

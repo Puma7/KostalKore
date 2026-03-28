@@ -49,11 +49,11 @@ class TargetSocNumber(NumberEntity):
         self._controller = controller
         self._attr_unique_id = f"{entry_id}_battery_target_soc"
         self._attr_device_info = device_info
-        self._value: float = 0
 
     @property
     def native_value(self) -> float:
-        return self._value
+        target = self._controller.target_soc
+        return target if target is not None else 0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -63,7 +63,6 @@ class TargetSocNumber(NumberEntity):
         }
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = value
         if value < 10:
             _LOGGER.info("SoC Controller: Target auf 0 gesetzt → Automatik")
             await self._controller.set_target(None)
