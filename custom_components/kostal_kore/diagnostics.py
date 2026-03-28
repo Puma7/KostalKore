@@ -159,12 +159,14 @@ async def async_get_config_entry_diagnostics(
         lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, STRING_COUNT_SETTING)
     )
     
+    MAX_SANE_STRING_COUNT = 10
     string_count = 0
     try:
-        string_count = int(
+        raw_count = int(
             string_count_setting.get(DEVICES_LOCAL_MODULE, {})
             .get(STRING_COUNT_SETTING, 0)
         )
+        string_count = max(0, min(raw_count, MAX_SANE_STRING_COUNT))
     except (ValueError, AttributeError):
         string_count = 0
 

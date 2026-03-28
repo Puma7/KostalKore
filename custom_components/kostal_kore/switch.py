@@ -785,12 +785,19 @@ async def async_setup_entry(
                 _LOGGER.warning("Could not get string count: %s", err)
             string_count_setting = {}
 
+        MAX_SANE_STRING_COUNT = 6
         try:
-            string_count = int(
+            raw_count = int(
                 string_count_setting.get(ModuleId.DEVICES_LOCAL, {}).get(
                     SettingId.STRING_COUNT, 0
                 )
             )
+            string_count = max(0, min(raw_count, MAX_SANE_STRING_COUNT))
+            if raw_count != string_count:
+                _LOGGER.warning(
+                    "StringCnt value %d out of sane range, clamped to %d",
+                    raw_count, string_count,
+                )
         except (ValueError, AttributeError):
             string_count = 0
 

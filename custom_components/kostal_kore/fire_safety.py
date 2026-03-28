@@ -313,9 +313,10 @@ class FireSafetyMonitor:
         # Steady-state differences (different orientations, Y-adapters) are normal
         # and should NOT trigger alerts. Only sudden deviations from the
         # established ratio indicate a real problem.
-        if len(powers) == 2:
-            vals_list = sorted(powers.values())
-            ratio = vals_list[0] / vals_list[1] if vals_list[1] > 0 else 0
+        # Use min/max ratio so this works for 2-string AND 3-string systems.
+        if len(powers) >= 2:
+            vals_sorted = sorted(powers.values())
+            ratio = vals_sorted[0] / vals_sorted[-1] if vals_sorted[-1] > 0 else 0
             self._dc_ratio_history.append((now, ratio))
 
         for string, power in powers.items():

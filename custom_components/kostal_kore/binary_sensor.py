@@ -23,16 +23,15 @@ async def async_setup_entry(
         return
 
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    health_monitor = entry_data.get("health_monitor")
-    if health_monitor is None:
-        return
-
     plenticore = entry.runtime_data
+    entities: list = []
 
-    from .health_binary_sensor import create_health_binary_sensors
-    entities = create_health_binary_sensors(
-        health_monitor, entry.entry_id, plenticore.device_info
-    )
+    health_monitor = entry_data.get("health_monitor")
+    if health_monitor is not None:
+        from .health_binary_sensor import create_health_binary_sensors
+        entities.extend(create_health_binary_sensors(
+            health_monitor, entry.entry_id, plenticore.device_info
+        ))
 
     fire_safety = entry_data.get("fire_safety")
     if fire_safety is not None:
