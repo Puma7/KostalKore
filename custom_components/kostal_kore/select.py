@@ -31,7 +31,7 @@ PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
 SELECT_UPDATE_INTERVAL_SECONDS: Final[int] = 30
-SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 5.0
+SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 6.0
 UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 NONE_OPTION_VALUE: Final[str] = "None"
 
@@ -144,8 +144,17 @@ async def async_setup_entry(
     """Add kostal plenticore Select widget."""
     plenticore = entry.runtime_data
 
-    # Fetch fresh settings data with timeout protection
-    available_settings_data = await _get_settings_data_safe(plenticore, "settings data")
+    # Fetch fresh settings data with timeout protection and retry
+    available_settings_data = await _get_settings_data_safe(plenticore, "settings data for select")
+
+    if not available_settings_data:
+        _LOGGER.warning(
+            "Initial select settings fetch failed, retrying in 1 second..."
+        )
+        await asyncio.sleep(1)
+        available_settings_data = await _get_settings_data_safe(
+            plenticore, "settings data for select (retry)"
+        )
     available_settings_data = available_settings_data or {}
     
     from .const import CONF_MODBUS_ENABLED

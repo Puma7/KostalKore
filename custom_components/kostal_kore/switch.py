@@ -36,7 +36,7 @@ UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 DC_STRING_FEATURE_DATA_ID: Final[str] = STRING_FEATURE_TEMPLATE
 SHADOW_MANAGEMENT_SUPPORT: Final[int] = 1
 SHADOW_MANAGEMENT_ADVANCED: Final[int] = 3
-SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 5.0
+SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 6.0
 
 # Security defaults
 DEFAULT_ENTITY_REGISTRY_ENABLED: Final[bool] = False
@@ -88,6 +88,37 @@ def _handle_api_error(err: Exception, operation: str, context: str = "") -> None
             f" ({context})" if context else "",
             err,
         )
+
+
+async def _fetch_switch_settings(plenticore: Any) -> dict[str, Any]:
+    """Fetch switch settings with timeout protection."""
+    try:
+        settings_getter = (
+            plenticore.async_get_settings_cached
+            if hasattr(plenticore, "async_get_settings_cached")
+            else plenticore.client.get_settings
+        )
+        return await asyncio.wait_for(
+            settings_getter(),
+            timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _LOGGER.warning(
+            "Timeout fetching settings data for switch setup"
+        )
+        return {}
+    except (ApiException, ClientError, TimeoutError) as err:
+        error_msg = str(err)
+        if "Unknown API response [500]" in error_msg:
+            _LOGGER.error(
+                "Inverter API returned 500 error - feature not supported on this model"
+            )
+        elif isinstance(err, ApiException):
+            modbus_err = parse_modbus_exception(err)
+            _LOGGER.error("Could not get settings data: %s", modbus_err.message)
+        else:
+            _LOGGER.error("Could not get settings data: %s", err)
+        return {}
 
 
 def create_switch_description(
@@ -651,37 +682,18 @@ async def async_setup_entry(
         )
     )
 
-    # Fetch fresh settings data
-    try:
-        settings_getter = (
-            plenticore.async_get_settings_cached
-            if hasattr(plenticore, "async_get_settings_cached")
-            else plenticore.client.get_settings
-        )
-        available_settings_data = await asyncio.wait_for(
-            settings_getter(),
-            timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
+    # Fetch fresh settings data with retry
+    available_settings_data = await _fetch_switch_settings(plenticore)
+
+    if not available_settings_data:
         _LOGGER.warning(
-            "Timeout fetching settings data for switch setup - "
-            "continuing with minimal switch set"
+            "Initial switch settings fetch failed, retrying in 1 second..."
         )
+        await asyncio.sleep(1)
+        available_settings_data = await _fetch_switch_settings(plenticore)
+
+    if not available_settings_data:
         settings_fetch_ok = False
-        available_settings_data = {}
-    except (ApiException, ClientError, TimeoutError) as err:
-        settings_fetch_ok = False
-        error_msg = str(err)
-        if "Unknown API response [500]" in error_msg:
-            _LOGGER.error(
-                "Inverter API returned 500 error - feature not supported on this model"
-            )
-        elif isinstance(err, ApiException):
-            modbus_err = parse_modbus_exception(err)
-            _LOGGER.error("Could not get settings data: %s", modbus_err.message)
-        else:
-            _LOGGER.error("Could not get settings data: %s", err)
-        available_settings_data = {}
     available_settings_data = available_settings_data or {}
 
     from .const import CONF_MODBUS_ENABLED
