@@ -117,3 +117,40 @@ async def test_cleanup_confirmation_text_set_value_no_hass_or_entity_id(hass):
     # no entity_id branch should still persist normalized value
     await entity.async_set_value(" z9 ")
     assert hass.data[DOMAIN][entry.entry_id][DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] == "Z9"
+
+
+async def test_cleanup_confirmation_text_native_value_does_not_create_entry_store(hass):
+    """Reading native_value should not recreate a missing entry store."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore",
+        data={"host": "10.0.0.11", "password": "pw"},
+    )
+    entry.runtime_data = SimpleNamespace(
+        device_info=DeviceInfo(identifiers={(DOMAIN, "SERIAL-TEXT-6")})
+    )
+    hass.data.setdefault(DOMAIN, {})
+
+    entity = text_platform.LegacyCleanupConfirmationCodeText(entry)
+    entity.hass = hass
+
+    assert entity.native_value == ""
+    assert entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_setup_entry_initializes_empty_confirmation_code(hass):
+    """Platform setup should initialize the cleanup code store entry."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore",
+        data={"host": "10.0.0.11", "password": "pw"},
+    )
+    entry.runtime_data = SimpleNamespace(
+        device_info=DeviceInfo(identifiers={(DOMAIN, "SERIAL-TEXT-7")})
+    )
+
+    added = []
+    await text_platform.async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert len(added) == 1
+    assert hass.data[DOMAIN][entry.entry_id][DATA_KEY_LEGACY_CLEANUP_CODE_INPUT] == ""

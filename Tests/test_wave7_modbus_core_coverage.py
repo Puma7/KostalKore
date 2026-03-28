@@ -1,0 +1,441 @@
+"""Coverage tests for omitted Modbus coordinator and button modules."""
+
+from __future__ import annotations
+
+import json
+import math
+from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
+from custom_components.kostal_kore.const import DOMAIN
+from custom_components.kostal_kore.modbus_button import (
+    BatteryTestButton,
+    ModbusDiagnosticsButton,
+    ModbusResetButton,
+    create_modbus_buttons,
+)
+from custom_components.kostal_kore.modbus_client import (
+    ModbusClientError,
+    ModbusConnectionError,
+    ModbusPermanentError,
+)
+from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+from custom_components.kostal_kore.modbus_registers import (
+    Access,
+    DataType,
+    ModbusRegister,
+    RegisterGroup,
+)
+
+
+def _device_info() -> dict[str, str]:
+    return {"identifiers": {("kostal_kore", "abc")}}
+
+
+def _modbus_reg(
+    address: int,
+    name: str,
+    *,
+    group: RegisterGroup,
+    access: Access = Access.RO,
+    data_type: DataType = DataType.FLOAT32,
+    count: int = 2,
+    unit: str | None = None,
+) -> ModbusRegister:
+    return ModbusRegister(address, name, name, data_type, count, access, group, unit)
+
+
+def _modbus_client() -> MagicMock:
+    client = MagicMock()
+    client.host = "1.2.3.4"
+    client.port = 1502
+    client.unit_id = 71
+    client.connected = True
+    client.connect = AsyncMock()
+    client.detect_endianness = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.read_register = AsyncMock()
+    client.write_register = AsyncMock()
+    client.write_by_name = AsyncMock()
+    client.write_by_address = AsyncMock()
+    client.import_unavailable_state = MagicMock()
+    client.export_unavailable_state = MagicMock(return_value={})
+    client.reset_unavailable = MagicMock()
+    client.unavailable_registers = set()
+    return client
+
+
+@pytest.mark.asyncio
+async def test_modbus_coordinator_setup_shutdown_and_capability_cache(hass) -> None:
+    """Coordinator setup/shutdown and cache helpers should handle all main branches."""
+    client = _modbus_client()
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+    assert coordinator.client is client
+    assert coordinator.device_info_data == {}
+
+    with patch.object(coordinator, "_read_device_info", new=AsyncMock()) as read_info, patch.object(
+        coordinator, "_load_register_capability_state", new=AsyncMock()
+    ) as load_caps:
+        await coordinator.async_setup()
+    client.connect.assert_awaited_once()
+    client.detect_endianness.assert_awaited_once()
+    read_info.assert_awaited_once()
+    load_caps.assert_awaited_once()
+
+    await coordinator.async_shutdown()
+    client.disconnect.assert_awaited_once()
+
+    coordinator._device_info = {"sw_version": "1.2.3"}
+    assert coordinator._capability_signature() == "1.2.3.4:1502:71:1.2.3"
+
+    coordinator._capability_store.async_load = AsyncMock(side_effect=RuntimeError("load failed"))
+    await coordinator._load_register_capability_state()
+
+    coordinator._capability_store.async_load = AsyncMock(return_value=None)
+    await coordinator._load_register_capability_state()
+
+    coordinator._capability_store.async_load = AsyncMock(
+        return_value={"signature": "other", "state": {"a": 1}}
+    )
+    await coordinator._load_register_capability_state()
+
+    coordinator._capability_store.async_load = AsyncMock(
+        return_value={"signature": coordinator._capability_signature(), "state": {"10": 2}}
+    )
+    await coordinator._load_register_capability_state()
+    client.import_unavailable_state.assert_called_once_with({"10": 2})
+    assert coordinator._last_saved_capability_state == json.dumps({"10": 2}, sort_keys=True)
+
+    client.import_unavailable_state.reset_mock()
+    client.import_unavailable_state.side_effect = ValueError("bad state")
+    await coordinator._load_register_capability_state()
+    client.import_unavailable_state.side_effect = None
+
+    coordinator._capability_store.async_load = AsyncMock(
+        return_value={"signature": coordinator._capability_signature(), "state": ["not-a-dict"]}
+    )
+    await coordinator._load_register_capability_state()
+
+    client.export_unavailable_state.return_value = {"x": 1}
+    coordinator._last_saved_capability_state = json.dumps({"x": 1}, sort_keys=True)
+    coordinator._capability_store.async_save = AsyncMock()
+    await coordinator._save_register_capability_state_if_changed()
+    coordinator._capability_store.async_save.assert_not_awaited()
+
+    client.export_unavailable_state.return_value = {"y": 2}
+    await coordinator._save_register_capability_state_if_changed()
+    coordinator._capability_store.async_save.assert_awaited_once()
+    assert coordinator._last_saved_capability_state == json.dumps({"y": 2}, sort_keys=True)
+
+    coordinator._capability_store.async_save = AsyncMock(side_effect=RuntimeError("save failed"))
+    client.export_unavailable_state.return_value = {"z": 3}
+    await coordinator._save_register_capability_state_if_changed()
+
+
+@pytest.mark.asyncio
+async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None:
+    """Coordinator should cover reconnect, read loops and write validation."""
+    client = _modbus_client()
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+
+    fast_ok = _modbus_reg(10, "fast_ok", group=RegisterGroup.POWER)
+    slow_ok = _modbus_reg(20, "slow_ok", group=RegisterGroup.ENERGY)
+    fast_perm = _modbus_reg(30, "fast_perm", group=RegisterGroup.BATTERY)
+    fast_err = _modbus_reg(40, "fast_err", group=RegisterGroup.PHASE)
+
+    async def _read_side_effect(reg: ModbusRegister):
+        if reg.name == "fast_perm":
+            raise ModbusPermanentError("perm")
+        if reg.name == "fast_err":
+            raise ModbusClientError("oops")
+        return reg.address * 1.0
+
+    client.connected = False
+    client.read_register.side_effect = _read_side_effect
+    coordinator._slow_tick = 5
+    coordinator._device_info_tick = 59
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_ok, fast_perm, slow_ok),
+    ), patch.object(coordinator, "_read_device_info", new=AsyncMock()) as read_info, patch.object(
+        coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
+    ) as save_state:
+        data = await coordinator._async_update_data()
+    client.connect.assert_awaited()
+    client.detect_endianness.assert_awaited()
+    assert data == {"fast_ok": 10.0, "slow_ok": 20.0}
+    read_info.assert_awaited_once()
+    save_state.assert_awaited_once()
+
+    client.connected = False
+    client.connect = AsyncMock(side_effect=ModbusConnectionError("down"))
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_ok,),
+    ):
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+    client.connect = AsyncMock()
+    client.detect_endianness = AsyncMock()
+    client.connected = True
+    client.read_register.side_effect = ModbusConnectionError("lost")
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_ok,),
+    ):
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+    client.read_register.side_effect = ModbusClientError("all bad")
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_ok, fast_err),
+    ):
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+    client.read_register.side_effect = _read_side_effect
+    coordinator._slow_tick = 0
+    coordinator._device_info_tick = 0
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_perm,),
+    ), patch.object(
+        coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
+    ):
+        assert await coordinator._async_update_data() == {}
+
+    slow_perm = _modbus_reg(50, "slow_perm", group=RegisterGroup.ENERGY)
+    slow_err = _modbus_reg(60, "slow_err", group=RegisterGroup.ENERGY)
+
+    async def _slow_side_effect(reg: ModbusRegister):
+        if reg.name == "slow_perm":
+            raise ModbusPermanentError("perm slow")
+        if reg.name == "slow_err":
+            raise ModbusClientError("err slow")
+        return 1.0
+
+    client.read_register.side_effect = _slow_side_effect
+    coordinator._slow_tick = 5
+    coordinator._device_info_tick = 0
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_ok, slow_perm, slow_err),
+    ), patch.object(
+        coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
+    ):
+        assert await coordinator._async_update_data() == {"fast_ok": 1.0}
+
+    info_values = {"serial_number": "SN", "product_name": "PLENTICORE"}
+
+    async def _info_read(reg: ModbusRegister):
+        if reg.name == "sw_version":
+            raise ModbusClientError("skip")
+        return info_values.get(reg.name, reg.name)
+
+    client.read_register.side_effect = _info_read
+    await coordinator._read_device_info()
+    assert coordinator.device_info_data["serial_number"] == "SN"
+    assert "sw_version" not in coordinator.device_info_data
+
+    ro_reg = _modbus_reg(100, "ro_reg", group=RegisterGroup.POWER, access=Access.RO)
+    rw_reg = _modbus_reg(101, "rw_reg", group=RegisterGroup.CONTROL, access=Access.RW)
+    with pytest.raises(ValueError):
+        await coordinator.async_write_register(ro_reg, 1)
+    with pytest.raises(ValueError):
+        await coordinator.async_write_register(rw_reg, math.nan)
+    with pytest.raises(ValueError):
+        await coordinator.async_write_register(rw_reg, math.inf)
+
+    await coordinator.async_write_register(rw_reg, 42)
+    client.write_register.assert_awaited_with(rw_reg, 42)
+
+    client.write_register = AsyncMock(side_effect=ModbusClientError("write failed"))
+    with pytest.raises(ModbusClientError):
+        await coordinator.async_write_register(rw_reg, 5)
+
+    await coordinator.async_write_by_name("foo", 1)
+    client.write_by_name.assert_awaited_once_with("foo", 1)
+    await coordinator.async_write_by_address(123, 2)
+    client.write_by_address.assert_awaited_once_with(123, 2)
+
+
+@pytest.mark.asyncio
+async def test_modbus_reset_button_and_create_buttons() -> None:
+    """Reset button should clear suppression state and request a refresh."""
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+    coordinator.client.unavailable_registers = {1, 2, 3}
+    coordinator.client.reset_unavailable = MagicMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    reset = ModbusResetButton(coordinator, "entry", _device_info())
+    await reset.async_press()
+    coordinator.client.reset_unavailable.assert_called_once()
+    coordinator.async_request_refresh.assert_awaited_once()
+
+    buttons = create_modbus_buttons(coordinator, "entry", _device_info())
+    assert [type(button) for button in buttons] == [
+        ModbusResetButton,
+        ModbusDiagnosticsButton,
+        BatteryTestButton,
+    ]
+
+
+def test_modbus_diagnostics_button_format_variants() -> None:
+    """Formatting helper should translate enums and render numbers sanely."""
+    assert ModbusDiagnosticsButton._format("inverter_state", 6) == "FeedIn"
+    assert ModbusDiagnosticsButton._format("battery_type", 0x0004) == "BYD"
+    assert ModbusDiagnosticsButton._format("battery_mgmt_mode", 0x02) == "External via MODBUS"
+    assert ModbusDiagnosticsButton._format("float_small", 12.3456) == "12.35"
+    assert ModbusDiagnosticsButton._format("float_large", 123456.0) == "123,456"
+    assert ModbusDiagnosticsButton._format("other", "abc") == "abc"
+
+
+@pytest.mark.asyncio
+async def test_modbus_diagnostics_button_report_paths_and_notification_failure() -> None:
+    """Diagnostics button should report ok/suppressed/error paths and tolerate notification errors."""
+    ok_reg = _modbus_reg(1, "ok_power", group=RegisterGroup.POWER, unit="W")
+    suppressed_reg = _modbus_reg(2, "suppressed", group=RegisterGroup.POWERMETER)
+    na_reg = _modbus_reg(3, "not_available", group=RegisterGroup.ENERGY)
+    err_reg = _modbus_reg(4, "error_reg", group=RegisterGroup.DEVICE_INFO)
+    skipped_rw = _modbus_reg(5, "rw_skip", group=RegisterGroup.CONTROL, access=Access.RW)
+
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+    coordinator.client.host = "1.2.3.4"
+    coordinator.client.port = 1502
+    coordinator.client.unavailable_registers = {suppressed_reg.address}
+
+    async def _read(reg: ModbusRegister):
+        if reg.name == "suppressed":
+            raise ModbusPermanentError("suppressed")
+        if reg.name == "not_available":
+            raise ModbusPermanentError("na")
+        if reg.name == "error_reg":
+            raise ModbusClientError("broken")
+        return 123.4
+
+    coordinator.client.read_register = AsyncMock(side_effect=_read)
+
+    button = ModbusDiagnosticsButton(coordinator, "entry1", _device_info())
+    button.hass = SimpleNamespace(
+        services=SimpleNamespace(async_call=AsyncMock(side_effect=RuntimeError("notify failed")))
+    )
+    button.async_write_ha_state = MagicMock()
+
+    with patch("custom_components.kostal_kore.modbus_button.ALL_REGISTERS", (ok_reg, suppressed_reg, na_reg, err_reg, skipped_rw)):
+        await button.async_press()
+
+    attrs = button.extra_state_attributes
+    assert attrs["registers_ok"] == 1
+    assert attrs["registers_skipped"] == 2
+    assert attrs["registers_suppressed"] == 1
+    assert attrs["registers_errors"] == 1
+    report = json.loads(attrs["report_json"])
+    assert report["summary"] == {"ok": 1, "skipped": 2, "suppressed": 1, "errors": 1}
+    assert report["registers"]["suppressed"]["status"] == "suppressed"
+    assert report["registers"]["not_available"]["status"] == "not_available"
+    assert report["registers"]["error_reg"]["status"] == "error"
+    button.async_write_ha_state.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_modbus_diagnostics_button_success_and_suppressed_only_summary() -> None:
+    """Diagnostics report should distinguish perfect success from suppressed-only success."""
+    ok_reg = _modbus_reg(1, "ok_power", group=RegisterGroup.POWER, unit="W")
+    suppressed_reg = _modbus_reg(2, "suppressed", group=RegisterGroup.POWERMETER)
+    coordinator = MagicMock()
+    coordinator.client = MagicMock()
+    coordinator.client.host = "1.2.3.4"
+    coordinator.client.port = 1502
+    coordinator.client.unavailable_registers = {suppressed_reg.address}
+    hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+
+    button = ModbusDiagnosticsButton(coordinator, "entry2", _device_info())
+    button.hass = hass
+    button.async_write_ha_state = MagicMock()
+
+    coordinator.client.read_register = AsyncMock(side_effect=[111.0])
+    with patch("custom_components.kostal_kore.modbus_button.ALL_REGISTERS", (ok_reg,)):
+        await button.async_press()
+    first_message = hass.services.async_call.await_args.args[2]["message"]
+    assert "Alle Tests bestanden" in first_message
+
+    async def _read(reg: ModbusRegister):
+        if reg.name == "suppressed":
+            raise ModbusPermanentError("suppressed")
+        return 111.0
+
+    coordinator.client.read_register = AsyncMock(side_effect=_read)
+    with patch("custom_components.kostal_kore.modbus_button.ALL_REGISTERS", (ok_reg, suppressed_reg)):
+        await button.async_press()
+    second_message = hass.services.async_call.await_args.args[2]["message"]
+    assert "Suppression-Cache" in second_message
+
+
+@pytest.mark.asyncio
+async def test_battery_test_button_abort_block_success_and_error_paths(hass) -> None:
+    """Battery test button should cover abort, blocker, success and error branches."""
+    coordinator = MagicMock()
+    button = BatteryTestButton(coordinator, "entry1", _device_info())
+    button.hass = hass
+    button.async_write_ha_state = MagicMock()
+
+    running_suite = SimpleNamespace(running=True, request_abort=MagicMock())
+    button._suite = running_suite
+    await button.async_press()
+    running_suite.request_abort.assert_called_once()
+    assert button.extra_state_attributes["status"] == "aborting"
+
+    button._suite = None
+    hass.data.setdefault(DOMAIN, {})["entry1"] = {"soc_controller": SimpleNamespace(active=True)}
+    await button.async_press()
+    assert button.extra_state_attributes["status"] == "blocked: SoC Controller aktiv"
+
+    hass.data[DOMAIN]["entry1"] = {}
+    results = [SimpleNamespace(success=True), SimpleNamespace(success=False)]
+    suite_instance = SimpleNamespace(
+        running=False,
+        log_lines=["a", "b"],
+        run=AsyncMock(return_value=results),
+    )
+    with patch(
+        "custom_components.kostal_kore.battery_test.BatteryTestSuite",
+        return_value=suite_instance,
+    ):
+        await button.async_press()
+    assert button.extra_state_attributes["status"] == "completed"
+    assert button.extra_state_attributes["phases_passed"] == 1
+    assert button.extra_state_attributes["phases_total"] == 2
+
+    hass.data[DOMAIN]["entry1"] = object()
+    suite_nondict = SimpleNamespace(
+        running=False,
+        log_lines=["x"],
+        run=AsyncMock(return_value=[SimpleNamespace(success=True)]),
+    )
+    with patch(
+        "custom_components.kostal_kore.battery_test.BatteryTestSuite",
+        return_value=suite_nondict,
+    ):
+        await button.async_press()
+    assert button.extra_state_attributes["status"] == "completed"
+
+    suite_error = SimpleNamespace(
+        running=False,
+        log_lines=[],
+        run=AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    with patch(
+        "custom_components.kostal_kore.battery_test.BatteryTestSuite",
+        return_value=suite_error,
+    ):
+        await button.async_press()
+    assert button.extra_state_attributes["status"] == "error"
+    assert button.extra_state_attributes["error"] == "boom"

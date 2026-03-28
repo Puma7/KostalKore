@@ -42,6 +42,7 @@ if sys.platform == "win32":
 
 # Pre-load local integration package and map HA component aliases.
 try:
+    import importlib
     import custom_components.kostal_kore as kostal_kore
     import custom_components.kostal_kore.binary_sensor
     import custom_components.kostal_kore.button
@@ -57,13 +58,61 @@ try:
     sys.modules[_ha_prefix] = kostal_kore
     # Backward-compat alias used by legacy tests.
     sys.modules["homeassistant.components.kostal_plenticore"] = kostal_kore
+    # Bare-package alias used by the repo's long-standing unit tests.
+    sys.modules["kostal_plenticore"] = kostal_kore
     for _sub in (
-        "binary_sensor", "button", "config_flow", "const", "coordinator",
-        "health_monitor", "health_sensor", "health_binary_sensor",
+        "binary_sensor",
+        "button",
+        "config_flow",
+        "const",
+        "const_ids",
+        "coordinator",
+        "battery_chemistry",
+        "battery_soc_controller",
+        "battery_test",
+        "charge_block_switch",
+        "degradation_entities",
+        "degradation_tracker",
+        "diagnostics",
+        "diagnostics_engine",
+        "diagnostic_entities",
+        "fire_safety",
+        "fire_safety_entities",
+        "grid_charge_limiter",
+        "health_monitor",
+        "health_sensor",
+        "health_binary_sensor",
+        "helper",
+        "ksem_coordinator",
+        "legacy_migration",
+        "live_test",
+        "longevity_advisor",
+        "longevity_entities",
+        "migration_services",
+        "modbus_button",
+        "modbus_client",
+        "modbus_coordinator",
+        "modbus_number",
+        "modbus_proxy",
+        "modbus_registers",
+        "mqtt_bridge",
+        "notifications",
+        "number",
+        "power_limits",
+        "repairs",
+        "request_scheduler",
+        "scheduled_session",
+        "select",
+        "sensor",
+        "soc_controller_entities",
+        "switch",
+        "system_health_check",
+        "text",
     ):
-        module = getattr(kostal_kore, _sub)
+        module = importlib.import_module(f"custom_components.kostal_kore.{_sub}")
         sys.modules[f"{_ha_prefix}.{_sub}"] = module
         sys.modules[f"homeassistant.components.kostal_plenticore.{_sub}"] = module
+        sys.modules[f"kostal_plenticore.{_sub}"] = module
 
 except ImportError as e:
     print(f"Warning: Could not import Platinum version: {e}")

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiClient, AuthenticationException, SettingsData
 import pytest
 
@@ -262,6 +264,11 @@ def test_normalize_options_enables_modbus_dependencies() -> None:
     assert options["modbus_enabled"] is True
 
 
+def test_installer_access_unknown_role_falls_back_to_service_code() -> None:
+    assert kore_config_flow._installer_access_from_role("mystery", None) is False
+    assert kore_config_flow._installer_access_from_role("mystery", "12345") is True
+
+
 async def test_reconfigure_updates_entry_with_access_profile(
     hass: HomeAssistant,
     mock_apiclient_class: type[ApiClient],
@@ -298,3 +305,232 @@ async def test_reconfigure_updates_entry_with_access_profile(
     assert mock_config_entry.data[CONF_HOST] == "1.1.1.1"
     assert mock_config_entry.data["access_role"] == "INSTALLER"
     assert mock_config_entry.data["installer_access"] is True
+
+
+async def test_probe_and_discovery_helpers_cover_remaining_paths(
+    hass: HomeAssistant,
+) -> None:
+    """Probe/discovery helpers handle positive and negative candidates."""
+    version = SimpleNamespace(api_version="1", sw_version="2")
+    api_ctx = MagicMock()
+    api_ctx.get_version = AsyncMock(return_value=version)
+    api_client = MagicMock()
+    api_client.__aenter__.return_value = api_ctx
+    api_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.ApiClient",
+        return_value=api_client,
+    ):
+        assert await kore_config_flow._probe_kostal_api("192.168.1.10", hass) is True
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.ApiClient",
+        side_effect=RuntimeError("boom"),
+    ):
+        assert await kore_config_flow._probe_kostal_api("192.168.1.11", hass) is False
+
+    async def _fake_adapters(_hass: HomeAssistant) -> list[dict[str, object]]:
+        return [
+            {
+                "ipv4": [
+                    {"address": "192.168.10.10", "network_prefix": "24"},
+                    {"address": "192.168.10.10", "network_prefix": "bad"},
+                    {"address": "192.168.10.10", "network_prefix": 31},
+                    {"address": "not-an-ip", "network_prefix": 24},
+                ]
+            }
+        ]
+
+    with patch(
+        "homeassistant.components.network.async_get_adapters",
+        AsyncMock(side_effect=_fake_adapters),
+    ):
+        candidates = await kore_config_flow._build_discovery_candidates(hass)
+
+    assert candidates
+    assert "192.168.10.10" not in candidates
+    assert len(candidates) <= kore_config_flow.DISCOVERY_MAX_HOSTS_PER_ADAPTER
+    assert len(candidates) == len(set(candidates))
+
+    class _EmptyNetwork:
+        def hosts(self) -> list[object]:
+            return []
+
+    class _EmptyInterface:
+        ip = "10.0.0.10"
+        network = _EmptyNetwork()
+
+    with patch(
+        "homeassistant.components.network.async_get_adapters",
+        AsyncMock(return_value=[{"ipv4": [{"address": "10.0.0.10", "network_prefix": 24}]}]),
+    ), patch(
+        "custom_components.kostal_kore.config_flow.ipaddress.ip_interface",
+        return_value=_EmptyInterface(),
+    ):
+        assert await kore_config_flow._build_discovery_candidates(hass) == []
+
+    with patch(
+        "custom_components.kostal_kore.config_flow._build_discovery_candidates",
+        AsyncMock(return_value=[]),
+    ):
+        assert await kore_config_flow.discover_inverter_hosts(hass) == []
+
+    with patch(
+        "custom_components.kostal_kore.config_flow._build_discovery_candidates",
+        AsyncMock(return_value=["a", "b", "c"]),
+    ), patch(
+        "custom_components.kostal_kore.config_flow._probe_kostal_api",
+        AsyncMock(side_effect=[False, True, False]),
+    ):
+        assert await kore_config_flow.discover_inverter_hosts(hass) == ["b"]
+
+    class _DupeNetwork:
+        def __init__(self):
+            self._hosts = [
+                kore_config_flow.ipaddress.ip_address("192.168.1.10"),
+                kore_config_flow.ipaddress.ip_address("192.168.1.11"),
+            ]
+
+        def hosts(self):
+            return list(self._hosts)
+
+    class _DupeInterface:
+        def __init__(self):
+            self.ip = kore_config_flow.ipaddress.ip_address("192.168.1.10")
+            self.network = _DupeNetwork()
+
+    with patch(
+        "homeassistant.components.network.async_get_adapters",
+        AsyncMock(
+            return_value=[
+                {"enabled": True, "ipv4": [{"address": "192.168.1.10", "network_prefix": 24}]},
+                {"enabled": True, "ipv4": [{"address": "192.168.1.10", "network_prefix": 24}]},
+            ]
+        ),
+    ), patch(
+        "custom_components.kostal_kore.config_flow.ipaddress.ip_interface",
+        return_value=_DupeInterface(),
+    ):
+        assert await kore_config_flow._build_discovery_candidates(hass) == ["192.168.1.11"]
+
+
+async def test_connection_and_resolve_helpers_cover_error_paths(
+    hass: HomeAssistant,
+) -> None:
+    """Connection helpers cover empty host and discovery edge cases."""
+    with pytest.raises(kore_config_flow.NoDiscoveredInverterError):
+        await kore_config_flow.test_connection_safe(
+            hass,
+            {CONF_PASSWORD: "pw"},
+        )
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.discover_inverter_hosts",
+        AsyncMock(return_value=["10.0.0.1", "10.0.0.2"]),
+    ), patch(
+        "custom_components.kostal_kore.config_flow.test_connection_safe",
+        AsyncMock(
+            side_effect=[
+                AuthenticationException(401, "bad"),
+                AuthenticationException(401, "bad-again"),
+            ]
+        ),
+    ):
+        with pytest.raises(kore_config_flow.DiscoveryAuthFailedError):
+            await kore_config_flow.resolve_connection_safe(
+                hass,
+                {CONF_PASSWORD: "pw"},
+            )
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.discover_inverter_hosts",
+        AsyncMock(return_value=["10.0.0.3"]),
+    ), patch(
+        "custom_components.kostal_kore.config_flow.test_connection_safe",
+        AsyncMock(side_effect=ClientError("network")),
+    ):
+        with pytest.raises(ClientError):
+            await kore_config_flow.resolve_connection_safe(
+                hass,
+                {CONF_PASSWORD: "pw"},
+            )
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.discover_inverter_hosts",
+        AsyncMock(return_value=["10.0.0.4"]),
+    ), patch(
+        "custom_components.kostal_kore.config_flow.DISCOVERY_MAX_AUTH_ATTEMPTS",
+        0,
+    ):
+        with pytest.raises(kore_config_flow.NoDiscoveredInverterError):
+            await kore_config_flow.resolve_connection_safe(
+                hass,
+                {CONF_PASSWORD: "pw"},
+            )
+
+
+async def test_run_modbus_connection_test_all_register_reads_fail() -> None:
+    """All register failures should produce a failed smoke test."""
+    fake_client = MagicMock()
+    fake_client.connect = AsyncMock()
+    fake_client.detect_endianness = AsyncMock(return_value="little")
+    fake_client.read_register = AsyncMock(side_effect=RuntimeError("nope"))
+    fake_client.disconnect = AsyncMock()
+
+    with patch(
+        "custom_components.kostal_kore.modbus_client.KostalModbusClient",
+        return_value=fake_client,
+    ):
+        passed, log = await kore_config_flow.run_modbus_connection_test(
+            "127.0.0.1",
+            {},
+        )
+
+    assert passed is False
+    assert "All 6 register reads failed." in log
+
+
+async def test_flow_step_helpers_cover_remaining_branches(hass: HomeAssistant) -> None:
+    """Direct step invocation covers wizard branches not hit by end-to-end flows."""
+    flow = kore_config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+
+    with patch.object(flow, "async_step_user", AsyncMock(return_value={"step_id": "user"})):
+        assert await flow.async_step_setup_options() == {"step_id": "user"}
+
+    flow._pending_entry_data = {
+        CONF_HOST: "1.2.3.4",
+        "access_role": "USER",
+        "installer_access": False,
+    }
+    flow._pending_entry_title = "host"
+
+    with patch.object(
+        flow,
+        "async_step_setup_modbus_test",
+        AsyncMock(return_value={"step_id": "setup_modbus_test"}),
+    ):
+        result = await flow.async_step_setup_options({"modbus_enabled": True})
+    assert result == {"step_id": "setup_modbus_test"}
+
+    flow._pending_options = {"modbus_enabled": True}
+    result = await flow.async_step_setup_modbus_test({"confirm": True})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.run_modbus_connection_test",
+        AsyncMock(return_value=(False, "broken")),
+    ):
+        result = await flow.async_step_setup_modbus_test()
+    assert result["step_id"] == "setup_modbus_test"
+    assert result["errors"] == {"base": "modbus_test_failed"}
+
+    with patch(
+        "custom_components.kostal_kore.config_flow.resolve_connection_safe",
+        AsyncMock(side_effect=asyncio.TimeoutError()),
+    ):
+        result = await flow.async_step_reconfigure(
+            {CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"}
+        )
+    assert result["errors"] == {CONF_HOST: "timeout"}

@@ -260,6 +260,15 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         assert m.dc_string_imbalance is None
 
+    def test_dc_string_imbalance_excludes_dc3_when_bidirectional(self) -> None:
+        m = InverterHealthMonitor(num_bidirectional=1)
+        m.update_from_modbus(
+            {"dc1_power": 60.0, "dc2_power": 120.0, "dc3_power": 6000.0}
+        )
+        imb = m.dc_string_imbalance
+        assert imb is not None
+        assert round(imb, 2) == round((30.0 / 90.0) * 100.0, 2)
+
     def test_phase_voltage_imbalance(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"phase1_voltage": 230.0, "phase2_voltage": 235.0, "phase3_voltage": 228.0})
@@ -285,6 +294,12 @@ class TestInverterHealthMonitor:
         m.update_from_modbus({"controller_temp": 64.0})
         assert m.controller_temp.level == HealthLevel.INFO
 
+    def test_overall_health_warning_branch(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"grid_frequency": 50.6})
+        assert m.grid_frequency.level == HealthLevel.WARNING
+        assert m.overall_health == HealthLevel.WARNING
+
     def test_isolation_stored_in_ohm(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
@@ -295,3 +310,44 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
         assert m.isolation.current is None
+
+
+class TestHealthMonitorCoverageGaps:
+
+    def test_parameter_tracker_info_low_level_branch(self) -> None:
+        tracker = ParameterTracker(name="test", unit="V", info_low=210.0)
+        tracker.record(205.0)
+        assert tracker.level == HealthLevel.INFO
+
+    def test_update_from_modbus_skips_unusable_isolation_and_invalid_state(self) -> None:
+        monitor = InverterHealthMonitor()
+        with patch(
+            "kostal_plenticore.health_monitor.normalize_isolation_resistance_ohm",
+            return_value=None,
+        ):
+            monitor.update_from_modbus(
+                {
+                    "isolation_resistance": 5000.0,
+                    "total_dc_power": 5000.0,
+                    "inverter_state": "not-a-state",
+                }
+            )
+
+        assert monitor.isolation.current is None
+        assert monitor.state_change_count == 0
+
+    def test_update_battery_soh_zero_is_ignored(self) -> None:
+        monitor = InverterHealthMonitor()
+        monitor.update_battery_soh(0.0)
+        assert monitor.battery_soh.current is None
+
+    def test_overall_health_info_and_score_penalties(self) -> None:
+        monitor = InverterHealthMonitor()
+        monitor.update_from_modbus(
+            {"controller_temp": 64.0, "dc1_power": 60.0, "dc2_power": 120.0}
+        )
+        monitor._total_polls = 10
+        monitor._failed_polls = 1
+
+        assert monitor.overall_health == HealthLevel.INFO
+        assert monitor.health_score == 82

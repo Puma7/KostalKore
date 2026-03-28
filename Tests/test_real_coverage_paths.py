@@ -871,6 +871,7 @@ async def test_coordinator_remaining_branches(hass: HomeAssistant) -> None:
         hass, entry, logging.getLogger(__name__), "proc", timedelta(seconds=10), p2
     )
     proc._fetch = {"m": ["k"]}
+    proc._fetch_refcount[("m", "k")] = 1
     cb2 = proc.start_fetch_data("m", "k")
     cb2()  # line 376 callback path without scheduling debouncer timer
 

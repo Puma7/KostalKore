@@ -9,6 +9,7 @@ from kostal_plenticore.power_limits import (
     clamp_control_power_w,
     default_feed_in_limit_w,
     get_device_power_limit_w,
+    is_device_power_limit_known,
 )
 
 
@@ -38,3 +39,20 @@ def test_clamp_control_power_respects_device_limit() -> None:
 
 def test_default_feed_in_limit_uses_ratio() -> None:
     assert default_feed_in_limit_w(10000.0) == 6000.0
+
+
+def test_get_device_power_limit_handles_non_positive_and_missing_mapping() -> None:
+    assert get_device_power_limit_w(_coord(0)) == DEFAULT_CONTROL_LIMIT_W
+    assert get_device_power_limit_w(_coord(float("nan"))) == DEFAULT_CONTROL_LIMIT_W
+    assert get_device_power_limit_w(SimpleNamespace(device_info_data=123)) == DEFAULT_CONTROL_LIMIT_W
+
+
+def test_is_device_power_limit_known_detects_real_metadata() -> None:
+    assert is_device_power_limit_known(_coord(5500)) is True
+    assert is_device_power_limit_known(_coord("invalid")) is False
+    assert is_device_power_limit_known(SimpleNamespace(device_info_data=None)) is False
+
+
+def test_default_feed_in_limit_rounds_and_clamps_to_minimum() -> None:
+    assert default_feed_in_limit_w(3333.0) == 2000.0
+    assert default_feed_in_limit_w(10.0) == 100.0
