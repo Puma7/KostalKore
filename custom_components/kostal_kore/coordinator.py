@@ -614,6 +614,7 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         )
         # data ids to poll
         self._fetch: dict[str, list[str]] = defaultdict(list)
+        self._fetch_refcount: dict[tuple[str, str], int] = defaultdict(int)
         self._plenticore = plenticore
 
     def start_fetch_data(self, module_id: str, data_id: str) -> CALLBACK_TYPE:
@@ -626,10 +627,14 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         Returns:
             Callback function to cancel the scheduled refresh.
         """
-        if module_id in self._fetch and data_id in self._fetch[module_id]:
-            _LOGGER.debug("Data %s/%s already being fetched, skipping duplicate", module_id, data_id)
-            # Return a cleanup callback that removes the data_id when the
-            # entity is removed -- even for duplicates.
+        key = (module_id, data_id)
+        self._fetch_refcount[key] += 1
+
+        if self._fetch_refcount[key] > 1:
+            _LOGGER.debug(
+                "Data %s/%s already being fetched (refcount=%d), skipping duplicate registration",
+                module_id, data_id, self._fetch_refcount[key],
+            )
             def _stop() -> None:
                 self.stop_fetch_data(module_id, data_id)
             return _stop
@@ -652,12 +657,16 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
 
     def stop_fetch_data(self, module_id: str, data_id: str) -> None:
         """Stop fetching the given data (module-id and data-id)."""
-        if module_id in self._fetch and data_id in self._fetch[module_id]:
-            try:
-                self._fetch[module_id].remove(data_id)
-            except ValueError:
-                # Data ID already removed, ignore error
-                pass
+        key = (module_id, data_id)
+        if self._fetch_refcount[key] > 0:
+            self._fetch_refcount[key] -= 1
+        if self._fetch_refcount[key] <= 0:
+            self._fetch_refcount.pop(key, None)
+            if module_id in self._fetch and data_id in self._fetch[module_id]:
+                try:
+                    self._fetch[module_id].remove(data_id)
+                except ValueError:
+                    pass
 
 
 class AdaptivePollingCoordinatorMixin:

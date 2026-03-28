@@ -154,6 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         setup_success = _handle_init_error(err, "setup")
 
     if not setup_success:
+        await plenticore.async_unload()
         _log_setup_metrics(start_time, False)
         return False
 
