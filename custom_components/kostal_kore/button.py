@@ -11,9 +11,8 @@ from typing import Any, Final
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
 from .const import (
+    AddConfigEntryEntitiesCallback,
     CONF_MODBUS_ENABLED,
     DATA_KEY_LEGACY_CLEANUP_CODE_INPUT,
     DATA_KEY_LEGACY_CLEANUP_GUARD,
@@ -399,7 +398,7 @@ class LegacyCleanupButton(ButtonEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PlenticoreConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up button entities for the integration."""
     entry_store = integration_entry_store(hass, entry.entry_id)
