@@ -1932,10 +1932,9 @@ class PlenticoreCalculatedSensor(
         if self.coordinator.data is None:
             return None
 
-        # Extract metric and period from data_id (e.g., BatteryEfficiency:Total)
-        metric, period = self.data_id.split(":", 1)
-        
         try:
+            # Extract metric and period from data_id (e.g., BatteryEfficiency:Total)
+            metric, period = self.data_id.split(":", 1)
             if "TotalGridConsumption" in self.data_id:
                 # Grid to Home + Grid to Battery
                 grid_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeGrid:{period}")

@@ -566,6 +566,11 @@ class KostalModbusClient:
                     f"Timeout reading register {address} (>{READ_TIMEOUT}s)"
                 ) from err
             except (PyConnectionException, OSError) as err:
+                if self._client is not None:
+                    try:
+                        self._client.close()
+                    except Exception:
+                        pass
                 self._client = None
                 raise ModbusConnectionError(
                     f"Connection lost reading register {address}: {err}"
@@ -616,6 +621,11 @@ class KostalModbusClient:
                     f"Timeout writing register {address} (>{READ_TIMEOUT}s)"
                 ) from err
             except (PyConnectionException, OSError) as err:
+                if self._client is not None:
+                    try:
+                        self._client.close()
+                    except Exception:
+                        pass
                 self._client = None
                 raise ModbusConnectionError(
                     f"Connection lost writing register {address}: {err}"

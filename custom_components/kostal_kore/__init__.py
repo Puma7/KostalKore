@@ -26,6 +26,7 @@ from pykoplenti import ApiException
 
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -150,6 +151,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         setup_success = await asyncio.wait_for(
             plenticore.async_setup(), timeout=SETUP_TIMEOUT_SECONDS
         )
+    except ConfigEntryNotReady:
+        await plenticore.async_unload()
+        raise  # Let HA's retry machinery handle transient connection failures
     except Exception as err:
         setup_success = _handle_init_error(err, "setup")
 

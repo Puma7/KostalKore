@@ -277,6 +277,10 @@ class ModbusTcpProxyServer:
             _LOGGER.warning("Modbus proxy: client %s error: %s", peer, err)
         finally:
             writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
             if task is not None:
                 self._clients.discard(task)
 
