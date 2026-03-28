@@ -73,6 +73,30 @@ async def test_cleanup_confirmation_text_returns_empty_without_hass() -> None:
     assert entity.native_value == ""
 
 
+async def test_cleanup_confirmation_text_set_value_missing_entry_store(hass):
+    """async_set_value should no-op when entry_store is None (covers text.py:51)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore",
+        data={"host": "10.0.0.11", "password": "pw"},
+    )
+    entry.runtime_data = SimpleNamespace(
+        device_info=DeviceInfo(identifiers={(DOMAIN, "SERIAL-TEXT-5")})
+    )
+    # Set DOMAIN data but WITHOUT this entry's store
+    hass.data.setdefault(DOMAIN, {})
+
+    entity = text_platform.LegacyCleanupConfirmationCodeText(entry)
+    entity.hass = hass
+    entity.entity_id = "text.legacy_cleanup_confirmation_code_test"
+
+    # Should not raise — entry_store is None, so early return
+    await entity.async_set_value("test")
+
+    # Verify nothing was stored
+    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+
+
 async def test_cleanup_confirmation_text_set_value_no_hass_or_entity_id(hass):
     """async_set_value should no-op without hass and skip state write without entity_id."""
     entry = MockConfigEntry(
