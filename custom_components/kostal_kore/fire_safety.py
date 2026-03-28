@@ -40,6 +40,7 @@ Detectable hazard patterns (from available inverter data):
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -162,25 +163,28 @@ class FireSafetyMonitor:
         # Always run stale-alert cleanup, even during standby/off
         self.clear_stale_alerts(pv_active)
 
-        # Skip ALL checks when inverter is off/standby
+        new_alerts: list[SafetyAlert] = []
+
+        # Battery thermal + grid emergency checks run ALWAYS — thermal runaway
+        # and grid faults can occur regardless of inverter operational state.
+        new_alerts.extend(self._check_battery_thermal(data, now))
+        new_alerts.extend(self._check_controller_thermal(data, now))
+        new_alerts.extend(self._check_grid_emergency(data, now))
+
+        # Skip remaining checks when inverter is off/standby
         inverter_state = data.get("inverter_state")
         if inverter_state is not None:
             try:
                 state_int = int(inverter_state)
                 if state_int in (0, 1, 10, 15):
-                    return []
+                    return new_alerts
             except (TypeError, ValueError):
                 pass
-
-        new_alerts: list[SafetyAlert] = []
 
         # Isolation + DC checks ONLY when PV is active (need DC voltage for measurement)
         if pv_active:
             new_alerts.extend(self._check_isolation(data, now))
             new_alerts.extend(self._check_dc_string_anomaly(data, now))
-        new_alerts.extend(self._check_battery_thermal(data, now))
-        new_alerts.extend(self._check_controller_thermal(data, now))
-        new_alerts.extend(self._check_grid_emergency(data, now))
 
         # Deduplicate: only append if no active alert with same category+risk exists
         active_keys = {
@@ -539,7 +543,10 @@ def _float(val: Any) -> float | None:
     if val is None:
         return None
     try:
-        return float(val)
+        result = float(val)
+        if math.isnan(result) or math.isinf(result):
+            return None
+        return result
     except (TypeError, ValueError):
         return None
 

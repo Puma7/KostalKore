@@ -220,24 +220,30 @@ class PlenticoreDataFormatter:
     def format_round(state: str) -> int | None:
         """Return the given state value as rounded integer."""
         try:
-            return round(float(state))
-        except (TypeError, ValueError):
+            value = float(state)
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return round(value)
+        except (TypeError, ValueError, OverflowError):
             _handle_format_error(state, "round")
             return None
 
     @staticmethod
     def format_round_back(value: float) -> str:
-        """Return a rounded integer value from a float."""
-        try:
-            if isinstance(value, float) and value.is_integer():
-                int_value = int(value)
-            elif isinstance(value, int):
-                int_value = value
-            else:
-                int_value = round(value)
+        """Return a numeric string suitable for the inverter API.
 
-            return str(int_value)
-        except (TypeError, ValueError):
+        Preserves fractional precision when the value is not a whole number,
+        so entities with native_step < 1 (e.g. 0.1, 0.01) are written correctly.
+        """
+        try:
+            fval = float(value)
+            if math.isnan(fval) or math.isinf(fval):
+                return ""
+            # Preserve decimals for fractional values; use integer string for whole numbers
+            if fval == int(fval):
+                return str(int(fval))
+            return str(round(fval, 3))
+        except (TypeError, ValueError, OverflowError):
             return ""
 
     @staticmethod

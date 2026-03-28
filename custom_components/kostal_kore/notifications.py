@@ -129,11 +129,22 @@ async def notify_safety_alert(
     )
 
 
+SAFETY_RISK_LEVELS: Final[tuple[str, ...]] = ("monitor", "elevated", "high", "emergency")
+SAFETY_ALERT_CATEGORIES: Final[tuple[str, ...]] = (
+    "isolation", "battery_thermal", "controller_thermal", "dc_imbalance",
+    "dc_arc_indicator", "dc_string_anomaly", "grid_emergency",
+    "voltage_extreme", "battery_voltage_anomaly",
+)
+
+
 async def notify_safety_clear(hass: HomeAssistant, *, entry_id: str = "") -> None:
     """Dismiss safety alerts when system returns to safe state."""
     scope = f"{entry_id}_" if entry_id else ""
-    for level in ("monitor", "elevated", "high", "emergency"):
+    for level in SAFETY_RISK_LEVELS:
+        # Dismiss both legacy (level-only) and category-qualified IDs
         await dismiss(hass, f"{scope}safety_{level}")
+        for category in SAFETY_ALERT_CATEGORIES:
+            await dismiss(hass, f"{scope}safety_{category}_{level}")
 
 
 async def notify_diagnosis(

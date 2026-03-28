@@ -124,19 +124,19 @@ async def test_notify_safety_alert_uses_entry_scope_and_category() -> None:
     )
 
 
-async def test_notify_safety_clear_dismisses_all_risk_levels() -> None:
-    """Safety clear should remove notifications for all risk levels."""
+async def test_notify_safety_clear_dismisses_all_risk_levels_and_categories() -> None:
+    """Safety clear should remove both legacy and category-qualified notifications."""
     hass = _make_hass()
 
     with patch("custom_components.kostal_kore.notifications.dismiss", new=AsyncMock()) as dismiss_mock:
         await notifications.notify_safety_clear(hass, entry_id="entry1")
 
-    expected = [
-        call(hass, "entry1_safety_monitor"),
-        call(hass, "entry1_safety_elevated"),
-        call(hass, "entry1_safety_high"),
-        call(hass, "entry1_safety_emergency"),
-    ]
+    # Each risk level should dismiss the legacy ID + all category-qualified IDs
+    expected = []
+    for level in notifications.SAFETY_RISK_LEVELS:
+        expected.append(call(hass, f"entry1_safety_{level}"))
+        for cat in notifications.SAFETY_ALERT_CATEGORIES:
+            expected.append(call(hass, f"entry1_safety_{cat}_{level}"))
     assert dismiss_mock.await_args_list == expected
 
 
@@ -147,12 +147,11 @@ async def test_notify_safety_clear_without_entry_id() -> None:
     with patch("custom_components.kostal_kore.notifications.dismiss", new=AsyncMock()) as dismiss_mock:
         await notifications.notify_safety_clear(hass)
 
-    expected = [
-        call(hass, "safety_monitor"),
-        call(hass, "safety_elevated"),
-        call(hass, "safety_high"),
-        call(hass, "safety_emergency"),
-    ]
+    expected = []
+    for level in notifications.SAFETY_RISK_LEVELS:
+        expected.append(call(hass, f"safety_{level}"))
+        for cat in notifications.SAFETY_ALERT_CATEGORIES:
+            expected.append(call(hass, f"safety_{cat}_{level}"))
     assert dismiss_mock.await_args_list == expected
 
 
