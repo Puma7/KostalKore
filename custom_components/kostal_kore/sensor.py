@@ -1536,6 +1536,8 @@ async def async_setup_entry(
             _LOGGER.warning("Timeout fetching DC string count via REST API")
         except (ApiException, ClientError, TimeoutError) as err:
             _handle_api_error(err, "DC string count fetch")
+        except (ValueError, TypeError):
+            _LOGGER.warning("Invalid DC string count value from REST API, ignoring")
 
     if dc_string_count < 1:
         dc_string_count = 2
