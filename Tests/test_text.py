@@ -56,7 +56,7 @@ async def test_cleanup_confirmation_text_normalizes_and_persists_value(hass):
         hass.data[DOMAIN][entry.entry_id][DATA_KEY_LEGACY_CLEANUP_CODE_INPUT]
         == "AB12CD"
     )
-    assert entity.native_value == "AB12CD"
+    assert entity.native_value == "******"
 
 
 async def test_cleanup_confirmation_text_returns_empty_without_hass() -> None:

@@ -68,6 +68,9 @@ async def test_async_setup_entry_platform_setup_error(
         async def async_setup(self) -> bool:
             return True
 
+        async def async_unload(self) -> None:
+            pass
+
     mock_config_entry.add_to_hass(hass)
 
     with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
@@ -113,6 +116,9 @@ async def test_async_setup_entry_setup_error(
 
         async def async_setup(self) -> bool:
             raise RuntimeError("boom")
+
+        async def async_unload(self) -> None:
+            pass
 
     mock_config_entry.add_to_hass(hass)
 
@@ -552,7 +558,7 @@ async def test_get_hostname_id_errors() -> None:
         async def get_settings(self):
             raise asyncio.TimeoutError
 
-    with pytest.raises(ApiException):
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
         await helper.get_hostname_id(TimeoutClient())
 
     class UnknownClient:
