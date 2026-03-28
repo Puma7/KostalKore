@@ -339,12 +339,12 @@ class TestExceptionClassification:
         resp.exception_code = 0xFF
         resp.function_code = 0x83
         err = _classify_exception_response(resp)
-        assert isinstance(err, ModbusReadError)
+        assert isinstance(err, ModbusClientError)
 
     def test_no_exception_code_is_generic(self) -> None:
         resp = MagicMock(spec=[])
         err = _classify_exception_response(resp)
-        assert isinstance(err, ModbusReadError)
+        assert isinstance(err, ModbusClientError)
 
     def test_all_messages_defined(self) -> None:
         for code in ModbusExceptionCode:

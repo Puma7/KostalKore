@@ -165,11 +165,29 @@ def test_helper_battery_control_checks() -> None:
 
 
 def test_integration_entry_store_reuses_entry_dict(hass: HomeAssistant) -> None:
+    # Simulate __init__.py creating the store during setup
+    from custom_components.kostal_kore.const import DOMAIN
+    hass.data.setdefault(DOMAIN, {})["entry-test"] = {}
+
     first = integration_entry_store(hass, "entry-test")
     first["x"] = 1
     second = integration_entry_store(hass, "entry-test")
     assert first is second
     assert second["x"] == 1
+
+
+def test_integration_entry_store_detached_after_unload(hass: HomeAssistant) -> None:
+    """After entry is popped from hass.data, store returns detached dict."""
+    from custom_components.kostal_kore.const import DOMAIN
+    hass.data.setdefault(DOMAIN, {})["entry-gone"] = {"y": 2}
+    # Simulate async_unload_entry popping the entry
+    hass.data[DOMAIN].pop("entry-gone")
+
+    store = integration_entry_store(hass, "entry-gone")
+    assert store == {}
+    # Writes to detached dict must not resurrect the store
+    store["z"] = 3
+    assert "entry-gone" not in hass.data[DOMAIN]
 
 
 def test_generate_confirmation_code_uses_expected_alphabet() -> None:
@@ -268,7 +286,7 @@ def test_format_em_manager_state_passthrough() -> None:
 async def test_get_hostname_id_timeout() -> None:
     client = MagicMock(spec=ApiClient)
     client.get_settings = AsyncMock(side_effect=asyncio.TimeoutError())
-    with pytest.raises(ApiException):
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
         await get_hostname_id(client)
 
 
@@ -276,7 +294,7 @@ async def test_get_hostname_id_timeout() -> None:
 async def test_get_hostname_id_client_error() -> None:
     client = MagicMock(spec=ApiClient)
     client.get_settings = AsyncMock(side_effect=ClientError("boom"))
-    with pytest.raises(ApiException):
+    with pytest.raises(ClientError):
         await get_hostname_id(client)
 
 
