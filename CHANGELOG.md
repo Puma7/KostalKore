@@ -31,6 +31,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **REST write safety policy**: blocked unsupported REST battery charge/discharge setpoint write targets to avoid non-deterministic behavior.
 
+## [2.16.10-rc.2] — 2026-03-28 — Codex QA Hardening Pass (continued)
+
+Second round of Codex static analysis review. Focused on multi-inverter
+notification collisions, hass.data store lifecycle, firmware edge cases,
+and fire safety learning for 3-string systems. Includes a self-review
+pass that caught regressions in the initial fixes.
+
+### Fixed — Multi-Inverter Notification Scoping
+- **charge_block_switch.py**: notification ID scoped by `entry_id`; notification dismissed on turn-off and entity removal.
+- **battery_soc_controller.py**: added `entry_id` parameter; notification ID scoped by `entry_id`.
+- **battery_test.py**: added `entry_id` parameter; notification ID scoped by `entry_id`.
+- **notifications.py / diagnostic_entities.py / repairs.py** (prior session): all notification and repair IDs already scoped by `entry_id`.
+
+### Fixed — hass.data Store Lifecycle
+- **helper.py**: `integration_entry_store()` returns detached empty dict when entry has been unloaded, preventing ghost store resurrection after `async_unload_entry`.
+- **text.py** (prior session): uses `.get()` instead of `.setdefault()` for same reason.
+
+### Fixed — Firmware Edge Cases
+- **diagnostics.py**: `StringCnt` clamped to `[0, MAX_SANE_STRING_COUNT]` to prevent empty or oversized feature probe from malformed firmware data.
+- **switch.py**: `StringCnt` clamped to `[0, MAX_SANE_STRING_COUNT]` with warning log on out-of-range values to prevent shadow-management stall.
+- **const.py**: shared `MAX_SANE_STRING_COUNT = 6` constant for consistent bounds across modules.
+
+### Fixed — Fire Safety
+- **fire_safety.py**: DC ratio learning generalized from 2-string-only to all multi-string systems. Uses deviation-from-equal-share metric instead of min/max ratio, which was unstable for 3+ strings.
+- **fire_safety.py**: `_is_stable_ratio()` updated to check jitter of the deviation metric (< 0.10 threshold) instead of relative deviation from ratio mean.
+
+### Fixed — Platform Setup
+- **binary_sensor.py**: removed early return on missing `health_monitor` so fire-safety binary sensors are created independently in partial-init scenarios.
+- **binary_sensor.py**: updated docstring to reflect health + fire-safety scope.
+- **binary_sensor.py**: migrated from `AddEntitiesCallback` to `AddConfigEntryEntitiesCallback` compat shim.
+- **manifest.json**: `loggers` updated from `["kostal"]` to `["custom_components.kostal_kore", "pykoplenti"]`.
+
+### Breaking Changes (minor)
+- Persistent notification IDs for charge block, SoC controller, and battery test now include the config entry ID. Existing automations that match on the old global notification IDs (e.g. `kostal_charge_block`, `kostal_soc_controller`, `kostal_battery_test`) must be updated to include the entry ID suffix.
+
 ## [2.16.10-rc.1] — 2026-03-28 — Codex QA Hardening Pass
 
 Systematic code audit driven by Codex static analysis feedback. Each finding

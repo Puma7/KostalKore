@@ -289,3 +289,83 @@ See `MIGRATION_ARCHITECTURE.md` for the full plan:
 ### Rejection rate
 ~30% of findings were invalid (already fixed, false positive, or not applicable).
 Always validate before implementing.
+
+---
+
+## 19) Ghost store resurrection after async_unload_entry
+
+### What we learned
+`integration_entry_store()` used `hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {})`
+which re-creates the per-entry store if a lingering callback fires after
+`async_unload_entry` has already popped the entry from `hass.data`.
+
+### Implemented decision
+- Return a detached empty `{}` when the entry is not (or no longer) in
+  `hass.data[DOMAIN]`. Writes go into a throwaway dict — harmless no-op.
+- The real store is created in `__init__.py:async_setup_entry()` via
+  `hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {...}`, not by the
+  helper function.
+
+### Lesson
+Convenience wrappers that silently create state on first access are dangerous
+in lifecycle-aware systems. Prefer explicit creation during setup and
+read-only access everywhere else.
+
+---
+
+## 20) Multi-string fire safety learning needs a stable metric
+
+### What we learned
+The original DC string ratio learning used `min(powers) / max(powers)` which
+works well for exactly 2 strings but becomes unstable with 3+ strings. Any
+change to the weakest or strongest string shifts the ratio dramatically,
+even during normal operation (e.g. cloud passing over one orientation).
+
+### Implemented decision
+- Replaced with deviation-from-equal-share: `max(|p/total - 1/N|)` for all
+  active strings. This metric is symmetric and stable regardless of string
+  count.
+- `_is_stable_ratio()` now checks the jitter (max absolute deviation from
+  mean) of this metric over 30 minutes, with a 0.10 threshold.
+
+### Design principle
+When generalizing a 2-element algorithm to N elements, verify that the
+mathematical properties still hold. Pairwise metrics don't always scale.
+
+---
+
+## 21) Notification IDs must be entry-scoped for multi-device setups
+
+### What we learned
+Global notification IDs like `kostal_charge_block` cause silent overwrites
+when two inverters exist. Inverter B's notification replaces Inverter A's,
+and dismissing one dismisses both.
+
+### Implemented decision
+- All persistent notification IDs now include `{entry_id}` suffix.
+- Dismiss calls are added to turn-off / entity-removal paths to prevent
+  orphaned notifications.
+- This is a minor breaking change for users with automations matching on
+  the old notification IDs.
+
+### Lesson
+Any identifier that HA uses to deduplicate or address user-facing state
+must be scoped to the config entry, not global to the integration domain.
+
+---
+
+## 22) Self-review catches regressions that forward-only review misses
+
+### What we learned
+After implementing ~10 fixes in one session, switching to a "Senior QA"
+adversarial review of our own diffs caught:
+- A no-op fix (helper.py `setdefault` → `get` that still fell through to
+  `setdefault`).
+- A metric that was mathematically wrong for 3-string systems.
+- A missing dismiss in an entity-removal path.
+- Inconsistent constants across two files.
+
+### Process recommendation
+After a batch of fixes, explicitly diff all changes and review them
+assuming they are wrong. This second pass is cheap and consistently
+finds issues that the implementation mindset overlooks.
