@@ -766,8 +766,11 @@ async def async_setup_entry(
     # This ensures basic switches (Battery Strategy, Battery Manual Charge) are always created
     if settings_fetch_ok:
         try:
-            string_count_setting = await plenticore.client.get_setting_values(
-                ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
+            string_count_setting = await asyncio.wait_for(
+                plenticore.client.get_setting_values(
+                    ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
+                ),
+                timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
             )
         except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
             error_msg = str(err)
@@ -824,9 +827,12 @@ async def async_setup_entry(
                 )
                 dc_string_features = cast(
                     dict[str, dict[str, str]],
-                    await plenticore.client.get_setting_values(
-                        PlenticoreShadowMgmtSwitch.MODULE_ID,
-                        dc_string_feature_ids,
+                    await asyncio.wait_for(
+                        plenticore.client.get_setting_values(
+                            PlenticoreShadowMgmtSwitch.MODULE_ID,
+                            dc_string_feature_ids,
+                        ),
+                        timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
                     ),
                 )
                 _LOGGER.debug(
@@ -863,9 +869,12 @@ async def async_setup_entry(
                                 dc_string + 1,
                                 feature_id,
                             )
-                            single_feature = await plenticore.client.get_setting_values(
-                                PlenticoreShadowMgmtSwitch.MODULE_ID,
-                                (feature_id,),
+                            single_feature = await asyncio.wait_for(
+                                plenticore.client.get_setting_values(
+                                    PlenticoreShadowMgmtSwitch.MODULE_ID,
+                                    (feature_id,),
+                                ),
+                                timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
                             )
                             if single_feature:
                                 dc_string_features.setdefault(
