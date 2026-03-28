@@ -33,7 +33,14 @@ def _mock_mqtt_module() -> MagicMock:
 def _mock_hass(mqtt_available: bool = True) -> MagicMock:
     hass = MagicMock()
     hass.config.components = {"mqtt"} if mqtt_available else set()
-    hass.async_create_task = MagicMock(side_effect=lambda coro: coro)
+
+    def _create_task(coro):
+        # Tests only assert task creation; close the coroutine to avoid
+        # "was never awaited" warnings from the MagicMock stub.
+        coro.close()
+        return MagicMock()
+
+    hass.async_create_task = MagicMock(side_effect=_create_task)
     return hass
 
 
