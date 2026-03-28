@@ -23,6 +23,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import REGISTER_BY_NAME
 from .power_limits import get_device_power_limit_w
@@ -85,7 +86,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                                 "Switch ausschalten um Ladung wieder zu erlauben.",
                      "notification_id": "kostal_charge_block"},
                 )
-            except Exception:
+            except Exception:  # notification is non-critical, keep broad
                 _LOGGER.debug("Failed to send charge block notification")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -103,7 +104,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, 0.0)
-            except Exception as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
                 _LOGGER.warning("Failed to block charging: %s", err)
 
     async def _write_normal(self) -> None:
@@ -111,7 +112,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, self._normal_limit_w)
-            except Exception as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
                 _LOGGER.warning("Failed to restore charging: %s", err)
 
     def _start_keepalive(self) -> None:

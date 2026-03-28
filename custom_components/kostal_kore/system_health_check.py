@@ -401,7 +401,12 @@ class SystemHealthCheckButton(ButtonEntity):
                         detail=f"{fiso / 1_000_000:,.1f} MΩ",
                     )
             except (TypeError, ValueError):
-                pass
+                report.check(
+                    "Isolationswiderstand",
+                    False,
+                    detail=f"Ungültiger Wert: {iso!r}",
+                    level="warn",
+                )
 
         # Inverter state
         inv_state = data.get("inverter_state")
@@ -437,7 +442,12 @@ class SystemHealthCheckButton(ButtonEntity):
                     "Batterie SoC", True, detail=f"{fsoc:.0f}%", level="info"
                 )
             except (TypeError, ValueError):
-                pass
+                report.check(
+                    "Batterie SoC",
+                    False,
+                    detail=f"Ungültiger Wert: {soc!r}",
+                    level="warn",
+                )
 
     def _check_coordinators(
         self, report: _HealthReport, entry_data: dict[str, Any]
@@ -596,7 +606,9 @@ class SystemHealthCheckButton(ButtonEntity):
                         "→ mögliches UINT32 Endianness-Problem"
                     )
             except (TypeError, ValueError):
-                pass
+                issues.append(
+                    f"generation_energy/total_yield nicht auswertbar (ungültige Werte)"
+                )
 
         # Pattern: battery_gross_capacity unrealistic (> 1000 Ah)
         cap = data.get("battery_gross_capacity")
@@ -609,7 +621,9 @@ class SystemHealthCheckButton(ButtonEntity):
                         "→ mögliches UINT32 Endianness-Problem"
                     )
             except (TypeError, ValueError):
-                pass
+                issues.append(
+                    f"battery_gross_capacity nicht auswertbar (ungültiger Wert)"
+                )
 
         # Pattern: battery_net_capacity = 0 while gross > 0
         net_cap = data.get("battery_net_capacity")
@@ -623,7 +637,9 @@ class SystemHealthCheckButton(ButtonEntity):
                         "→ Register nicht unterstützt auf diesem Modell"
                     )
             except (TypeError, ValueError):
-                pass
+                issues.append(
+                    f"battery_net/gross_capacity nicht auswertbar (ungültige Werte)"
+                )
 
         if issues:
             report.check(

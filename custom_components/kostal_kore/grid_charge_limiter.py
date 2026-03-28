@@ -31,6 +31,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import REGISTER_BY_NAME
 from .power_limits import default_feed_in_limit_w, get_device_power_limit_w
@@ -170,7 +171,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             if math.isnan(val) or math.isinf(val):
                 return None
             return val
-        except Exception:
+        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
             return None
 
     async def _write_charge_limit(self, watts: float) -> None:
@@ -178,7 +179,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, watts)
-            except Exception as err:
+            except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
                 _LOGGER.warning("Grid limiter write failed: %s", err)
 
     async def async_will_remove_from_hass(self) -> None:
