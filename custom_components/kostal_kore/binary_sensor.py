@@ -24,7 +24,7 @@ async def async_setup_entry(
 
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     plenticore = entry.runtime_data
-    entities: list = []
+    entities: list[object] = []
 
     health_monitor = entry_data.get("health_monitor")
     if health_monitor is not None:
