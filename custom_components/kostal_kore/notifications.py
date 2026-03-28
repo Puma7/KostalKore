@@ -50,7 +50,7 @@ async def notify(
                 "notification_id": full_id,
             },
         )
-    except Exception as err:
+    except Exception as err:  # notification is non-critical, keep broad
         _LOGGER.debug("Could not create notification %s: %s", full_id, err)
 
 
@@ -62,7 +62,7 @@ async def dismiss(hass: HomeAssistant, notification_id: str) -> None:
             "persistent_notification", "dismiss",
             {"notification_id": full_id},
         )
-    except Exception:
+    except Exception:  # notification is non-critical, keep broad
         _LOGGER.debug("Failed to dismiss notification %s", full_id)
 
 

@@ -80,27 +80,33 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
                 )
 
     async def _read_registers(self, address: int, count: int) -> list[int]:
-        if not self.connected:
-            await self._ensure_connected()
-        assert self._client is not None
-        try:
-            response = await asyncio.wait_for(
-                self._client.read_holding_registers(
-                    address=address,
-                    count=count,
-                    device_id=self._unit_id,
-                ),
-                timeout=KSEM_READ_TIMEOUT,
-            )
-            if response.isError():
-                raise UpdateFailed(f"KSEM read error at {address}: {response}")
-            return list(response.registers)
-        except (PyModbusException, OSError, asyncio.TimeoutError) as err:
-            # reset connection and let next cycle reconnect
-            if self._client is not None:
+        # Ensure connection first (cheap no-op if already connected).
+        await self._ensure_connected()
+        # Guard the actual read under the lock to prevent a TOCTOU race
+        # with async_shutdown() setting _client = None between the
+        # connected-check and the read call.
+        async with self._lock:
+            if self._client is None:
+                raise UpdateFailed(
+                    "KSEM client not connected after _ensure_connected()"
+                )
+            try:
+                response = await asyncio.wait_for(
+                    self._client.read_holding_registers(
+                        address=address,
+                        count=count,
+                        device_id=self._unit_id,
+                    ),
+                    timeout=KSEM_READ_TIMEOUT,
+                )
+                if response.isError():
+                    raise UpdateFailed(f"KSEM read error at {address}: {response}")
+                return list(response.registers)
+            except (PyModbusException, OSError, asyncio.TimeoutError) as err:
+                # reset connection and let next cycle reconnect
                 self._client.close()
                 self._client = None
-            raise UpdateFailed(f"KSEM read failed at {address}: {err}") from err
+                raise UpdateFailed(f"KSEM read failed at {address}: {err}") from err
 
     async def _read_u32(self, address: int, scale: float = 1.0) -> float:
         regs = await self._read_registers(address, 2)
