@@ -118,9 +118,11 @@ class BatteryTestSuite:
 
     def __init__(
         self, coordinator: ModbusDataUpdateCoordinator, hass: Any = None,
+        entry_id: str = "",
     ) -> None:
         self._coord = coordinator
         self._hass = hass
+        self._entry_id = entry_id
         self._running = False
         self._abort_requested = False
         self._log: list[str] = []
@@ -608,7 +610,7 @@ class BatteryTestSuite:
             await self._hass.services.async_call(
                 "persistent_notification", "create",
                 {"title": f"🔋 {title}", "message": msg,
-                 "notification_id": "kostal_battery_test"},
+                 "notification_id": f"kostal_battery_test_{self._entry_id}"},
             )
         except Exception:
             _LOGGER.debug("Failed to send battery test notification")

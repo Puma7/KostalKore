@@ -229,7 +229,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         # SoC Controller (must be created before MQTT bridge + proxy for arbitration)
         if modbus_coordinator is not None:  # pragma: no cover
             from .battery_soc_controller import BatterySocController
-            soc_controller = BatterySocController(modbus_coordinator, hass=hass)
+            soc_controller = BatterySocController(modbus_coordinator, hass=hass, entry_id=entry.entry_id)
 
         if modbus_coordinator and entry.options.get(
             CONF_MQTT_BRIDGE_ENABLED, False

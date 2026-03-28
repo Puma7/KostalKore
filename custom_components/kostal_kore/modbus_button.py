@@ -294,7 +294,7 @@ class BatteryTestButton(ButtonEntity):
         self._attr_extra_state_attributes["started"] = datetime.now().isoformat()
         self.async_write_ha_state()
 
-        self._suite = BatteryTestSuite(self._coordinator, hass=self.hass)
+        self._suite = BatteryTestSuite(self._coordinator, hass=self.hass, entry_id=self._entry_id)
 
         try:
             results = await self._suite.run()

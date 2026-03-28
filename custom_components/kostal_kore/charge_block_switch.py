@@ -51,6 +51,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
     ) -> None:
         self._coord = coordinator
         self._hass_ref = hass
+        self._entry_id = entry_id
         self._normal_limit_w = get_device_power_limit_w(coordinator)
         self._attr_unique_id = f"{entry_id}_block_battery_charging"
         self._attr_device_info = device_info
@@ -108,7 +109,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                     {"title": "🔋 Akku-Ladung blockiert",
                      "message": "PV-Strom fließt ins Netz statt in den Akku.\n"
                                 "Switch ausschalten um Ladung wieder zu erlauben.",
-                     "notification_id": "kostal_charge_block"},
+                     "notification_id": f"kostal_charge_block_{self._entry_id}"},
                 )
             except Exception:  # notification is non-critical, keep broad
                 _LOGGER.debug("Failed to send charge block notification")
@@ -121,6 +122,15 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         self._is_on = False
         self.async_write_ha_state()
         _LOGGER.info("Battery charging RESTORED (REG 1038 = %.0f)", restore)
+
+        if self._hass_ref:
+            try:
+                await self._hass_ref.services.async_call(
+                    "persistent_notification", "dismiss",
+                    {"notification_id": f"kostal_charge_block_{self._entry_id}"},
+                )
+            except Exception:
+                _LOGGER.debug("Failed to dismiss charge block notification")
 
     async def _write_block(self) -> None:
         reg = REGISTER_BY_NAME.get("bat_max_charge_limit")

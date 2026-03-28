@@ -54,9 +54,11 @@ class BatterySocController:
         self,
         coordinator: ModbusDataUpdateCoordinator,
         hass: Any = None,
+        entry_id: str = "",
     ) -> None:
         self._coord = coordinator
         self._hass = hass
+        self._entry_id = entry_id
         self._device_power_limit_w = get_device_power_limit_w(
             coordinator, fallback_w=DEFAULT_CONTROL_LIMIT_W
         )
@@ -402,7 +404,7 @@ class BatterySocController:
             await self._hass.services.async_call(
                 "persistent_notification", "create",
                 {"title": f"🔋 {title}", "message": msg,
-                 "notification_id": "kostal_soc_controller"},
+                 "notification_id": f"kostal_soc_controller_{self._entry_id}"},
             )
         except Exception:  # notification is non-critical, keep broad
             _LOGGER.debug("Failed to send SoC controller notification")

@@ -33,8 +33,18 @@ ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
-    """Return mutable per-entry integration state store."""
-    return cast(dict[str, Any], hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {}))
+    """Return mutable per-entry integration state store.
+
+    Uses .get() instead of .setdefault() to avoid resurrecting a store
+    after async_unload_entry has already removed it from hass.data.
+    """
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        domain_data = hass.data.setdefault(DOMAIN, {})
+    entry_data = domain_data.get(entry_id)
+    if entry_data is None:
+        entry_data = domain_data.setdefault(entry_id, {})
+    return cast(dict[str, Any], entry_data)
 
 
 def generate_confirmation_code(
