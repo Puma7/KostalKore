@@ -117,6 +117,24 @@ CONSERVATIVE_THRESHOLDS: Final = BatteryThresholds(
     ),
 )
 
+NO_BATTERY_THRESHOLDS: Final = BatteryThresholds(
+    chemistry="none",
+    chemistry_full="No battery installed",
+    temp_optimal_max=0.0,
+    temp_acceptable_max=0.0,
+    temp_warning_max=0.0,
+    temp_critical_max=0.0,
+    temp_optimal_min=0.0,
+    temp_acceptable_min=0.0,
+    cycles_good=0,
+    cycles_warning=0,
+    cycles_critical=0,
+    soh_info=0.0,
+    soh_warning=0.0,
+    soh_critical=0.0,
+    longevity_tip="Keine Batterie installiert.",
+)
+
 _TYPE_TO_CHEMISTRY: Final[dict[int, str]] = {
     0x0004: "LFP",
     0x0200: "LFP",
@@ -132,9 +150,15 @@ _TYPE_TO_CHEMISTRY: Final[dict[int, str]] = {
 
 
 def detect_chemistry(battery_type_code: int | None) -> BatteryThresholds:
-    """Detect battery chemistry from Modbus register 588 value."""
-    if battery_type_code is None or battery_type_code == 0:
+    """Detect battery chemistry from Modbus register 588 value.
+
+    Returns NO_BATTERY_THRESHOLDS for 0x0000 ('No battery'),
+    CONSERVATIVE_THRESHOLDS for None (register not read yet).
+    """
+    if battery_type_code is None:
         return CONSERVATIVE_THRESHOLDS
+    if battery_type_code == 0:
+        return NO_BATTERY_THRESHOLDS
 
     chem = _TYPE_TO_CHEMISTRY.get(battery_type_code)
     if chem == "LFP":
