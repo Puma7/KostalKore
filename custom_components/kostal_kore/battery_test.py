@@ -51,6 +51,7 @@ MAX_BATTERY_TEMP_C: Final[float] = 48.0
 GRID_BREAKER_LIMIT_W: Final[int] = 25_000
 POWER_TOLERANCE_PCT: Final[float] = 50.0
 RAMP_UP_SAMPLES: Final[int] = 3
+MAX_CONSECUTIVE_KA_FAILURES: Final[int] = 3
 
 # Essential registers for fast monitoring (~1-2s)
 FAST_REGS: Final[list[str]] = [
@@ -185,10 +186,17 @@ class BatteryTestSuite:
     # ------------------------------------------------------------------
 
     async def _write_charge(self, power: int) -> bool:
-        """Force charge from grid. evcc mode 3: REG 1034 = -power."""
+        """Force charge from grid. evcc mode 3: REG 1034 = -power.
+
+        Also restores bat_max_charge_limit to 20000 in case a prior
+        discharge phase set it to 0 (blocking charging).
+        """
         val = float(-abs(power))
         self._emit(f"  📝 REG 1034 bat_charge_dc_abs = {val:+.0f}W (Laden {abs(power)}W)")
-        return await self._wr("bat_charge_dc_abs_power", val)
+        ok1 = await self._wr("bat_charge_dc_abs_power", val)
+        self._emit("  📝 REG 1038 bat_max_charge_limit = 20000 (Laden freigeben)")
+        ok2 = await self._wr("bat_max_charge_limit", 20000.0)
+        return ok1 and ok2
 
     async def _write_discharge(self, power: int) -> bool:
         """Force discharge to grid. REG 1034 = +power, REG 1038 = 0 (block charge)."""
@@ -435,6 +443,7 @@ class BatteryTestSuite:
         self._emit(f"  🔍 Readback: REG1034={rb1034} | bat_cd_power={rb_cd}")
 
         power_samples: list[float] = []
+        consecutive_ka_failures = 0
 
         while True:
             elapsed = time.monotonic() - start
@@ -453,6 +462,15 @@ class BatteryTestSuite:
                 res.keepalive_writes += 1
                 last_write = time.monotonic()
                 self._emit(f"  🔁 KA#{res.keepalive_writes} @{elapsed:.0f}s ({since_write:.0f}s seit letztem Write) {'✅' if ok else '⚠️'}")
+                if ok:
+                    consecutive_ka_failures = 0
+                else:
+                    consecutive_ka_failures += 1
+                    if consecutive_ka_failures >= MAX_CONSECUTIVE_KA_FAILURES:
+                        res.abort_reason = (
+                            f"Keepalive {MAX_CONSECUTIVE_KA_FAILURES}x hintereinander fehlgeschlagen"
+                        )
+                        return res
 
             # ── MONITOR ──
             full = (cycle % 3 == 0)
