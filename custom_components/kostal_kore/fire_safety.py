@@ -375,6 +375,11 @@ class FireSafetyMonitor:
         _dc_ratio_history. The distribution is "stable" when the metric
         has not jumped around much over the last 30 minutes, i.e. the
         installation has a consistent (even if asymmetric) layout.
+
+        Threshold 0.05 corresponds to ~5 percentage-point shift in any
+        string's share of total power, matching the sensitivity of the
+        old min/max-ratio code (which triggered at ~0.25 relative
+        deviation ≈ 5-7 pp absolute shift at typical operating points).
         """
         window = [d for t, d in self._dc_ratio_history if now - t < 1800]
         if len(window) < 10:
@@ -384,7 +389,7 @@ class FireSafetyMonitor:
         # A stable installation has a consistent share pattern even if
         # the absolute values fluctuate with irradiance.
         max_jitter = max(abs(d - avg_dev) for d in window)
-        return max_jitter < 0.10
+        return max_jitter < 0.05
 
     # ------------------------------------------------------------------
     # Check 3: Battery thermal runaway precursors
