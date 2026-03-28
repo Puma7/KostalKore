@@ -105,6 +105,7 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 1000000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 45.0,
             "battery_temperature": 25.0,
             "grid_frequency": 50.01,
@@ -139,7 +140,7 @@ class TestInverterHealthMonitor:
 
     def test_update_from_modbus_skips_invalid(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"isolation_resistance": "not_a_number"})
+        m.update_from_modbus({"isolation_resistance": "not_a_number", "total_dc_power": 5000.0})
         assert m.isolation.current is None
 
     def test_update_battery_soh(self) -> None:
@@ -176,6 +177,7 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 2000000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 40.0,
             "grid_frequency": 50.0,
         })
@@ -185,12 +187,13 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 50000.0,
+            "total_dc_power": 5000.0,
         })
         assert m.overall_health == HealthLevel.CRITICAL
 
     def test_overall_health_warning_from_errors(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"isolation_resistance": 2000000.0})
+        m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
         for _ in range(10):
             m.record_error("test", "error")
         assert m.overall_health == HealthLevel.WARNING
@@ -198,13 +201,14 @@ class TestInverterHealthMonitor:
     def test_health_score_decreases(self) -> None:
         m = InverterHealthMonitor()
         assert m.health_score == 100
-        m.update_from_modbus({"isolation_resistance": 50000.0})
+        m.update_from_modbus({"isolation_resistance": 50000.0, "total_dc_power": 5000.0})
         assert m.health_score < 100
 
     def test_health_score_min_zero(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 50000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 80.0,
             "grid_frequency": 52.0,
         })
@@ -219,6 +223,7 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 1500000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 42.0,
         })
         summary = m.get_health_summary()
@@ -282,5 +287,11 @@ class TestInverterHealthMonitor:
 
     def test_isolation_stored_in_ohm(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"isolation_resistance": 2000000.0})
+        m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
         assert m.isolation.current == 2000000.0
+
+    def test_isolation_skipped_when_pv_inactive(self) -> None:
+        """Isolation not recorded at night to avoid mixed-unit values."""
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
+        assert m.isolation.current is None

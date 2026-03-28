@@ -139,6 +139,7 @@ class TestDegradationTracker:
         t = DegradationTracker()
         t.update_from_modbus({
             "isolation_resistance": 2000000.0,
+            "total_dc_power": 5000.0,
             "battery_temperature": 25.0,
             "controller_temp": 45.0,
             "dc1_power": 5000.0,
@@ -152,7 +153,7 @@ class TestDegradationTracker:
 
     def test_persistence_roundtrip(self) -> None:
         t = DegradationTracker()
-        t.update_from_modbus({"isolation_resistance": 2000000.0})
+        t.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
         data = t.to_dict()
 
         t2 = DegradationTracker()

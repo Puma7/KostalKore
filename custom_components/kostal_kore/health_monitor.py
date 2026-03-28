@@ -328,6 +328,11 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
+                        # Only record isolation when PV is active to avoid
+                        # mixed-unit day/night values that flip between Ω
+                        # and kΩ in HA long-term statistics.
+                        if not pv_active:
+                            continue
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
                             pv_active=pv_active,

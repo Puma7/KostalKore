@@ -291,8 +291,10 @@ class DegradationTracker:
         except (TypeError, ValueError):
             inverter_state = None
 
+        # Only record isolation when PV is active to avoid mixed-unit
+        # day/night values (firmware may report kΩ or Ω).
         iso = data.get("isolation_resistance")
-        if iso is not None:
+        if iso is not None and pv_active:
             try:
                 normalized_ohm = normalize_isolation_resistance_ohm(
                     iso,
