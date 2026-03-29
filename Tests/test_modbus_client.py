@@ -672,7 +672,11 @@ class TestAdditionalClientCoverage:
         client.read_holding_registers = AsyncMock(side_effect=asyncio.TimeoutError())
         with pytest.raises(ModbusConnectionError, match="Timeout reading"):
             await c._raw_read_inner(10, 1)
+        assert c._client is None  # timeout closes connection
 
+        # Restore client for the next test case
+        c._client = client
+        c._client.connected = True
         client.read_holding_registers = AsyncMock(side_effect=OSError("broken pipe"))
         with pytest.raises(ModbusConnectionError, match="Connection lost reading"):
             await c._raw_read_inner(10, 1)
@@ -721,7 +725,11 @@ class TestAdditionalClientCoverage:
         client.write_register = AsyncMock(side_effect=asyncio.TimeoutError())
         with pytest.raises(ModbusConnectionError, match="Timeout writing"):
             await c._raw_write_inner(10, b"\x00\x2a", 1)
+        assert c._client is None  # timeout closes connection
 
+        # Restore client for the next test case
+        c._client = client
+        c._client.connected = True
         client.write_register = AsyncMock(side_effect=OSError("lost"))
         with pytest.raises(ModbusConnectionError, match="Connection lost writing"):
             await c._raw_write_inner(10, b"\x00\x2a", 1)
