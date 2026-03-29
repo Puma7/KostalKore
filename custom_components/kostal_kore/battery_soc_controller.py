@@ -346,7 +346,7 @@ class BatterySocController:
             await self._coord.async_write_register(reg, float(-abs(power)))
             self._last_write = time.monotonic()
             return True
-        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+        except Exception as err:
             _LOGGER.warning("SoC Controller charge write failed: %s", err)
             return False
 
@@ -359,13 +359,13 @@ class BatterySocController:
         try:
             await self._coord.async_write_register(reg1034, float(abs(power)))
             self._last_write = time.monotonic()
-        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+        except Exception as err:
             _LOGGER.warning("SoC Controller discharge write failed: %s", err)
             return False
         if reg1038:
             try:
                 await self._coord.async_write_register(reg1038, 0.0)
-            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+            except Exception as err:
                 _LOGGER.debug("SoC Controller: secondary reg1038 write failed: %s", err)
         return True
 
@@ -383,7 +383,7 @@ class BatterySocController:
             if reg:
                 try:
                     await self._coord.async_write_register(reg, val)
-                except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+                except Exception as err:
                     _LOGGER.warning("SoC Controller: failed to reset %s: %s", name, err)
         self._original_charge_limit = None
         self._original_discharge_limit = None
@@ -394,7 +394,7 @@ class BatterySocController:
             return None
         try:
             return float(await self._coord.client.read_register(reg))
-        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
+        except Exception:
             return None
 
     async def _read_temp(self) -> float | None:
@@ -403,7 +403,7 @@ class BatterySocController:
             return None
         try:
             return float(await self._coord.client.read_register(reg))
-        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
+        except Exception:
             return None
 
     async def _read_inv_state(self) -> int | None:
@@ -412,7 +412,7 @@ class BatterySocController:
             return None
         try:
             return int(await self._coord.client.read_register(reg))
-        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
+        except Exception:
             return None
 
     async def _notify(self, title: str, msg: str) -> None:

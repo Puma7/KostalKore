@@ -99,7 +99,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         await self._snapshot_charge_limit()
         try:
             await self._write_block()
-        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+        except Exception as err:
             self._original_charge_limit = None  # discard snapshot on failure
             raise HomeAssistantError("Ladung konnte nicht blockiert werden") from err
         self._is_on = True
@@ -142,7 +142,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, 0.0)
-            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+            except Exception as err:
                 _LOGGER.warning("Failed to block charging: %s", err)
                 raise
 
@@ -152,7 +152,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, limit)
-            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+            except Exception as err:
                 _LOGGER.warning("Failed to restore charging: %s", err)
 
     def _start_keepalive(self) -> None:

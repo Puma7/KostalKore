@@ -191,7 +191,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             if math.isnan(val) or math.isinf(val):
                 return None
             return val
-        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
+        except Exception:
             return None
 
     async def _write_charge_limit(self, watts: float) -> None:
@@ -199,7 +199,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         if reg:
             try:
                 await self._coord.async_write_register(reg, watts)
-            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+            except Exception as err:
                 _LOGGER.warning("Grid limiter write failed: %s", err)
 
     async def async_will_remove_from_hass(self) -> None:
