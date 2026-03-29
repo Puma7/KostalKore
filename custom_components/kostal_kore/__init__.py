@@ -463,26 +463,17 @@ async def _await_cleanup_step(
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -> bool:
-    """
-    Unload the Kostal Plenticore integration with graceful cleanup.
+    """Unload the Kostal Plenticore integration with graceful cleanup."""
+    import traceback
 
-    This function handles the graceful shutdown of the integration,
-    ensuring all resources are properly cleaned up and the inverter
-    connection is properly terminated.
-
-    Unload Process:
-    1. Clean up Modbus + MQTT bridge
-    2. Unload all platforms (sensors, switches, numbers, selects)
-    3. Logout from inverter with timeout protection
-    4. Clean up resources and connections
-    5. Monitor cleanup performance
-
-    Performance Features:
-    - Concurrent platform unloading
-    - Timeout protection for logout operations
-    - Resource cleanup monitoring
-    """
     start_time = time.time()
+    # Diagnostic: log WHO triggered the unload to debug reload loops
+    caller_stack = "".join(traceback.format_stack(limit=8))
+    _LOGGER.warning(
+        "async_unload_entry called for %s — call stack:\n%s",
+        entry.entry_id,
+        caller_stack,
+    )
 
     # Clean up SoC Controller + Modbus proxy + MQTT bridge (concurrently)
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
