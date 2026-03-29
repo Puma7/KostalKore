@@ -221,6 +221,39 @@ async def test_async_unload_entry_unload_platforms_false(
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is False
 
 
+@pytest.mark.asyncio
+async def test_async_unload_entry_with_mqtt_and_modbus(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test unload with mqtt_bridge and modbus_coordinator in entry_data (covers __init__.py:495-512)."""
+    class DummyPlenticore:
+        async def async_unload(self) -> None:
+            return None
+
+    mock_config_entry.runtime_data = DummyPlenticore()
+
+    mqtt_bridge = AsyncMock()
+    modbus_coordinator = AsyncMock()
+
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        "mqtt_bridge": mqtt_bridge,
+        "modbus_coordinator": modbus_coordinator,
+    }
+
+    with patch(
+        "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
+        AsyncMock(return_value=True),
+    ), patch(
+        "custom_components.kostal_kore.__init__._await_cleanup_step",
+        AsyncMock(),
+    ):
+        assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
+
+    mqtt_bridge.async_stop.assert_called_once()
+    modbus_coordinator.async_shutdown.assert_called_once()
+
+
 def test_handle_config_flow_error_branches() -> None:
     errors = config_flow._handle_config_flow_error(
         AuthenticationException("bad", "error"), "auth"
@@ -1164,4 +1197,69 @@ async def test_select_registry_migration_old_entry_only(
 
     with patch.object(select, "_get_settings_data_safe", _empty_settings):
         await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+
+@pytest.mark.asyncio
+async def test_select_setup_retry_on_empty_settings(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test select setup retries once when initial settings fetch returns empty (covers select.py:150-157)."""
+    plenticore = SimpleNamespace(
+        device_info={"name": "test"},
+        client=SimpleNamespace(
+            get_settings=AsyncMock(return_value={}),
+        ),
+    )
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = plenticore
+
+    call_count = 0
+
+    async def _fail_then_succeed(_plenticore, _op):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {}  # first call fails (empty)
+        return {"devices:local": [SimpleNamespace(id="X")]}  # retry succeeds
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", side_effect=_fail_then_succeed), \
+         patch("custom_components.kostal_kore.select.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+        mock_sleep.assert_called_once_with(1)
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_configuration_settings_none_fallback(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test configuration_settings or {} when get_setting_values returns None (covers diagnostics.py:193)."""
+    call_count = 0
+
+    async def _get_setting_values(module_id, data_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {module_id: {diagnostics.STRING_COUNT_SETTING: "1"}}
+        return None
+
+    plenticore = SimpleNamespace(
+        device_info={"name": "demo"},
+        client=SimpleNamespace(
+            get_process_data=AsyncMock(return_value={}),
+            get_settings=AsyncMock(return_value={}),
+            get_version=AsyncMock(return_value="1.0"),
+            get_me=AsyncMock(return_value="me"),
+            get_setting_values=AsyncMock(side_effect=_get_setting_values),
+        ),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
+        hass, mock_config_entry
+    )
+    assert diagnostics_data["configuration"] == {}
 
