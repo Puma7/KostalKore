@@ -1261,5 +1261,130 @@ async def test_diagnostics_configuration_settings_none_fallback(
     diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
         hass, mock_config_entry
     )
+    # configuration_settings was None → or {} fallback applied
     assert diagnostics_data["configuration"] == {}
+
+
+@pytest.mark.asyncio
+async def test_select_get_settings_data_safe_cached_getter(
+    hass: HomeAssistant,
+) -> None:
+    """Test _get_settings_data_safe uses async_get_settings_cached when available (covers select.py:104-107)."""
+    expected = {"devices:local": [SimpleNamespace(id="X")]}
+    plenticore = SimpleNamespace(
+        async_get_settings_cached=AsyncMock(return_value=expected),
+        client=SimpleNamespace(get_settings=AsyncMock(return_value={})),
+    )
+    result = await select._get_settings_data_safe(plenticore, "test")
+    assert result == expected
+    plenticore.async_get_settings_cached.assert_called_once()
+    plenticore.client.get_settings.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_select_modbus_active_interval(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test select coordinator uses 90s interval when Modbus is active (covers select.py:162)."""
+    from custom_components.kostal_kore.const import CONF_MODBUS_ENABLED
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = plenticore
+    hass.config_entries._entries[mock_config_entry.entry_id] = mock_config_entry
+    mock_config_entry._options = {CONF_MODBUS_ENABLED: True}
+
+    entities: list = []
+
+    async def _empty(_p, _o):
+        return {}
+
+    with patch.object(select, "_get_settings_data_safe", _empty):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+
+@pytest.mark.asyncio
+async def test_select_option_write_error_skips_rollback_for_none_string(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test rollback skipped when previous_option is the string 'None' (covers select.py:342 False)."""
+    plenticore = SimpleNamespace(
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
+        client=SimpleNamespace(set_setting_values=AsyncMock()),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    async def _settings_with_data(_plenticore, _op):
+        return {"devices:local": [SimpleNamespace(id="Battery:SmartBatteryControl:Enable")]}
+
+    entities: list = []
+
+    with patch.object(select, "_get_settings_data_safe", _settings_with_data):
+        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+
+    select_entity = entities[0]
+    select_entity.hass = hass
+    select_entity.async_write_ha_state = MagicMock()
+
+    # Set current_option to "None" (the string, not Python None)
+    select_entity.coordinator.data = {
+        select_entity.module_id: {select_entity.data_id: "None"}
+    }
+
+    select_entity.coordinator.async_write_data = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await select_entity.async_select_option("Battery:SmartBatteryControl:Enable")
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_with_cached_getters(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test diagnostics uses cached getters when available (covers diagnostics.py:111-119)."""
+    plenticore = SimpleNamespace(
+        device_info={"name": "demo"},
+        async_get_process_data_cached=AsyncMock(return_value={"mod": ["p"]}),
+        async_get_settings_cached=AsyncMock(return_value={"mod": [SimpleNamespace(id="X")]}),
+        client=SimpleNamespace(
+            get_process_data=AsyncMock(return_value={}),
+            get_settings=AsyncMock(return_value={}),
+            get_version=AsyncMock(return_value="1.0"),
+            get_me=AsyncMock(return_value="me"),
+            get_setting_values=AsyncMock(return_value={}),
+        ),
+    )
+    mock_config_entry.runtime_data = plenticore
+
+    diagnostics_data = await diagnostics.async_get_config_entry_diagnostics(
+        hass, mock_config_entry
+    )
+    assert diagnostics_data["client"]["version"] == "1.0"
+    plenticore.async_get_process_data_cached.assert_called_once()
+    plenticore.async_get_settings_cached.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rollback_setup_empty_cleanup_list() -> None:
+    """Test _rollback_setup when no soc/proxy/mqtt objects exist (covers __init__.py:433 False)."""
+    hass = MagicMock()
+    entry = SimpleNamespace(entry_id="test_entry", title="test")
+
+    hass.data = {
+        DOMAIN: {
+            "test_entry": {}  # No soc_controller, modbus_proxy, or mqtt_bridge
+        }
+    }
+
+    plenticore = AsyncMock()
+
+    await kp_init._rollback_setup(hass, entry, plenticore)
+
+    plenticore.async_unload.assert_called_once()
 
