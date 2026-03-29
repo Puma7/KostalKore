@@ -76,7 +76,7 @@ class DegradationSensor(RestoreEntity, SensorEntity):
         }
 
     async def async_added_to_hass(self) -> None:
-        """Restore persisted data on startup."""
+        """Restore persisted data for this parameter on startup."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_extra_data()
         if last_state and last_state.as_dict():
@@ -85,18 +85,29 @@ class DegradationSensor(RestoreEntity, SensorEntity):
             if snapshot_json:
                 try:
                     data = json.loads(snapshot_json) if isinstance(snapshot_json, str) else snapshot_json
-                    self._tracker.restore_from_dict(data)
-                    _LOGGER.info(
-                        "Restored degradation data for %s (%d days)",
-                        self._param_key,
-                        self._get_param().days_tracked,
-                    )
+                    # Only restore our own parameter to avoid last-entity-wins races
+                    # when multiple DegradationSensors share the same tracker.
+                    if self._param_key in data:
+                        self._tracker.restore_from_dict({self._param_key: data[self._param_key]})
+                        _LOGGER.info(
+                            "Restored degradation data for %s (%d days)",
+                            self._param_key,
+                            self._get_param().days_tracked,
+                        )
+                    elif "snapshots" in data:
+                        # Legacy format: per-parameter dict stored directly
+                        self._tracker.restore_from_dict({self._param_key: data})
+                        _LOGGER.info(
+                            "Restored degradation data for %s (legacy format, %d days)",
+                            self._param_key,
+                            self._get_param().days_tracked,
+                        )
                 except Exception as err:
-                    _LOGGER.debug("Could not restore degradation data: %s", err)
+                    _LOGGER.debug("Could not restore degradation data for %s: %s", self._param_key, err)
 
     @property
     def extra_restore_state_data(self) -> ExtraStoredData | None:  # pyright: ignore[reportIncompatibleVariableOverride]
-        """Data to persist across restarts."""
+        """Persist only this parameter's data (not the full tracker)."""
 
         class _Data(ExtraStoredData):
             def __init__(self, data: str) -> None:
@@ -105,7 +116,8 @@ class DegradationSensor(RestoreEntity, SensorEntity):
             def as_dict(self) -> dict[str, Any]:
                 return {"snapshot_data": self._data}
 
-        return _Data(json.dumps(self._tracker.to_dict(), default=str))
+        param = self._get_param()
+        return _Data(json.dumps({self._param_key: param.to_dict()}, default=str))
 
 
 class DegradationAlertSensor(SensorEntity):

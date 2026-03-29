@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_SERVICE_CODE, DOMAIN
+from .const import CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
@@ -161,27 +161,40 @@ async def async_get_config_entry_diagnostics(
     
     string_count = 0
     try:
-        string_count = int(
+        raw_count = int(
             string_count_setting.get(DEVICES_LOCAL_MODULE, {})
             .get(STRING_COUNT_SETTING, 0)
         )
+        string_count = max(0, min(raw_count, MAX_SANE_STRING_COUNT))
+        if raw_count != string_count:
+            _LOGGER.warning(
+                "StringCnt value %d out of sane range, clamped to %d",
+                raw_count, string_count,
+            )
     except (ValueError, AttributeError):
         string_count = 0
 
     # Generate feature IDs dynamically based on string count
     feature_ids = [STRING_FEATURE_PATTERN.format(index=idx) for idx in range(string_count)]
+    config_fetch_error: str | None = None
     if feature_ids:
-        configuration_settings = await _get_diagnostics_data_safe(
-            plenticore,
-            "configuration settings",
-            lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, feature_ids)
-        )
+        try:
+            configuration_settings = await asyncio.wait_for(
+                plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, feature_ids),
+                timeout=DIAGNOSTICS_TIMEOUT_SECONDS,
+            )
+        except Exception as err:
+            _handle_diagnostics_error(err, "configuration settings")
+            configuration_settings = {}
+            config_fetch_error = f"{type(err).__name__}: {err}"
     else:
         configuration_settings = {}
 
-    data["configuration"] = {
-        **configuration_settings,
-    }
+    configuration_settings = configuration_settings or {}
+    config_block: dict[str, Any] = {**configuration_settings}
+    if config_fetch_error is not None:
+        config_block["_error"] = config_fetch_error
+    data["configuration"] = config_block
 
     device_info = {**plenticore.device_info}
     device_info[ATTR_IDENTIFIERS] = REDACTED  # contains serial number

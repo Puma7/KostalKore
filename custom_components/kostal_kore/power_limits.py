@@ -32,7 +32,11 @@ def get_device_power_limit_w(
     *,
     fallback_w: float = DEFAULT_CONTROL_LIMIT_W,
 ) -> float:
-    """Return inverter max power from device info (with safe fallback)."""
+    """Return inverter max power from device info (with safe fallback).
+
+    Logs a warning when falling back to a guessed default so callers
+    and users are aware the limit is not based on real device metadata.
+    """
     raw_limit = None
     try:
         device_info = getattr(coordinator, "device_info_data", None) or {}
@@ -42,8 +46,24 @@ def get_device_power_limit_w(
 
     parsed = _to_finite_positive(raw_limit)
     if parsed is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "inverter_max_power not available in device metadata "
+            "(raw=%r), using fallback %.0f W for control limits",
+            raw_limit, fallback_w,
+        )
         return _normalize_power_limit(fallback_w)
     return _normalize_power_limit(parsed)
+
+
+def is_device_power_limit_known(coordinator: Any) -> bool:
+    """Return True if the device power limit comes from real metadata."""
+    try:
+        device_info = getattr(coordinator, "device_info_data", None) or {}
+        raw_limit = device_info.get("inverter_max_power")
+    except (AttributeError, TypeError):
+        return False
+    return _to_finite_positive(raw_limit) is not None
 
 
 def clamp_control_power_w(value_w: float, *, device_limit_w: float) -> float:

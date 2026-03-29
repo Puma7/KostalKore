@@ -5,10 +5,13 @@ and Modbus TCP (port 1502). Parallel requests from multiple coordinators
 cause timeouts and 503 errors.
 
 This scheduler ensures:
-- Max 1 request to the inverter at any time (global lock)
-- Minimum pause between requests (50ms, configurable)
-- Priority: Modbus fast-poll > REST process data > REST settings
+- Max 1 request to the inverter at any time (global lock, FIFO order)
+- Minimum pause between requests (20ms default)
 - Request counting for diagnostics
+
+Note: The lock is a plain asyncio.Lock (FIFO). There is no source-aware
+priority queue -- all callers are treated equally. The ``source`` parameter
+is used only for logging/diagnostics, not for scheduling priority.
 
 Usage:
     scheduler = RequestScheduler()

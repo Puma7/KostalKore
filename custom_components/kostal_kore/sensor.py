@@ -1507,7 +1507,7 @@ async def async_setup_entry(
     
     # Discover DC string count -- try Modbus first (faster, no auth needed),
     # fall back to REST API if Modbus is not available
-    dc_string_count = 1  # Minimum fallback
+    dc_string_count = 0  # 0 = not yet discovered; triggers REST fallback below
 
     from .const import DOMAIN as _DOMAIN
     _entry_store = hass.data.get(_DOMAIN, {}).get(entry.entry_id, {})
@@ -1521,7 +1521,7 @@ async def async_setup_entry(
             except (TypeError, ValueError):
                 pass
 
-    if dc_string_count <= 1:
+    if dc_string_count < 1:
         try:
             string_count_setting = await asyncio.wait_for(
                 plenticore.client.get_setting_values("devices:local", "Properties:StringCnt"),
@@ -1536,6 +1536,8 @@ async def async_setup_entry(
             _LOGGER.warning("Timeout fetching DC string count via REST API")
         except (ApiException, ClientError, TimeoutError) as err:
             _handle_api_error(err, "DC string count fetch")
+        except (ValueError, TypeError):
+            _LOGGER.warning("Invalid DC string count value from REST API, ignoring")
 
     if dc_string_count < 1:
         dc_string_count = 2
@@ -1648,6 +1650,17 @@ async def async_setup_entry(
                      _LOGGER.debug("Battery module not detected - skipping battery sensors")
                      continue
             
+            # For _virt_ modules (except pv_P which is handled above),
+            # check if the module exists in available_process_data
+            if module_id == "_virt_" and available_process_data and (
+                module_id not in available_process_data
+                or data_id not in available_process_data[module_id]
+            ):
+                _LOGGER.debug(
+                    "Skipping unavailable _virt_ process data %s/%s", module_id, data_id
+                )
+                continue
+
             # For statistics modules, check if available in API
             # Statistics data changes slowly and may not be available on all models
             if (module_id.startswith("scb:statistic")) and available_process_data and (
@@ -1919,10 +1932,9 @@ class PlenticoreCalculatedSensor(
         if self.coordinator.data is None:
             return None
 
-        # Extract metric and period from data_id (e.g., BatteryEfficiency:Total)
-        metric, period = self.data_id.split(":", 1)
-        
         try:
+            # Extract metric and period from data_id (e.g., BatteryEfficiency:Total)
+            metric, period = self.data_id.split(":", 1)
             if "TotalGridConsumption" in self.data_id:
                 # Grid to Home + Grid to Battery
                 grid_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeGrid:{period}")
@@ -2110,6 +2122,41 @@ class PlenticoreCalculatedSensor(
 
             for data_id in required_ids:
                 self.coordinator.start_fetch_data("scb:statistic:EnergyFlow", data_id)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister this entity from the Update Coordinator."""
+        if ":" in self.data_id:
+            period = self.data_id.split(":")[1]
+            required_ids: list[str] = []
+
+            if "BatteryDischargeTotal" in self.data_id:
+                required_ids = [
+                    f"Statistic:EnergyHomeBat:{period}",
+                    f"Statistic:EnergyDischargeGrid:{period}",
+                ]
+            elif "InverterDischargeEfficiency" in self.data_id:
+                required_ids = [
+                    f"Statistic:EnergyDischarge:{period}",
+                    f"Statistic:EnergyHomeBat:{period}",
+                    f"Statistic:EnergyDischargeGrid:{period}",
+                ]
+            elif "BatteryNetEfficiency" in self.data_id:
+                required_ids = [
+                    f"Statistic:EnergyChargePv:{period}",
+                    f"Statistic:EnergyChargeGrid:{period}",
+                    f"Statistic:EnergyHomeBat:{period}",
+                    f"Statistic:EnergyDischargeGrid:{period}",
+                ]
+            elif "BatteryEfficiency" in self.data_id:
+                required_ids = [
+                    f"Statistic:EnergyChargePv:{period}",
+                    f"Statistic:EnergyChargeGrid:{period}",
+                    f"Statistic:EnergyDischarge:{period}",
+                ]
+
+            for data_id in required_ids:
+                self.coordinator.stop_fetch_data("scb:statistic:EnergyFlow", data_id)
+        await super().async_will_remove_from_hass()
 
 
 class CalculatedPvSumSensor(
@@ -2370,6 +2417,12 @@ class PreferredGridPowerSensor(
 
     def _async_external_update(self) -> None:
         self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return True only if at least one data source has a value."""
+        _, value, _, _ = self._resolve()
+        return value is not None
 
     @property
     def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]

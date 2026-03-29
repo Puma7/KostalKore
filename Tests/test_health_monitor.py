@@ -105,6 +105,7 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 1000000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 45.0,
             "battery_temperature": 25.0,
             "grid_frequency": 50.01,
@@ -139,7 +140,7 @@ class TestInverterHealthMonitor:
 
     def test_update_from_modbus_skips_invalid(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"isolation_resistance": "not_a_number"})
+        m.update_from_modbus({"isolation_resistance": "not_a_number", "total_dc_power": 5000.0})
         assert m.isolation.current is None
 
     def test_update_battery_soh(self) -> None:
@@ -176,6 +177,7 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 2000000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 40.0,
             "grid_frequency": 50.0,
         })
@@ -185,12 +187,13 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 50000.0,
+            "total_dc_power": 5000.0,
         })
         assert m.overall_health == HealthLevel.CRITICAL
 
     def test_overall_health_warning_from_errors(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"isolation_resistance": 2000000.0})
+        m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
         for _ in range(10):
             m.record_error("test", "error")
         assert m.overall_health == HealthLevel.WARNING
@@ -198,13 +201,14 @@ class TestInverterHealthMonitor:
     def test_health_score_decreases(self) -> None:
         m = InverterHealthMonitor()
         assert m.health_score == 100
-        m.update_from_modbus({"isolation_resistance": 50000.0})
+        m.update_from_modbus({"isolation_resistance": 50000.0, "total_dc_power": 5000.0})
         assert m.health_score < 100
 
     def test_health_score_min_zero(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 50000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 80.0,
             "grid_frequency": 52.0,
         })
@@ -219,6 +223,7 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({
             "isolation_resistance": 1500000.0,
+            "total_dc_power": 5000.0,
             "controller_temp": 42.0,
         })
         summary = m.get_health_summary()
@@ -242,7 +247,7 @@ class TestInverterHealthMonitor:
         assert "phase1_voltage" in trackers
         assert "dc1_power" in trackers
         assert "active_errors" in trackers
-        assert len(trackers) == 21
+        assert len(trackers) == 22
 
     def test_dc_string_imbalance(self) -> None:
         m = InverterHealthMonitor()
@@ -254,6 +259,15 @@ class TestInverterHealthMonitor:
     def test_dc_string_imbalance_none_when_no_data(self) -> None:
         m = InverterHealthMonitor()
         assert m.dc_string_imbalance is None
+
+    def test_dc_string_imbalance_excludes_dc3_when_bidirectional(self) -> None:
+        m = InverterHealthMonitor(num_bidirectional=1)
+        m.update_from_modbus(
+            {"dc1_power": 60.0, "dc2_power": 120.0, "dc3_power": 6000.0}
+        )
+        imb = m.dc_string_imbalance
+        assert imb is not None
+        assert round(imb, 2) == round((30.0 / 90.0) * 100.0, 2)
 
     def test_phase_voltage_imbalance(self) -> None:
         m = InverterHealthMonitor()
@@ -280,7 +294,60 @@ class TestInverterHealthMonitor:
         m.update_from_modbus({"controller_temp": 64.0})
         assert m.controller_temp.level == HealthLevel.INFO
 
+    def test_overall_health_warning_branch(self) -> None:
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"grid_frequency": 50.6})
+        assert m.grid_frequency.level == HealthLevel.WARNING
+        assert m.overall_health == HealthLevel.WARNING
+
     def test_isolation_stored_in_ohm(self) -> None:
         m = InverterHealthMonitor()
-        m.update_from_modbus({"isolation_resistance": 2000000.0})
+        m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 5000.0})
         assert m.isolation.current == 2000000.0
+
+    def test_isolation_skipped_when_pv_inactive(self) -> None:
+        """Isolation not recorded at night to avoid mixed-unit values."""
+        m = InverterHealthMonitor()
+        m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
+        assert m.isolation.current is None
+
+
+class TestHealthMonitorCoverageGaps:
+
+    def test_parameter_tracker_info_low_level_branch(self) -> None:
+        tracker = ParameterTracker(name="test", unit="V", info_low=210.0)
+        tracker.record(205.0)
+        assert tracker.level == HealthLevel.INFO
+
+    def test_update_from_modbus_skips_unusable_isolation_and_invalid_state(self) -> None:
+        monitor = InverterHealthMonitor()
+        with patch(
+            "kostal_plenticore.health_monitor.normalize_isolation_resistance_ohm",
+            return_value=None,
+        ):
+            monitor.update_from_modbus(
+                {
+                    "isolation_resistance": 5000.0,
+                    "total_dc_power": 5000.0,
+                    "inverter_state": "not-a-state",
+                }
+            )
+
+        assert monitor.isolation.current is None
+        assert monitor.state_change_count == 0
+
+    def test_update_battery_soh_zero_is_ignored(self) -> None:
+        monitor = InverterHealthMonitor()
+        monitor.update_battery_soh(0.0)
+        assert monitor.battery_soh.current is None
+
+    def test_overall_health_info_and_score_penalties(self) -> None:
+        monitor = InverterHealthMonitor()
+        monitor.update_from_modbus(
+            {"controller_temp": 64.0, "dc1_power": 60.0, "dc2_power": 120.0}
+        )
+        monitor._total_polls = 10
+        monitor._failed_polls = 1
+
+        assert monitor.overall_health == HealthLevel.INFO
+        assert monitor.health_score == 82

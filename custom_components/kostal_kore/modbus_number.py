@@ -201,9 +201,19 @@ async def create_modbus_number_entities(
 
     from .notifications import notify_modbus_probe_success, notify_modbus_probe_failed
 
+    read_only = False
     bat_mgmt_mode = device_data.get(REG_BATTERY_MGMT_MODE.name)
     if bat_mgmt_mode is not None:
-        mode_int = int(bat_mgmt_mode)
+        try:
+            mode_int = int(float(bat_mgmt_mode))
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "Invalid battery management mode value %r, treating as read-only",
+                bat_mgmt_mode,
+            )
+            mode_int = -1
+            read_only = True
+
         if mode_int == 0x02:
             _LOGGER.info("Battery management mode: External via MODBUS (confirmed active)")
             await notify_modbus_probe_success(coordinator.hass)
@@ -212,9 +222,15 @@ async def create_modbus_number_entities(
             if registers_ok:
                 await notify_modbus_probe_success(coordinator.hass)
             else:
+                read_only = True
                 await notify_modbus_probe_failed(coordinator.hass)
         else:
-            _LOGGER.info("Battery management mode is %s", bat_mgmt_mode)
+            _LOGGER.warning(
+                "Battery management mode is %s (not 'External via MODBUS'), "
+                "number entities will be read-only",
+                bat_mgmt_mode,
+            )
+            read_only = True
             await _probe_modbus_access(coordinator)
 
     descriptions = _build_descriptions(max_power)
@@ -235,6 +251,7 @@ async def create_modbus_number_entities(
                 entity_category=desc.get("entity_category"),
                 entry_id=entry_id,
                 device_info=device_info,
+                read_only=read_only,
             )
         )
     return entities
@@ -263,9 +280,11 @@ class ModbusNumberEntity(
         entity_category: EntityCategory | None,
         entry_id: str,
         device_info: Any,
+        read_only: bool = False,
     ) -> None:
         super().__init__(coordinator)
         self._register = register
+        self._read_only = read_only
         self._attr_name = name
         self._attr_icon = icon
         self._attr_native_min_value = min_value
@@ -301,6 +320,12 @@ class ModbusNumberEntity(
 
     async def async_set_native_value(self, value: float) -> None:
         """Write a new value to the Modbus register with safety validation."""
+        if self._read_only:
+            _LOGGER.warning(
+                "Write to %s blocked: inverter is not in 'External via MODBUS' mode",
+                self._register.name,
+            )
+            return
         if math.isnan(value) or math.isinf(value):
             _LOGGER.error(
                 "Refusing to write NaN/Infinity to %s", self._register.name

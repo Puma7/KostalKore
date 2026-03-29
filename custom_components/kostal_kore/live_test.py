@@ -95,9 +95,19 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
             report["endianness"]["status"] = "default"
         else:
             val = resp.registers[0]
-            endianness = "big" if val == 1 else "little"
-            print(f"  OK: Byte order = {endianness} ({'ABCD' if endianness == 'big' else 'CDAB'})")
-            report["endianness"]["status"] = "detected"
+            if val == 0:
+                endianness = "little"
+                print(f"  OK: Byte order = little-endian (CDAB), register value = 0")
+                report["endianness"]["status"] = "detected"
+            elif val == 1:
+                endianness = "big"
+                print(f"  OK: Byte order = big-endian (ABCD), register value = 1")
+                report["endianness"]["status"] = "detected"
+            else:
+                endianness = "little"
+                print(f"  WARNING: Unexpected byte order value {val} (expected 0 or 1), using little-endian default")
+                report["endianness"]["status"] = "unexpected_value"
+                report["endianness"]["raw_value"] = val
         report["endianness"]["value"] = endianness
     except Exception as e:
         print(f"  WARNING: Endianness detection failed: {e} (using little-endian)")
@@ -240,13 +250,30 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
         report["summary"]["battery_type"] = bat_name
         print(f"\n  Battery Type: {bat_name}")
 
+    warnings: list[str] = []
+
     bat_mgmt = report["registers"].get("battery_mgmt_mode", {})
+    modbus_mode_ok = True
     if bat_mgmt.get("status") == "ok":
         mode_val = bat_mgmt.get("value")
         mode_name = BATTERY_MGMT_MODES.get(mode_val, f"Unknown ({mode_val})")
         report["summary"]["battery_mgmt_mode"] = mode_name
-        modbus_ok = "MODBUS" in mode_name.upper()
-        print(f"  Battery Mgmt Mode: {mode_name} {'✓' if modbus_ok else '✗ MODBUS NOT ENABLED!'}")
+        modbus_mode_ok = "MODBUS" in mode_name.upper()
+        print(f"  Battery Mgmt Mode: {mode_name} {'✓' if modbus_mode_ok else '✗ MODBUS NOT ENABLED!'}")
+        if not modbus_mode_ok:
+            warnings.append(
+                "Battery management is NOT set to 'External via MODBUS'. "
+                "Battery control registers will not be writable."
+            )
+    else:
+        modbus_mode_ok = False
+        warnings.append("Battery management mode register could not be read.")
+
+    if skip_count > ok_count:
+        warnings.append(
+            f"{skip_count} registers skipped/unavailable vs {ok_count} OK — "
+            "many expected registers are not accessible on this model/firmware."
+        )
 
     print(f"\n[5/5] Summary")
     print(f"  Registers OK:          {ok_count}")
@@ -254,10 +281,19 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
     print(f"  Errors:                {error_count}")
     print(f"  Endianness:            {endianness}")
 
-    if error_count == 0:
+    if error_count == 0 and not warnings:
         print(f"\n  ✓ ALL TESTS PASSED -- safe to enable Modbus in HA integration")
+    elif error_count == 0:
+        print(f"\n  ⚠ TESTS PASSED WITH WARNINGS:")
+        for w in warnings:
+            print(f"    - {w}")
+        print(f"  Modbus can be enabled, but check the warnings above.")
     else:
         print(f"\n  ✗ {error_count} ERRORS -- check log above before enabling Modbus")
+        for w in warnings:
+            print(f"    - {w}")
+
+    report["summary"]["warnings"] = warnings
 
     client.close()
 

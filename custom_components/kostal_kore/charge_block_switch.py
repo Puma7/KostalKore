@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from typing import Any, Final
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .modbus_client import ModbusClientError
@@ -50,11 +52,13 @@ class BatteryChargeBlockSwitch(SwitchEntity):
     ) -> None:
         self._coord = coordinator
         self._hass_ref = hass
+        self._entry_id = entry_id
         self._normal_limit_w = get_device_power_limit_w(coordinator)
         self._attr_unique_id = f"{entry_id}_block_battery_charging"
         self._attr_device_info = device_info
         self._is_on = False
         self._keepalive_task: asyncio.Task[None] | None = None
+        self._original_charge_limit: float | None = None
 
     @property
     def is_on(self) -> bool:
@@ -69,10 +73,36 @@ class BatteryChargeBlockSwitch(SwitchEntity):
             "keepalive_interval": f"{KEEPALIVE_INTERVAL}s",
         }
 
+    async def _snapshot_charge_limit(self) -> None:
+        """Read and store the current charge limit before overwriting."""
+        if self._original_charge_limit is not None:
+            return
+        reg = REGISTER_BY_NAME.get("bat_max_charge_limit")
+        if not reg:
+            return
+        try:
+            val = float(await self._coord.client.read_register(reg))
+            if not math.isnan(val) and not math.isinf(val) and val >= 0:
+                self._original_charge_limit = val
+                _LOGGER.debug("Snapshotted original charge limit: %.0f W", val)
+        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError) as err:
+            _LOGGER.debug("Could not snapshot charge limit: %s", err)
+
+    def _restore_limit(self) -> float:
+        """Return the limit to restore: original snapshot or device max as fallback."""
+        limit = self._original_charge_limit if self._original_charge_limit is not None else self._normal_limit_w
+        self._original_charge_limit = None
+        return limit
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Block battery charging: REG 1038 = 0."""
+        await self._snapshot_charge_limit()
+        try:
+            await self._write_block()
+        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+            self._original_charge_limit = None  # discard snapshot on failure
+            raise HomeAssistantError("Ladung konnte nicht blockiert werden") from err
         self._is_on = True
-        await self._write_block()
         self._start_keepalive()
         self.async_write_ha_state()
         _LOGGER.info("Battery charging BLOCKED (REG 1038 = 0)")
@@ -84,20 +114,28 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                     {"title": "🔋 Akku-Ladung blockiert",
                      "message": "PV-Strom fließt ins Netz statt in den Akku.\n"
                                 "Switch ausschalten um Ladung wieder zu erlauben.",
-                     "notification_id": "kostal_charge_block"},
+                     "notification_id": f"kostal_charge_block_{self._entry_id}"},
                 )
             except Exception:  # notification is non-critical, keep broad
                 _LOGGER.debug("Failed to send charge block notification")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Restore normal charging using inverter-specific power limit."""
-        self._is_on = False
+        """Restore charging to previous limit."""
         self._cancel_keepalive()
-        await self._write_normal()
+        restore = self._restore_limit()
+        await self._write_normal(restore)
+        self._is_on = False
         self.async_write_ha_state()
-        _LOGGER.info(
-            "Battery charging RESTORED (REG 1038 = %.0f)", self._normal_limit_w
-        )
+        _LOGGER.info("Battery charging RESTORED (REG 1038 = %.0f)", restore)
+
+        if self._hass_ref:
+            try:
+                await self._hass_ref.services.async_call(
+                    "persistent_notification", "dismiss",
+                    {"notification_id": f"kostal_charge_block_{self._entry_id}"},
+                )
+            except Exception:
+                _LOGGER.debug("Failed to dismiss charge block notification")
 
     async def _write_block(self) -> None:
         reg = REGISTER_BY_NAME.get("bat_max_charge_limit")
@@ -106,12 +144,14 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                 await self._coord.async_write_register(reg, 0.0)
             except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("Failed to block charging: %s", err)
+                raise
 
-    async def _write_normal(self) -> None:
+    async def _write_normal(self, watts: float | None = None) -> None:
+        limit = watts if watts is not None else self._normal_limit_w
         reg = REGISTER_BY_NAME.get("bat_max_charge_limit")
         if reg:
             try:
-                await self._coord.async_write_register(reg, self._normal_limit_w)
+                await self._coord.async_write_register(reg, limit)
             except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("Failed to restore charging: %s", err)
 
@@ -143,5 +183,14 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         """Restore charging on entity removal."""
         self._cancel_keepalive()
         if self._is_on:
-            await self._write_normal()
+            self._is_on = False
+            await self._write_normal(self._restore_limit())
+            if self._hass_ref:
+                try:
+                    await self._hass_ref.services.async_call(
+                        "persistent_notification", "dismiss",
+                        {"notification_id": f"kostal_charge_block_{self._entry_id}"},
+                    )
+                except Exception:
+                    _LOGGER.debug("Failed to dismiss charge block notification on removal")
         await super().async_will_remove_from_hass()

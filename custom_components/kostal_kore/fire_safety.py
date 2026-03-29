@@ -40,6 +40,7 @@ Detectable hazard patterns (from available inverter data):
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -84,6 +85,10 @@ class FireSafetyMonitor:
     monitors would miss.
     """
 
+    # After this many consecutive polls with no usable safety data,
+    # log a warning so the user knows the safety monitor is blind.
+    STALE_DATA_THRESHOLD: Final = 12  # ~60s at 5s interval
+
     def __init__(self, *, num_bidirectional: int = 0) -> None:
         self._alerts: deque[SafetyAlert] = deque(maxlen=500)
         self._iso_history: deque[tuple[float, float]] = deque(maxlen=100)
@@ -98,6 +103,7 @@ class FireSafetyMonitor:
         self._total_polls: int = 0
         self._num_bidirectional: int = num_bidirectional
         self._dc_ratio_history: deque[tuple[float, float]] = deque(maxlen=200)
+        self._consecutive_empty_polls: int = 0
 
     @property
     def alerts(self) -> list[SafetyAlert]:
@@ -155,41 +161,71 @@ class FireSafetyMonitor:
 
         self._record_history(data, now)
 
+        # Stale-data detection: if key safety sensors are missing for too long,
+        # the safety monitor is effectively blind.
+        bat_temp = _float(data.get("battery_temperature"))
+        ctrl_temp = _float(data.get("controller_temperature"))
+        has_safety_data = bat_temp is not None or ctrl_temp is not None
+        if has_safety_data:
+            self._consecutive_empty_polls = 0
+        else:
+            self._consecutive_empty_polls += 1
+            if self._consecutive_empty_polls == self.STALE_DATA_THRESHOLD:
+                _LOGGER.warning(
+                    "Fire safety: no temperature data for %d consecutive polls — "
+                    "safety monitoring is degraded",
+                    self._consecutive_empty_polls,
+                )
+
         # Determine if PV is producing (DC power > 50W)
         total_dc = _float(data.get("total_dc_power"))
         pv_active = total_dc is not None and total_dc > 50
 
-        # Skip ALL checks when inverter is off/standby
+        # Always run stale-alert cleanup, even during standby/off
+        self.clear_stale_alerts(pv_active)
+
+        new_alerts: list[SafetyAlert] = []
+
+        # Battery thermal + grid emergency checks run ALWAYS — thermal runaway
+        # and grid faults can occur regardless of inverter operational state.
+        new_alerts.extend(self._check_battery_thermal(data, now))
+        new_alerts.extend(self._check_controller_thermal(data, now))
+        new_alerts.extend(self._check_grid_emergency(data, now))
+
+        # Skip remaining checks when inverter is off/standby
         inverter_state = data.get("inverter_state")
         if inverter_state is not None:
             try:
                 state_int = int(inverter_state)
                 if state_int in (0, 1, 10, 15):
-                    return []
+                    return new_alerts
             except (TypeError, ValueError):
                 pass
-
-        new_alerts: list[SafetyAlert] = []
-
-        # Clear stale isolation/DC alerts when PV is off (night)
-        self.clear_stale_alerts(pv_active)
 
         # Isolation + DC checks ONLY when PV is active (need DC voltage for measurement)
         if pv_active:
             new_alerts.extend(self._check_isolation(data, now))
             new_alerts.extend(self._check_dc_string_anomaly(data, now))
-        new_alerts.extend(self._check_battery_thermal(data, now))
-        new_alerts.extend(self._check_controller_thermal(data, now))
-        new_alerts.extend(self._check_grid_emergency(data, now))
 
+        # Deduplicate: only append if no active alert with same category+risk exists
+        active_keys = {
+            (a.category, a.risk_level)
+            for a in self.active_alerts
+        }
+        deduplicated: list[SafetyAlert] = []
         for alert in new_alerts:
+            key = (alert.category, alert.risk_level)
+            if key in active_keys:
+                continue
+            active_keys.add(key)
             self._alerts.append(alert)
+            deduplicated.append(alert)
             _LOGGER.warning(
                 "FIRE SAFETY [%s] %s: %s (values: %s)",
                 alert.risk_level.upper(), alert.category, alert.title, alert.register_values,
             )
 
-        return new_alerts
+        return deduplicated
 
     def _record_history(self, data: dict[str, Any], now: float) -> None:
         total_dc = _float(data.get("total_dc_power"))
@@ -298,14 +334,21 @@ class FireSafetyMonitor:
         if avg_power < 100:
             return alerts
 
-        # Track the ratio between strings over time for baseline learning.
+        # Track per-string share of total power for baseline learning.
         # Steady-state differences (different orientations, Y-adapters) are normal
         # and should NOT trigger alerts. Only sudden deviations from the
-        # established ratio indicate a real problem.
-        if len(powers) == 2:
-            vals_list = sorted(powers.values())
-            ratio = vals_list[0] / vals_list[1] if vals_list[1] > 0 else 0
-            self._dc_ratio_history.append((now, ratio))
+        # established baseline indicate a real problem.
+        # We record the max deviation of any string's share from its equal share
+        # (1/N). This metric works for 2-string AND 3-string systems alike,
+        # unlike a simple min/max ratio which becomes unstable with 3+ strings.
+        if len(powers) >= 2:
+            total = sum(powers.values())
+            if total > 0:
+                equal_share = 1.0 / len(powers)
+                max_share_dev = max(
+                    abs(p / total - equal_share) for p in powers.values()
+                )
+                self._dc_ratio_history.append((now, max_share_dev))
 
         for string, power in powers.items():
             deviation = abs(power - avg_power) / avg_power * 100
@@ -351,15 +394,27 @@ class FireSafetyMonitor:
         return alerts
 
     def _is_stable_ratio(self, now: float) -> bool:
-        """Check if the DC string power ratio has been stable (normal installation difference)."""
-        window = [r for t, r in self._dc_ratio_history if now - t < 1800]
+        """Check if DC string power distribution has been stable.
+
+        Uses max-deviation-from-equal-share metric recorded in
+        _dc_ratio_history. The distribution is "stable" when the metric
+        has not jumped around much over the last 30 minutes, i.e. the
+        installation has a consistent (even if asymmetric) layout.
+
+        Threshold 0.05 corresponds to ~5 percentage-point shift in any
+        string's share of total power, matching the sensitivity of the
+        old min/max-ratio code (which triggered at ~0.25 relative
+        deviation ≈ 5-7 pp absolute shift at typical operating points).
+        """
+        window = [d for t, d in self._dc_ratio_history if now - t < 1800]
         if len(window) < 10:
             return False
-        avg_ratio = sum(window) / len(window)
-        if avg_ratio == 0:
-            return False
-        max_dev = max(abs(r - avg_ratio) / avg_ratio for r in window)
-        return max_dev < 0.25
+        avg_dev = sum(window) / len(window)
+        # Check whether the deviation metric itself has been stable.
+        # A stable installation has a consistent share pattern even if
+        # the absolute values fluctuate with irradiance.
+        max_jitter = max(abs(d - avg_dev) for d in window)
+        return max_jitter < 0.05
 
     # ------------------------------------------------------------------
     # Check 3: Battery thermal runaway precursors
@@ -509,7 +564,10 @@ def _float(val: Any) -> float | None:
     if val is None:
         return None
     try:
-        return float(val)
+        result = float(val)
+        if math.isnan(result) or math.isinf(result):
+            return None
+        return result
     except (TypeError, ValueError):
         return None
 

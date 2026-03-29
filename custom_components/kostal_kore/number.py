@@ -92,7 +92,7 @@ DEFAULT_PERCENTAGE_STEP: Final[int] = 1
 DEFAULT_TIME_MAX_SECONDS: Final[int] = 86400
 DEFAULT_TIME_MIN_SECONDS: Final[int] = 0
 DEFAULT_TIME_STEP_SECONDS: Final[int] = 1
-SETTINGS_TIMEOUT_SECONDS: Final[float] = 8.0
+SETTINGS_TIMEOUT_SECONDS: Final[float] = 5.0
 
 # Battery-specific constants
 BATTERY_MAX_POWER_WATTS: Final[int] = 1000000
@@ -1295,9 +1295,9 @@ async def async_setup_entry(
 
     if not available_settings_data:
         _LOGGER.warning(
-            "Initial number settings fetch failed, retrying in 2 seconds..."
+            "Initial number settings fetch failed, retrying in 1 second..."
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         available_settings_data = await _get_settings_data_safe(
             plenticore, "number settings (retry)"
         )
@@ -1491,13 +1491,15 @@ async def async_setup_entry(
             if description.data_id not in FORCE_CREATE_KEYS:
                 continue
 
-            expected_unique_ids = {
-                f"{entry.entry_id}_{description.module_id}_{description.data_id}",
+            canonical_uid = f"{entry.entry_id}_{description.module_id}_{description.data_id}"
+            expected_unique_ids_set = {
+                canonical_uid,
                 f"{entry.entry_id}_{description.module_id}_{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
             }
-            expected_unique_ids.update(
+            expected_unique_ids_set.update(
                 forced_unique_ids_by_data_id.get(description.data_id, set())
             )
+            expected_unique_ids = sorted(expected_unique_ids_set)
 
             expected_entry = None
             for uid in expected_unique_ids:
@@ -1537,11 +1539,11 @@ async def async_setup_entry(
                 _LOGGER.info(
                     "Migrating number unique_id for %s to %s",
                     entity_entry.entity_id,
-                    next(iter(expected_unique_ids)),
+                    canonical_uid,
                 )
                 entity_registry.async_update_entity(
                     entity_entry.entity_id,
-                    new_unique_id=next(iter(expected_unique_ids)),
+                    new_unique_id=canonical_uid,
                     disabled_by=None,
                 )
                 expected_entry = entity_entry
@@ -1788,8 +1790,11 @@ class PlenticoreDataNumber(
             return
         self._keepalive_task = self.hass.async_create_task(self._run_keepalive())
 
+    _MAX_CONSECUTIVE_KA_FAILURES: Final = 3
+
     async def _run_keepalive(self) -> None:
         """Re-apply G3 limit values cyclically to avoid fallback activation."""
+        consecutive_failures = 0
         try:
             while self._keepalive_value is not None:
                 await asyncio.sleep(self._get_keepalive_interval())
@@ -1809,18 +1814,32 @@ class PlenticoreDataNumber(
                 ):
                     break
                 str_value = self._formatter_back(self._keepalive_value)
-                await self.coordinator.async_write_data(
-                    self.module_id, {data_id_for_write: str_value}
-                )
+                try:
+                    await self.coordinator.async_write_data(
+                        self.module_id, {data_id_for_write: str_value}
+                    )
+                    consecutive_failures = 0
+                except Exception as write_err:
+                    consecutive_failures += 1
+                    _LOGGER.warning(
+                        "G3 keepalive write failed for %s/%s (%d/%d): %s",
+                        self.module_id,
+                        data_id_for_write,
+                        consecutive_failures,
+                        self._MAX_CONSECUTIVE_KA_FAILURES,
+                        write_err,
+                    )
+                    if consecutive_failures >= self._MAX_CONSECUTIVE_KA_FAILURES:
+                        _LOGGER.error(
+                            "G3 keepalive aborted for %s/%s after %d consecutive failures "
+                            "— inverter may revert to fallback limits",
+                            self.module_id,
+                            data_id_for_write,
+                            consecutive_failures,
+                        )
+                        break
         except asyncio.CancelledError:
             return
-        except Exception as err:
-            _LOGGER.debug(
-                "Keepalive failed for %s/%s: %s",
-                self.module_id,
-                self.data_id,
-                err,
-            )
 
     async def async_added_to_hass(self) -> None:
         """Register this entity on the Update Coordinator."""

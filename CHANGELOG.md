@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.10-rc.3] — 2026-03-29 — CI Fixes, Test Coverage, QA Regression Fixes
+
+Third pass: CI compliance (mypy, test coverage 100%), plus self-review
+regression analysis that found and fixed 4 real bugs introduced by prior fixes.
+
+### Fixed — CI Compliance
+- **mypy**: Replaced function-attribute debounce pattern (`_feed_health_data._clear_sent`) with closure-captured dict to satisfy mypy `attr-defined` when `@callback` is properly typed in CI.
+- **test coverage**: Added 17+ test functions across `test_phase5_coverage.py`, `test_helper.py` to reach 100% branch coverage on all 9 measured files.
+- **test assertion**: Fixed stale `format_round_back(4.4) == "4"` → `"4.4"` to match new fractional-precision behavior.
+
+### Fixed — Regressions Found by QA Self-Review
+- **coordinator.py (R5)**: `_fetch_device_metadata` now catches `asyncio.TimeoutError` in addition to `TimeoutError`. Required because `get_hostname_id` now re-raises the original `asyncio.TimeoutError` instead of wrapping it in `ApiException`.
+- **charge_block_switch.py (R7)**: Restored `try/except` in `_write_block()` — a failed Modbus write no longer propagates unhandled through `async_turn_on()`, which would leave the switch in an inconsistent state (keepalive not started, `_is_on` not set). `async_turn_on` now discards the snapshot on write failure and returns gracefully.
+- **__init__.py (R1)**: `async_setup_entry` now clears both legacy unscoped issue IDs (`kostal_kore_auth_failed`) AND new entry-scoped IDs (`kostal_kore_{entry_id}_auth_failed`). Prevents phantom repair issues surviving an upgrade from the old ID scheme.
+- **notifications.py (P1)**: `notify_safety_clear` now fires all dismiss calls via `asyncio.gather()` instead of sequential awaits. Also dismisses legacy unscoped notification IDs for upgrade compatibility.
+
 ### Added
 - **Backlog implementation wave completed**:
   - Event intelligence coordinator with bounded history + dedup/cooldown.
@@ -17,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `kostal_kore.adopt_legacy_entity_ids` for safe registry rebind previews/applies.
   - `kostal_kore.copy_legacy_history` for optional advanced recorder metadata merge.
 - **Project learnings doc**: Added `LEARNINGS.md` with validated behavior and policy decisions.
+- **Migration architecture decision record**: Added `MIGRATION_ARCHITECTURE.md` documenting known limitations and future-proofing plan for legacy device migration.
 
 ### Changed
 - **Markdown documentation sweep**: Synced all maintained `.md` files with current `kostal_kore` naming, migration flow, and access model.
@@ -29,6 +46,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **REST write safety policy**: blocked unsupported REST battery charge/discharge setpoint write targets to avoid non-deterministic behavior.
+
+## [2.16.10-rc.2] — 2026-03-28 — Codex QA Hardening Pass (continued)
+
+Second round of Codex static analysis review. Focused on multi-inverter
+notification collisions, hass.data store lifecycle, firmware edge cases,
+and fire safety learning for 3-string systems. Includes a self-review
+pass that caught regressions in the initial fixes.
+
+### Fixed — Multi-Inverter Notification Scoping
+- **charge_block_switch.py**: notification ID scoped by `entry_id`; notification dismissed on turn-off and entity removal.
+- **battery_soc_controller.py**: added `entry_id` parameter; notification ID scoped by `entry_id`.
+- **battery_test.py**: added `entry_id` parameter; notification ID scoped by `entry_id`.
+- **notifications.py / diagnostic_entities.py / repairs.py** (prior session): all notification and repair IDs already scoped by `entry_id`.
+
+### Fixed — hass.data Store Lifecycle
+- **helper.py**: `integration_entry_store()` returns detached empty dict when entry has been unloaded, preventing ghost store resurrection after `async_unload_entry`.
+- **text.py** (prior session): uses `.get()` instead of `.setdefault()` for same reason.
+
+### Fixed — Firmware Edge Cases
+- **diagnostics.py**: `StringCnt` clamped to `[0, MAX_SANE_STRING_COUNT]` to prevent empty or oversized feature probe from malformed firmware data.
+- **switch.py**: `StringCnt` clamped to `[0, MAX_SANE_STRING_COUNT]` with warning log on out-of-range values to prevent shadow-management stall.
+- **const.py**: shared `MAX_SANE_STRING_COUNT = 6` constant for consistent bounds across modules.
+
+### Fixed — Fire Safety
+- **fire_safety.py**: DC ratio learning generalized from 2-string-only to all multi-string systems. Uses deviation-from-equal-share metric instead of min/max ratio, which was unstable for 3+ strings.
+- **fire_safety.py**: `_is_stable_ratio()` updated to check jitter of the deviation metric (< 0.10 threshold) instead of relative deviation from ratio mean.
+
+### Fixed — Platform Setup
+- **binary_sensor.py**: removed early return on missing `health_monitor` so fire-safety binary sensors are created independently in partial-init scenarios.
+- **binary_sensor.py**: updated docstring to reflect health + fire-safety scope.
+- **binary_sensor.py**: migrated from `AddEntitiesCallback` to `AddConfigEntryEntitiesCallback` compat shim.
+- **manifest.json**: `loggers` updated from `["kostal"]` to `["custom_components.kostal_kore", "pykoplenti"]`.
+
+### Breaking Changes (minor)
+- Persistent notification IDs for charge block, SoC controller, and battery test now include the config entry ID. Existing automations that match on the old global notification IDs (e.g. `kostal_charge_block`, `kostal_soc_controller`, `kostal_battery_test`) must be updated to include the entry ID suffix.
+
+## [2.16.10-rc.1] — 2026-03-28 — Codex QA Hardening Pass
+
+Systematic code audit driven by Codex static analysis feedback. Each finding
+was manually validated before implementation. ~50 findings reviewed across
+15+ files; ~35 confirmed valid and fixed, ~15 rejected as false positives or
+already covered by prior work.
+
+### Fixed — Sensor & Entity Lifecycle
+- **sensor.py**: `PlenticoreCalculatedSensor` missing cleanup in `async_will_remove_from_hass` — listeners now properly unsubscribed on entity removal.
+- **sensor.py**: DC-string detection threshold `<= 1` → `< 1` — a single DC string is valid, only zero is not.
+- **sensor.py**: `PreferredGridPowerSensor.available` now checks coordinator data availability instead of always returning `True`.
+- **sensor.py**: `_virt_` filter in availability check prevented legitimate virtual sensors from reporting available.
+
+### Fixed — Number Platform & Keepalive
+- **number.py**: G3 keepalive inner write failures are now caught individually, logged as warnings, and abort after 3 consecutive failures (`_MAX_CONSECUTIVE_KA_FAILURES`).
+- **number.py**: Registry migration `expected_unique_ids` changed from non-deterministic `set` to sorted list; migration target uses `canonical_uid` instead of `next(iter(set))`.
+
+### Fixed — Coordinator & Setup Lifecycle
+- **coordinator.py**: Added `_fetch_refcount` (defaultdict) for reference-counted `start_fetch_data`/`stop_fetch_data` — prevents premature removal when multiple consumers share a fetch key.
+- **__init__.py**: Early `async_unload()` on `plenticore.async_setup()` failure was already present; added full `_rollback_setup()` for platform-forwarding failures (SoC controller, Modbus proxy, MQTT bridge, plenticore session).
+
+### Fixed — Switch Platform
+- **switch.py**: Three shadow management API calls (`_async_query_string_count`, batch DC-string features, per-string fallback) now wrapped with `asyncio.wait_for(timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS)`.
+
+### Fixed — Modbus Stack
+- **modbus_registers.py**: Register 529 renamed from `REG_BATTERY_OPERATION_MODE` to `REG_BATTERY_WORK_CAPACITY_SUNSPEC` (unit: Wh) to match SunSpec semantics.
+- **modbus_client.py**: Added register count validation (`len(resp.registers) != count` → `ModbusReadError`).
+- **modbus_client.py**: `_classify_exception_response` fallback changed from `ModbusReadError` to `ModbusClientError` for non-read exception paths.
+- **modbus_proxy.py**: FC16 (Write Multiple) now validates `quantity` range (1–123) and `byte_count == quantity * 2` consistency.
+- **modbus_proxy.py**: Forwarding failures (read, write-single, write-multiple) now return Modbus exception **0x04** (Server Device Failure) instead of **0x02** (Illegal Data Address) — prevents clients from permanently blacklisting valid registers.
+- **modbus_proxy.py**: Incoming unit-ID is now checked against configured `self._unit_id`; mismatches return **0x0B** (Gateway Target Device Failed to Respond).
+
+### Fixed — System Health & Monitoring
+- **system_health_check.py**: `active_warnings` attribute replaced with `active_warning_count` + ParameterTracker sample extraction.
+- **system_health_check.py**: Added missing `self.info_count: int = 0` to `_HealthReport`; info-level findings now increment `info_count` instead of `pass_count`.
+- **health_monitor.py**: Added missing `pm_cos_phi` to `all_trackers` property.
+
+### Fixed — Config Flow & Security
+- **config_flow.py**: Replaced TCP port probe (`_probe_tcp_port`) with `_probe_kostal_api` using unauthenticated `client.get_version()` — eliminates discovery credential spray risk (P1).
+- **config_flow.py**: Entire validation flow wrapped in single `asyncio.wait_for(timeout=CONNECTION_TEST_TIMEOUT_SECONDS)`.
+- **config_flow.py**: Modbus smoke test counts `reg_failures`; `test_passed = False` when all register reads fail.
+- **config_flow.py**: Reauth flow pins host to `existing_entry.data[CONF_HOST]` — prevents host spoofing during reauthentication.
+
+### Fixed — Fire Safety
+- **fire_safety.py**: `clear_stale_alerts(pv_active)` moved before standby/off early return — stale alerts are now cleaned up even when inverter is idle.
+- **fire_safety.py**: Alert deduplication via `active_keys` set of `(category, risk_level)` — prevents repeated alerts for the same condition.
+
+### Fixed — Battery Test
+- **battery_test.py**: Added `_original_charge_limit` / `_original_discharge_limit` snapshot in `_preflight()`.
+- **battery_test.py**: `_write_normal()` restores original limits on test completion; falls back to `_DEFAULT_LIMIT_W = 20000.0` if snapshot is missing.
+
+### Fixed — Migration Services
+- **migration_services.py**: `_normalise_mapping_rows()` detects many-to-one target conflicts via `target_sources` dict; raises `vol.Invalid` on collision.
+- **migration_services.py**: `_ensure_guard_confirmed()` now binds a SHA-256 payload fingerprint — prevents TOCTOU tampering between preview and apply.
+
+### Fixed — Helper Utilities
+- **helper.py**: `format_float()` and `format_energy()` return `None` for `NaN`/`Inf` values instead of propagating them to entity state.
+- **helper.py**: `get_hostname_id()` re-raises original exceptions instead of wrapping them in `ApiException` — preserves exception type for callers.
+
+### Fixed — MQTT Bridge (prior session)
+- **mqtt_bridge.py**: Listener leak on reconnect, idempotency guard, rate-limit ordering, payload validation.
+
+### Fixed — Test Infrastructure
+- **pytest.ini**: Suppressed coroutine-unawaited and asyncio-loop-scope warnings.
+- **Tests/test_health_monitor.py**: Updated `all_trackers` assertion from 21 → 22 after `pm_cos_phi` addition.
+
+### Known Issue — Legacy Migration Architecture
+- Device identifiers are not rewritten from `("kostal_plenticore", serial)` to `("kostal_kore", serial)` during migration. This cross-domain device-linking pattern will break in HA Core 2026.8. See `MIGRATION_ARCHITECTURE.md` for the remediation plan.
+
+### Strings
+- **strings.json**: Timeout error now has its own message instead of mapping to `cannot_connect`. Reauth flow: added description text, changed host label to clarify it is read-only.
 
 ## [2.16.0-alpha.4] - 2026-03-01
 

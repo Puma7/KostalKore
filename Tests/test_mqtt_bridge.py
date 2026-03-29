@@ -33,7 +33,14 @@ def _mock_mqtt_module() -> MagicMock:
 def _mock_hass(mqtt_available: bool = True) -> MagicMock:
     hass = MagicMock()
     hass.config.components = {"mqtt"} if mqtt_available else set()
-    hass.async_create_task = MagicMock(side_effect=lambda coro: coro)
+
+    def _create_task(coro):
+        # Tests only assert task creation; close the coroutine to avoid
+        # "was never awaited" warnings from the MagicMock stub.
+        coro.close()
+        return MagicMock()
+
+    hass.async_create_task = MagicMock(side_effect=_create_task)
     return hass
 
 
@@ -363,7 +370,8 @@ class TestProxyCommands:
     async def test_execute_write_rejects_nan(self) -> None:
         hass = _mock_hass()
         coord = _mock_coordinator()
-        bridge = KostalMqttBridge(hass, coord, "INV123")
+        # Use installer_access=True so the NaN check is actually reached
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
 
         from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
         await bridge._execute_write(REG_BAT_MIN_SOC, "NaN", source="test")
@@ -378,6 +386,91 @@ class TestProxyCommands:
         from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
         await bridge._execute_write(REG_BAT_MIN_SOC, "50", source="test")
         coord.async_write_register.assert_called_once()
+
+
+class TestListenerCleanup:
+    """Test coordinator listener lifecycle."""
+
+    @pytest.mark.asyncio
+    async def test_stop_removes_coordinator_listener(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        unsub_cb = MagicMock()
+        coord.async_add_listener.return_value = unsub_cb
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        mock_mqtt = _mock_mqtt_module()
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            await bridge.async_start()
+            assert bridge._unsub_coordinator is unsub_cb
+            await bridge.async_stop()
+            unsub_cb.assert_called_once()
+            assert bridge._unsub_coordinator is None
+
+    @pytest.mark.asyncio
+    async def test_double_start_is_idempotent(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        mock_mqtt = _mock_mqtt_module()
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            await bridge.async_start()
+            await bridge.async_start()  # second call should be a no-op
+            coord.async_add_listener.assert_called_once()
+
+
+class TestPayloadValidation:
+    """Test that non-numeric JSON payloads are rejected."""
+
+    @pytest.mark.asyncio
+    async def test_rejects_boolean_payload(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        await bridge._execute_write(REG_BAT_MIN_SOC, "true", source="test")
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rejects_null_payload(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        await bridge._execute_write(REG_BAT_MIN_SOC, "null", source="test")
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rejects_array_payload(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        await bridge._execute_write(REG_BAT_MIN_SOC, "[1,2]", source="test")
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rejects_object_payload(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        await bridge._execute_write(REG_BAT_MIN_SOC, '{"a":1}', source="test")
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_not_consumed_by_invalid_request(self) -> None:
+        """Invalid requests must not burn the rate-limit slot."""
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=False)
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+        # Rejected by installer_access check — rate limit should NOT be consumed
+        await bridge._execute_write(REG_BAT_MIN_SOC, "50", source="test")
+        coord.async_write_register.assert_not_called()
+        # Subsequent legitimate write should not be rate-limited
+        assert bridge._check_rate_limit(REG_BAT_MIN_SOC.name) is True
 
 
 class TestProxyTopicBase:

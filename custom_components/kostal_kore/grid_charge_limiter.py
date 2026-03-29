@@ -67,6 +67,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._task: asyncio.Task[None] | None = None
         self._feed_in_limit_w: float = default_feed_in_limit_w(self._device_power_limit_w)
         self._current_charge_limit: float = 0.0
+        self._original_charge_limit: float | None = None
 
     @property
     def is_on(self) -> bool:
@@ -88,19 +89,42 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._feed_in_limit_w = max(0.0, min(self._device_power_limit_w, watts))
         _LOGGER.info("Grid feed-in limit set to %.0f W", self._feed_in_limit_w)
 
+    async def _snapshot_charge_limit(self) -> None:
+        """Read and store the current charge limit before we start overwriting it."""
+        if self._original_charge_limit is not None:
+            return  # already snapshotted
+        reg = REGISTER_BY_NAME.get("bat_max_charge_limit")
+        if not reg:
+            return
+        try:
+            val = float(await self._coord.client.read_register(reg))
+            if not math.isnan(val) and not math.isinf(val) and val >= 0:
+                self._original_charge_limit = val
+                _LOGGER.debug("Snapshotted original charge limit: %.0f W", val)
+        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError) as err:
+            _LOGGER.debug("Could not snapshot charge limit: %s", err)
+
     async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._snapshot_charge_limit()
         self._is_on = True
         self._start_control()
         self.async_write_ha_state()
         _LOGGER.info("Grid Feed-In Optimizer ON (limit=%.0f W)", self._feed_in_limit_w)
 
+    def _restore_limit(self) -> float:
+        """Return the limit to restore: original snapshot or device max as fallback."""
+        limit = self._original_charge_limit if self._original_charge_limit is not None else self._device_power_limit_w
+        self._original_charge_limit = None
+        return limit
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
         self._cancel_control()
-        await self._write_charge_limit(self._device_power_limit_w)
+        restore = self._restore_limit()
+        await self._write_charge_limit(restore)
         self._current_charge_limit = 0.0
         self.async_write_ha_state()
-        _LOGGER.info("Grid Feed-In Optimizer OFF (normal charging restored)")
+        _LOGGER.info("Grid Feed-In Optimizer OFF (charge limit restored to %.0f W)", restore)
 
     def _start_control(self) -> None:
         self._cancel_control()
@@ -120,16 +144,12 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             while self._is_on:
                 pv_power = await self._read_float("total_dc_power")
                 home_consumption = await self._read_float("home_from_pv")
-                grid_power = await self._read_float("pm_total_active")
-                bat_power = await self._read_float("battery_cd_power")
 
                 if pv_power is None:
                     await asyncio.sleep(CONTROL_INTERVAL)
                     continue
 
                 home = abs(home_consumption or 0)
-                # Kostal: battery_cd_power negative = charging
-                current_bat_charge = abs(min(bat_power or 0, 0))
 
                 available_for_grid = pv_power - home
                 surplus = available_for_grid - self._feed_in_limit_w
@@ -145,9 +165,9 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                 await self._write_charge_limit(new_limit)
 
                 _LOGGER.debug(
-                    "FeedIn Optimizer: PV=%.0fW Home=%.0fW → Grid=%.0fW + Bat=%.0fW "
-                    "(limit=%.0fW, feed-in cap=%.0fW)",
-                    pv_power, home, available_for_grid, new_limit,
+                    "FeedIn Optimizer: PV=%.0fW Home=%.0fW → Available=%.0fW "
+                    "(charge limit=%.0fW, feed-in cap=%.0fW)",
+                    pv_power, home, available_for_grid,
                     new_limit, self._feed_in_limit_w,
                 )
 
@@ -160,7 +180,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             _LOGGER.error("Grid Feed-In Optimizer error: %s", err)
         finally:
             if not self._is_on:
-                await self._write_charge_limit(self._device_power_limit_w)
+                await self._write_charge_limit(self._restore_limit())
 
     async def _read_float(self, name: str) -> float | None:
         reg = REGISTER_BY_NAME.get(name)
@@ -185,7 +205,8 @@ class GridFeedInLimiterSwitch(SwitchEntity):
     async def async_will_remove_from_hass(self) -> None:
         self._cancel_control()
         if self._is_on:
-            await self._write_charge_limit(self._device_power_limit_w)
+            self._is_on = False
+            await self._write_charge_limit(self._restore_limit())
         await super().async_will_remove_from_hass()
 
 

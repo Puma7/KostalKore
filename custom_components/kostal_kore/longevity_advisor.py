@@ -60,8 +60,15 @@ class LongevityAdvisor:
         tips.extend(self._pv_tips())
         return tips
 
+    @property
+    def has_battery(self) -> bool:
+        """Return True if a battery is installed."""
+        return self._bat_thresholds.chemistry != "none"
+
     def get_battery_temp_assessment(self) -> str:
         """Assess battery temperature for longevity."""
+        if not self.has_battery:
+            return "Keine Batterie installiert."
         temp = self._health.battery_temp.current
         bt = self._bat_thresholds
         if temp is None:
@@ -86,6 +93,8 @@ class LongevityAdvisor:
         return f"Erhöht ({temp:.1f}°C). Belüftung prüfen für längere Lebensdauer."
 
     def _battery_tips(self) -> list[LongevityTip]:
+        if not self.has_battery:
+            return []
         tips: list[LongevityTip] = []
         h = self._health
         bt = self._bat_thresholds

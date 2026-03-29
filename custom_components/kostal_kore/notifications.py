@@ -12,6 +12,7 @@ Notification levels:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Final
 
@@ -100,11 +101,27 @@ async def notify_modbus_probe_failed(hass: HomeAssistant) -> None:
     )
 
 
-async def notify_safety_alert(hass: HomeAssistant, risk_level: str, title: str, detail: str, action: str) -> None:
-    """Push a fire safety alert as notification."""
+async def notify_safety_alert(
+    hass: HomeAssistant,
+    risk_level: str,
+    title: str,
+    detail: str,
+    action: str,
+    *,
+    entry_id: str = "",
+    category: str = "",
+) -> None:
+    """Push a fire safety alert as notification.
+
+    Uses category (e.g. 'battery_thermal') as part of the notification ID
+    so concurrent alerts with the same severity don't overwrite each other.
+    Falls back to risk_level-only ID for backwards compatibility.
+    """
     level = "error" if risk_level in ("high", "emergency") else "warning"
+    suffix = f"{category}_{risk_level}" if category else risk_level
+    scope = f"{entry_id}_" if entry_id else ""
     await notify(
-        hass, f"safety_{risk_level}",
+        hass, f"{scope}safety_{suffix}",
         f"Sicherheitswarnung: {title}",
         f"**Risikostufe:** {risk_level.upper()}\n\n"
         f"**Details:** {detail}\n\n"
@@ -113,20 +130,48 @@ async def notify_safety_alert(hass: HomeAssistant, risk_level: str, title: str, 
     )
 
 
-async def notify_safety_clear(hass: HomeAssistant) -> None:
+SAFETY_RISK_LEVELS: Final[tuple[str, ...]] = ("monitor", "elevated", "high", "emergency")
+SAFETY_ALERT_CATEGORIES: Final[tuple[str, ...]] = (
+    "isolation", "battery_thermal", "controller_thermal", "dc_imbalance",
+    "dc_arc_indicator", "dc_string_anomaly", "grid_emergency",
+    "voltage_extreme", "battery_voltage_anomaly",
+)
+
+
+async def notify_safety_clear(hass: HomeAssistant, *, entry_id: str = "") -> None:
     """Dismiss safety alerts when system returns to safe state."""
-    for level in ("monitor", "elevated", "high", "emergency"):
-        await dismiss(hass, f"safety_{level}")
+    scope = f"{entry_id}_" if entry_id else ""
+    ids_to_dismiss: list[str] = []
+    for level in SAFETY_RISK_LEVELS:
+        # Legacy (level-only) IDs
+        ids_to_dismiss.append(f"safety_{level}")
+        if scope:
+            ids_to_dismiss.append(f"{scope}safety_{level}")
+        # Category-qualified IDs
+        for category in SAFETY_ALERT_CATEGORIES:
+            ids_to_dismiss.append(f"{scope}safety_{category}_{level}")
+    # Fire all dismissals concurrently to avoid blocking the event loop
+    await asyncio.gather(*(dismiss(hass, nid) for nid in ids_to_dismiss))
 
 
-async def notify_diagnosis(hass: HomeAssistant, area: str, status: str, title: str, detail: str, action: str) -> None:
+async def notify_diagnosis(
+    hass: HomeAssistant,
+    area: str,
+    status: str,
+    title: str,
+    detail: str,
+    action: str,
+    *,
+    entry_id: str = "",
+) -> None:
     """Push a diagnostic finding as notification (only for warnung/kritisch)."""
+    scope = f"{entry_id}_" if entry_id else ""
     if status not in ("warnung", "kritisch"):
-        await dismiss(hass, f"diag_{area}")
+        await dismiss(hass, f"{scope}diag_{area}")
         return
     level = "error" if status == "kritisch" else "warning"
     await notify(
-        hass, f"diag_{area}",
+        hass, f"{scope}diag_{area}",
         title,
         f"**Bereich:** {area}\n\n"
         f"**Details:** {detail}\n\n"

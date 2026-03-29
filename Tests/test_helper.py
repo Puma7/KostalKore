@@ -165,11 +165,39 @@ def test_helper_battery_control_checks() -> None:
 
 
 def test_integration_entry_store_reuses_entry_dict(hass: HomeAssistant) -> None:
+    # Simulate __init__.py creating the store during setup
+    from custom_components.kostal_kore.const import DOMAIN
+    hass.data.setdefault(DOMAIN, {})["entry-test"] = {}
+
     first = integration_entry_store(hass, "entry-test")
     first["x"] = 1
     second = integration_entry_store(hass, "entry-test")
     assert first is second
     assert second["x"] == 1
+
+
+def test_integration_entry_store_detached_after_unload(hass: HomeAssistant) -> None:
+    """After entry is popped from hass.data, store returns detached dict."""
+    from custom_components.kostal_kore.const import DOMAIN
+    hass.data.setdefault(DOMAIN, {})["entry-gone"] = {"y": 2}
+    # Simulate async_unload_entry popping the entry
+    hass.data[DOMAIN].pop("entry-gone")
+
+    store = integration_entry_store(hass, "entry-gone")
+    assert store == {}
+    # Writes to detached dict must not resurrect the store
+    store["z"] = 3
+    assert "entry-gone" not in hass.data[DOMAIN]
+
+
+def test_integration_entry_store_no_domain(hass: HomeAssistant) -> None:
+    """When DOMAIN is not in hass.data at all, return empty detached dict."""
+    from custom_components.kostal_kore.const import DOMAIN
+    # Ensure DOMAIN is NOT in hass.data
+    hass.data.pop(DOMAIN, None)
+    store = integration_entry_store(hass, "any-entry")
+    assert store == {}
+    assert DOMAIN not in hass.data
 
 
 def test_generate_confirmation_code_uses_expected_alphabet() -> None:
@@ -201,6 +229,12 @@ def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
     assert normalize_isolation_resistance_ohm(
         "bad", pv_active=True, inverter_state=6
     ) is None
+    assert normalize_isolation_resistance_ohm(
+        float("inf"), pv_active=True, inverter_state=6
+    ) is None
+    assert normalize_isolation_resistance_ohm(
+        float("-inf"), pv_active=True, inverter_state=6
+    ) is None
 
 
 def test_format_energy_clamps_negative_values() -> None:
@@ -227,6 +261,25 @@ def test_ensure_installer_access() -> None:
         )
         is False
     )
+
+
+def test_ensure_installer_access_with_hass(hass: HomeAssistant) -> None:
+    """Test ensure_installer_access with hass creates/clears repair issues."""
+    # Access denied with hass → creates installer_required issue
+    entry_denied = SimpleNamespace(data={}, entry_id="test_entry")
+    with patch("custom_components.kostal_kore.helper.create_installer_required_issue") as mock_create:
+        assert ensure_installer_access(
+            entry_denied, True, "devices:local", "Battery:MinSocRel", "setting", hass=hass,
+        ) is False
+        mock_create.assert_called_once_with(hass, entry_id="test_entry")
+
+    # Access granted with hass → clears installer_required issue
+    entry_ok = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"}, entry_id="test_entry")
+    with patch("custom_components.kostal_kore.helper.clear_issue") as mock_clear:
+        assert ensure_installer_access(
+            entry_ok, True, "devices:local", "Battery:MinSocRel", "setting", hass=hass,
+        ) is True
+        mock_clear.assert_called_once_with(hass, "installer_required", entry_id="test_entry")
 
 
 def test_parse_modbus_exception_variants() -> None:
@@ -268,7 +321,7 @@ def test_format_em_manager_state_passthrough() -> None:
 async def test_get_hostname_id_timeout() -> None:
     client = MagicMock(spec=ApiClient)
     client.get_settings = AsyncMock(side_effect=asyncio.TimeoutError())
-    with pytest.raises(ApiException):
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
         await get_hostname_id(client)
 
 
@@ -276,7 +329,7 @@ async def test_get_hostname_id_timeout() -> None:
 async def test_get_hostname_id_client_error() -> None:
     client = MagicMock(spec=ApiClient)
     client.get_settings = AsyncMock(side_effect=ClientError("boom"))
-    with pytest.raises(ApiException):
+    with pytest.raises(ClientError):
         await get_hostname_id(client)
 
 

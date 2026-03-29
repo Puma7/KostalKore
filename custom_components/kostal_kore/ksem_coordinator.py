@@ -67,17 +67,24 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
         async with self._lock:
             if self.connected:
                 return
-            self._client = AsyncModbusTcpClient(
+            client = AsyncModbusTcpClient(
                 host=self._host,
                 port=self._port,
                 timeout=KSEM_CONNECT_TIMEOUT,
             )
-            ok = await self._client.connect()
+            try:
+                ok = await client.connect()
+            except (OSError, asyncio.TimeoutError, PyModbusException) as err:
+                client.close()
+                raise UpdateFailed(
+                    f"KSEM connection error to {self._host}:{self._port}: {err}"
+                ) from err
             if not ok:
-                self._client = None
+                client.close()
                 raise UpdateFailed(
                     f"KSEM connection failed to {self._host}:{self._port}"
                 )
+            self._client = client
 
     async def _read_registers(self, address: int, count: int) -> list[int]:
         # Ensure connection first (cheap no-op if already connected).
@@ -101,7 +108,12 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
                 )
                 if response.isError():
                     raise UpdateFailed(f"KSEM read error at {address}: {response}")
-                return list(response.registers)
+                regs = list(response.registers)
+                if len(regs) < count:
+                    raise UpdateFailed(
+                        f"KSEM short read at {address}: expected {count} registers, got {len(regs)}"
+                    )
+                return regs
             except (PyModbusException, OSError, asyncio.TimeoutError) as err:
                 # reset connection and let next cycle reconnect
                 self._client.close()

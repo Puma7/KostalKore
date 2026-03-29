@@ -132,6 +132,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fast_errors = 0
         fast_total = 0
 
+        permanent_skip = 0
         for reg in MONITORING_REGISTERS:
             if reg.group not in FAST_GROUPS:
                 continue
@@ -139,7 +140,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 data[reg.name] = await self._client.read_register(reg)
             except ModbusPermanentError:
-                pass
+                permanent_skip += 1
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
             except ModbusClientError as err:
@@ -149,6 +150,11 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if fast_total > 0 and fast_errors >= fast_total:
             raise UpdateFailed(
                 f"All {fast_total} fast-poll registers failed – inverter may be unreachable"
+            )
+        if fast_total > 0 and permanent_skip >= fast_total and not data:
+            _LOGGER.debug(
+                "All %d fast-poll registers permanently unavailable on this model",
+                fast_total,
             )
 
         self._slow_tick += 1

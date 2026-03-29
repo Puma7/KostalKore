@@ -275,6 +275,7 @@ class InverterHealthMonitor:
             "phase2_voltage": self.phase2_voltage,
             "phase3_voltage": self.phase3_voltage,
             "cos_phi": self.cos_phi,
+            "pm_cos_phi": self.pm_cos_phi,
             "dc1_voltage": self.dc1_voltage,
             "dc2_voltage": self.dc2_voltage,
             "dc3_voltage": self.dc3_voltage,
@@ -328,6 +329,11 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
+                        # Only record isolation when PV is active to avoid
+                        # mixed-unit day/night values that flip between Ω
+                        # and kΩ in HA long-term statistics.
+                        if not pv_active:
+                            continue
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
                             pv_active=pv_active,

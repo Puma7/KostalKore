@@ -2,7 +2,9 @@ adopt_legacy_entity_ids:
   name: Adopt legacy entity IDs
   description: >
     Rebind legacy kostal_plenticore entities/devices to a kostal_kore config entry.
-    Use dry-run first. Apply mode is guarded by a two-step confirmation code flow.
+    Use dry-run first. Apply mode is guarded by a three-step confirmation flow:
+    (1) call with dry_run=false to generate a code, (2) call again with the code
+    to arm, (3) call with final_confirm=true to execute.
   fields:
     target_entry_id:
       name: Target config entry ID
@@ -46,7 +48,9 @@ copy_legacy_history:
   name: Copy/merge legacy history
   description: >
     Advanced recorder history copy/merge from old entity IDs to new ones.
-    Dry-run recommended first. Apply mode is guarded by a two-step confirmation code flow.
+    Dry-run recommended first. Apply mode is guarded by a three-step confirmation flow:
+    (1) call with dry_run=false to generate a code, (2) call again with the code
+    to arm, (3) call with final_confirm=true to execute.
   fields:
     target_entry_id:
       name: Target config entry ID
@@ -73,7 +77,8 @@ copy_legacy_history:
     entity_map:
       name: Manual mapping
       description: >
-        Optional manual old/new pairs to include in copy/merge.
+        Optional list of manual old/new entity ID pairs to include in copy/merge.
+        Each item must have 'old_entity_id' and 'new_entity_id' keys.
       required: false
       example:
         - old_entity_id: sensor.kostal_plenticore_grid_power
