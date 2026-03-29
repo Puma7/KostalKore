@@ -25,6 +25,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_ST
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -93,7 +94,7 @@ class Plenticore:
 
         self.device_info = DeviceInfo(
             configuration_url=f"http://{self.host}",
-            identifiers={(DOMAIN, self.host)},
+            identifiers={(DOMAIN, self._get_persistent_device_id())},
             manufacturer="Kostal",
             name="Kostal Plenticore",
             model="Unknown",
@@ -267,17 +268,41 @@ class Plenticore:
                 _LOGGER.error("Error processing device metadata: %s", err)
             return False
 
+    def _get_persistent_device_id(self) -> str:
+        """Return a stable device identifier from the device registry.
+
+        Looks up the existing device for this config entry in the HA device
+        registry and returns the identifier stored there.  This ensures that
+        even when the metadata API call times out, entities are still mapped
+        to the *same* device (with the real serial number) that was created
+        on the first successful boot.
+
+        Falls back to ``self.host`` only when no device has ever been
+        registered (brand-new installation).
+        """
+        try:
+            registry = dr.async_get(self.hass)
+            for device in dr.async_entries_for_config_entry(
+                registry, self.config_entry.entry_id
+            ):
+                for domain, identifier in device.identifiers:
+                    if domain == DOMAIN and identifier != "unknown":
+                        return identifier
+        except Exception:  # noqa: BLE001 – defensive; never block setup
+            pass
+        return self.host
+
     def _set_default_device_info(self) -> None:
         """Set conservative fallback device metadata.
 
-        Uses the host address as stable identifier so that HA maps entities
-        to the same device across restarts even when the metadata fetch
-        times out.  Previously ``"unknown"`` was used, which created a
-        *different* device each time, orphaning all existing entities.
+        Re-uses the identifier stored in the device registry so that HA
+        keeps mapping entities to the existing device even when the metadata
+        fetch times out.
         """
+        device_id = self._get_persistent_device_id()
         self.device_info = DeviceInfo(
             configuration_url=f"http://{self.host}",
-            identifiers={(DOMAIN, self.host)},
+            identifiers={(DOMAIN, device_id)},
             manufacturer="Kostal",
             model="Unknown",
             name=self.host,
