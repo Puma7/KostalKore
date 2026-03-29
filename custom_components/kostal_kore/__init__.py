@@ -334,6 +334,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         health_monitor = InverterHealthMonitor(num_bidirectional=num_bi)
         fire_safety = FireSafetyMonitor(num_bidirectional=num_bi)
         degradation_tracker = DegradationTracker()
+        _clear_sent: dict[str, bool] = {"value": False}
 
         @callback
         def _feed_health_data() -> None:  # pragma: no cover
@@ -343,7 +344,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 degradation_tracker.update_from_modbus(data)
                 new_alerts = fire_safety.analyze(data)
                 if new_alerts:
-                    _feed_health_data._clear_sent = False
+                    _clear_sent["value"] = False
                     from .notifications import notify_safety_alert, notify_safety_clear
                     for alert in new_alerts:
                         hass.async_create_task(
@@ -355,8 +356,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                             )
                         )
                 elif fire_safety.alert_count == 0 and fire_safety._total_polls > 0:
-                    if not getattr(_feed_health_data, "_clear_sent", False):
-                        _feed_health_data._clear_sent = True
+                    if not _clear_sent["value"]:
+                        _clear_sent["value"] = True
                         from .notifications import notify_safety_clear
                         hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
