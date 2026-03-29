@@ -1286,7 +1286,6 @@ async def test_select_get_settings_data_safe_cached_getter(
 @pytest.mark.asyncio
 async def test_select_modbus_active_interval(
     hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test select coordinator uses 90s interval when Modbus is active (covers select.py:162)."""
     from custom_components.kostal_kore.const import CONF_MODBUS_ENABLED
@@ -1295,17 +1294,21 @@ async def test_select_modbus_active_interval(
         device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
         client=SimpleNamespace(set_setting_values=AsyncMock()),
     )
-    mock_config_entry.add_to_hass(hass)
-    mock_config_entry.runtime_data = plenticore
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "1.1.1.1", CONF_PASSWORD: "test"},
+        options={CONF_MODBUS_ENABLED: True},
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = plenticore
 
     entities: list = []
 
     async def _empty(_p, _o):
         return {}
 
-    with patch.object(select, "_get_settings_data_safe", _empty), \
-         patch.object(mock_config_entry, "options", {CONF_MODBUS_ENABLED: True}):
-        await select.async_setup_entry(hass, mock_config_entry, entities.extend)
+    with patch.object(select, "_get_settings_data_safe", _empty):
+        await select.async_setup_entry(hass, entry, entities.extend)
 
 
 @pytest.mark.asyncio
