@@ -455,16 +455,7 @@ async def _await_cleanup_step(
 
 async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -> bool:
     """Unload the Kostal Plenticore integration with graceful cleanup."""
-    import traceback
-
     start_time = time.time()
-    # Diagnostic: log WHO triggered the unload to debug reload loops
-    caller_stack = "".join(traceback.format_stack(limit=8))
-    _LOGGER.warning(
-        "async_unload_entry called for %s — call stack:\n%s",
-        entry.entry_id,
-        caller_stack,
-    )
 
     # Clean up SoC Controller + Modbus proxy + MQTT bridge (sequentially
     # to give the inverter time to release connections between stops)

@@ -56,8 +56,8 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_HISTORY_MAX: int = 50
 EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
-SETUP_FETCH_TIMEOUT_SECONDS: float = 15.0
-SETUP_PREWARM_TIMEOUT_SECONDS: float = 10.0
+SETUP_FETCH_TIMEOUT_SECONDS: float = 45.0
+SETUP_PREWARM_TIMEOUT_SECONDS: float = 30.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",
@@ -93,7 +93,7 @@ class Plenticore:
 
         self.device_info = DeviceInfo(
             configuration_url=f"http://{self.host}",
-            identifiers={(DOMAIN, "unknown")},
+            identifiers={(DOMAIN, self.host)},
             manufacturer="Kostal",
             name="Kostal Plenticore",
             model="Unknown",
@@ -268,10 +268,16 @@ class Plenticore:
             return False
 
     def _set_default_device_info(self) -> None:
-        """Set conservative fallback device metadata."""
+        """Set conservative fallback device metadata.
+
+        Uses the host address as stable identifier so that HA maps entities
+        to the same device across restarts even when the metadata fetch
+        times out.  Previously ``"unknown"`` was used, which created a
+        *different* device each time, orphaning all existing entities.
+        """
         self.device_info = DeviceInfo(
             configuration_url=f"http://{self.host}",
-            identifiers={(DOMAIN, "unknown")},
+            identifiers={(DOMAIN, self.host)},
             manufacturer="Kostal",
             model="Unknown",
             name=self.host,
