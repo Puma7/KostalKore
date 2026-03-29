@@ -86,9 +86,9 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 ]
 
 # Performance constants
-SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
+SETUP_TIMEOUT_SECONDS: Final[float] = 90.0
 UNLOAD_TIMEOUT_SECONDS: Final[float] = 5.0
-PLATFORM_SETUP_TIMEOUT_SECONDS: Final[float] = 30.0
+PLATFORM_SETUP_TIMEOUT_SECONDS: Final[float] = 60.0
 EVENT_POLL_INTERVAL_SECONDS: Final[int] = 30
 
 # Performance metrics constants
