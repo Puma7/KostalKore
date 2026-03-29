@@ -110,7 +110,7 @@ async def test_async_setup_entry_config_entry_not_ready(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """ConfigEntryNotReady must propagate after calling async_unload."""
+    """ConfigEntryNotReady is now caught like any other exception and returns False."""
     from homeassistant.exceptions import ConfigEntryNotReady
 
     class DummyPlenticore:
@@ -125,9 +125,10 @@ async def test_async_setup_entry_config_entry_not_ready(
 
     mock_config_entry.add_to_hass(hass)
 
-    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore):
-        with pytest.raises(ConfigEntryNotReady):
-            await kp_init.async_setup_entry(hass, mock_config_entry)
+    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
+        "custom_components.kostal_kore.__init__._handle_init_error", return_value=False
+    ):
+        assert await kp_init.async_setup_entry(hass, mock_config_entry) is False
 
 
 @pytest.mark.asyncio
@@ -167,7 +168,7 @@ async def test_async_unload_entry_branches(
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=True),
-    ), patch("custom_components.kostal_kore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]):
+    ), patch("custom_components.kostal_kore.__init__.time.time", return_value=10.0):
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
 
 

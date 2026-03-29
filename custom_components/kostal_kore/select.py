@@ -31,7 +31,7 @@ PARALLEL_UPDATES = 0  # Coordinator serialises all API calls
 
 # Performance and security constants
 SELECT_UPDATE_INTERVAL_SECONDS: Final[int] = 30
-SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 6.0
+SELECT_SETTINGS_FETCH_TIMEOUT_SECONDS: Final[float] = 10.0
 UNKNOWN_API_500_RESPONSE: Final[str] = "Unknown API response [500]"
 NONE_OPTION_VALUE: Final[str] = "None"
 

@@ -56,8 +56,8 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_HISTORY_MAX: int = 50
 EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
-SETUP_FETCH_TIMEOUT_SECONDS: float = 5.0
-SETUP_PREWARM_TIMEOUT_SECONDS: float = 5.0
+SETUP_FETCH_TIMEOUT_SECONDS: float = 15.0
+SETUP_PREWARM_TIMEOUT_SECONDS: float = 10.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",
@@ -745,7 +745,7 @@ class ProcessDataUpdateCoordinator(
         try:
             fetched_data = await asyncio.wait_for(
                 client.get_process_data_values(self._fetch),
-                timeout=30.0
+                timeout=15.0
             )
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy after a successful process-data roundtrip.
