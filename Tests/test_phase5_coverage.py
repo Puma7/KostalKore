@@ -1206,9 +1206,11 @@ async def test_select_setup_retry_on_empty_settings(
 ) -> None:
     """Test select setup retries once when initial settings fetch returns empty (covers select.py:150-157)."""
     plenticore = SimpleNamespace(
-        device_info={"name": "test"},
+        available_modules=[],
+        device_info=DeviceInfo(identifiers={(DOMAIN, "x")}),
         client=SimpleNamespace(
             get_settings=AsyncMock(return_value={}),
+            set_setting_values=AsyncMock(),
         ),
     )
     mock_config_entry.add_to_hass(hass)
@@ -1295,15 +1297,14 @@ async def test_select_modbus_active_interval(
     )
     mock_config_entry.add_to_hass(hass)
     mock_config_entry.runtime_data = plenticore
-    hass.config_entries._entries[mock_config_entry.entry_id] = mock_config_entry
-    mock_config_entry._options = {CONF_MODBUS_ENABLED: True}
 
     entities: list = []
 
     async def _empty(_p, _o):
         return {}
 
-    with patch.object(select, "_get_settings_data_safe", _empty):
+    with patch.object(select, "_get_settings_data_safe", _empty), \
+         patch.object(mock_config_entry, "options", {CONF_MODBUS_ENABLED: True}):
         await select.async_setup_entry(hass, mock_config_entry, entities.extend)
 
 
