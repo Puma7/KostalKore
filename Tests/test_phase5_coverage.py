@@ -106,6 +106,31 @@ async def test_async_setup_entry_success(
 
 
 @pytest.mark.asyncio
+async def test_async_setup_entry_config_entry_not_ready(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """ConfigEntryNotReady must propagate after calling async_unload."""
+    from homeassistant.exceptions import ConfigEntryNotReady
+
+    class DummyPlenticore:
+        def __init__(self, *_args):
+            pass
+
+        async def async_setup(self) -> bool:
+            raise ConfigEntryNotReady("transient failure")
+
+        async def async_unload(self) -> None:
+            pass
+
+    mock_config_entry.add_to_hass(hass)
+
+    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore):
+        with pytest.raises(ConfigEntryNotReady):
+            await kp_init.async_setup_entry(hass, mock_config_entry)
+
+
+@pytest.mark.asyncio
 async def test_async_setup_entry_setup_error(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -525,8 +550,13 @@ def test_helper_formatters_and_conversions() -> None:
     assert helper._handle_format_error("x", "round") is None
     assert helper.PlenticoreDataFormatter.format_round("4.2") == 4
     assert helper.PlenticoreDataFormatter.format_round("bad") is None
+    assert helper.PlenticoreDataFormatter.format_round("nan") is None
+    assert helper.PlenticoreDataFormatter.format_round("inf") is None
+    assert helper.PlenticoreDataFormatter.format_round("-inf") is None
     assert helper.PlenticoreDataFormatter.format_round_back(4.0) == "4"
     assert helper.PlenticoreDataFormatter.format_round_back(4.4) == "4.4"
+    assert helper.PlenticoreDataFormatter.format_round_back(float("nan")) == ""
+    assert helper.PlenticoreDataFormatter.format_round_back(float("inf")) == ""
     assert helper.PlenticoreDataFormatter.format_float("1.5") == 1.5
     assert helper.PlenticoreDataFormatter.format_float("bad") is None
     assert helper.PlenticoreDataFormatter.format_float_back(2.5) == "2.5"

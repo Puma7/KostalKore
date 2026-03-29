@@ -219,6 +219,12 @@ def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
     assert normalize_isolation_resistance_ohm(
         "bad", pv_active=True, inverter_state=6
     ) is None
+    assert normalize_isolation_resistance_ohm(
+        float("inf"), pv_active=True, inverter_state=6
+    ) is None
+    assert normalize_isolation_resistance_ohm(
+        float("-inf"), pv_active=True, inverter_state=6
+    ) is None
 
 
 def test_format_energy_clamps_negative_values() -> None:
