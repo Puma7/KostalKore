@@ -646,6 +646,22 @@ def test_repairs_create_and_clear(hass: HomeAssistant) -> None:
         delete_issue.assert_called_once()
 
 
+def test_repairs_with_entry_id(hass: HomeAssistant) -> None:
+    """Test repair issue creation/clearing with entry_id scoping."""
+    with patch("custom_components.kostal_kore.repairs.ir.async_create_issue") as create_issue, patch(
+        "custom_components.kostal_kore.repairs.ir.async_delete_issue"
+    ) as delete_issue:
+        repairs.create_auth_failed_issue(hass, entry_id="test_entry")
+        create_issue.assert_called_once()
+        issue_id = create_issue.call_args[0][2]
+        assert "test_entry" in issue_id
+        repairs.clear_issue(hass, "auth_failed", entry_id="test_entry")
+        delete_issue.assert_called_once()
+        # Also cover create_installer_required_issue (repairs.py:54-63)
+        repairs.create_installer_required_issue(hass, entry_id="test_entry")
+        assert create_issue.call_count == 2
+
+
 def test_select_helpers_and_errors() -> None:
     assert select._normalize_translation_key("Battery:Foo  Bar") == "battery_foo_bar"
     select._handle_select_error(ApiException("boom"), "api")

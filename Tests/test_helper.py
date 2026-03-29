@@ -190,6 +190,16 @@ def test_integration_entry_store_detached_after_unload(hass: HomeAssistant) -> N
     assert "entry-gone" not in hass.data[DOMAIN]
 
 
+def test_integration_entry_store_no_domain(hass: HomeAssistant) -> None:
+    """When DOMAIN is not in hass.data at all, return empty detached dict."""
+    from custom_components.kostal_kore.const import DOMAIN
+    # Ensure DOMAIN is NOT in hass.data
+    hass.data.pop(DOMAIN, None)
+    store = integration_entry_store(hass, "any-entry")
+    assert store == {}
+    assert DOMAIN not in hass.data
+
+
 def test_generate_confirmation_code_uses_expected_alphabet() -> None:
     code = generate_confirmation_code()
     assert len(code) == 6
@@ -251,6 +261,25 @@ def test_ensure_installer_access() -> None:
         )
         is False
     )
+
+
+def test_ensure_installer_access_with_hass(hass: HomeAssistant) -> None:
+    """Test ensure_installer_access with hass creates/clears repair issues."""
+    # Access denied with hass → creates installer_required issue
+    entry_denied = SimpleNamespace(data={}, entry_id="test_entry")
+    with patch("custom_components.kostal_kore.helper.create_installer_required_issue") as mock_create:
+        assert ensure_installer_access(
+            entry_denied, True, "devices:local", "Battery:MinSocRel", "setting", hass=hass,
+        ) is False
+        mock_create.assert_called_once_with(hass, entry_id="test_entry")
+
+    # Access granted with hass → clears installer_required issue
+    entry_ok = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"}, entry_id="test_entry")
+    with patch("custom_components.kostal_kore.helper.clear_issue") as mock_clear:
+        assert ensure_installer_access(
+            entry_ok, True, "devices:local", "Battery:MinSocRel", "setting", hass=hass,
+        ) is True
+        mock_clear.assert_called_once_with(hass, "installer_required", entry_id="test_entry")
 
 
 def test_parse_modbus_exception_variants() -> None:
