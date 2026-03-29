@@ -276,6 +276,28 @@ async def test_charge_block_switch_snapshot_handles_invalid_or_missing_values() 
 
 
 @pytest.mark.asyncio
+async def test_charge_block_switch_turn_on_write_failure_raises() -> None:
+    """async_turn_on should raise HomeAssistantError when _write_block fails."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _coordinator_stub()
+    entity = BatteryChargeBlockSwitch(coordinator, "entryFail", _device_info())
+    entity.async_write_ha_state = MagicMock()
+
+    # Pre-set a snapshot so we can verify it gets discarded
+    entity._original_charge_limit = 500.0
+
+    coordinator.async_write_register.side_effect = OSError("modbus down")
+    with pytest.raises(HomeAssistantError, match="blockiert"):
+        await entity.async_turn_on()
+
+    # Snapshot discarded, switch not on, no keepalive
+    assert entity._original_charge_limit is None
+    assert not entity.is_on
+    assert entity._keepalive_task is None
+
+
+@pytest.mark.asyncio
 async def test_charge_block_switch_no_notification_and_notification_error_paths() -> None:
     """Charge block switch should tolerate absent or failing notifications."""
     coordinator = _coordinator_stub()

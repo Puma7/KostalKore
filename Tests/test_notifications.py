@@ -139,6 +139,7 @@ async def test_notify_safety_clear_dismisses_all_risk_levels_and_categories() ->
         for cat in notifications.SAFETY_ALERT_CATEGORIES:
             expected_ids.add(f"entry1_safety_{cat}_{level}")
     actual_ids = {c.args[1] for c in dismiss_mock.call_args_list}
+    assert len(dismiss_mock.call_args_list) == len(expected_ids)  # no duplicates
     assert actual_ids == expected_ids
 
 
@@ -156,6 +157,7 @@ async def test_notify_safety_clear_without_entry_id() -> None:
         for cat in notifications.SAFETY_ALERT_CATEGORIES:
             expected_ids.add(f"safety_{cat}_{level}")
     actual_ids = {c.args[1] for c in dismiss_mock.call_args_list}
+    assert len(dismiss_mock.call_args_list) == len(expected_ids)  # no duplicates
     assert actual_ids == expected_ids
 
 

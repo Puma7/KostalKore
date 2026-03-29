@@ -22,6 +22,7 @@ from typing import Any, Final
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .modbus_client import ModbusClientError
@@ -98,9 +99,9 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         await self._snapshot_charge_limit()
         try:
             await self._write_block()
-        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError):
+        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
             self._original_charge_limit = None  # discard snapshot on failure
-            return
+            raise HomeAssistantError("Ladung konnte nicht blockiert werden") from err
         self._is_on = True
         self._start_keepalive()
         self.async_write_ha_state()
