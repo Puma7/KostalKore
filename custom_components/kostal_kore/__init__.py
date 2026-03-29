@@ -26,7 +26,6 @@ from pykoplenti import ApiException
 
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -151,9 +150,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         setup_success = await asyncio.wait_for(
             plenticore.async_setup(), timeout=SETUP_TIMEOUT_SECONDS
         )
-    except ConfigEntryNotReady:
-        await plenticore.async_unload()
-        raise  # Let HA's retry machinery handle transient connection failures
     except Exception as err:
         setup_success = _handle_init_error(err, "setup")
 
@@ -422,20 +418,15 @@ async def _rollback_setup(
 ) -> None:
     """Clean up runtime objects after a failed platform-forwarding attempt."""
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
-    cleanup: list[tuple[str, Awaitable[object]]] = []
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:
-        cleanup.append(("SoC controller stop", soc_ctrl.stop()))
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     proxy = entry_data.get("modbus_proxy")
     if proxy:
-        cleanup.append(("Modbus proxy stop", proxy.stop()))
+        await _await_cleanup_step("Modbus proxy stop", proxy.stop())
     mqtt = entry_data.get("mqtt_bridge")
     if mqtt:
-        cleanup.append(("MQTT bridge stop", mqtt.async_stop()))
-    if cleanup:
-        await asyncio.gather(
-            *(_await_cleanup_step(label, step) for label, step in cleanup)
-        )
+        await _await_cleanup_step("MQTT bridge stop", mqtt.async_stop())
     await plenticore.async_unload()
     _LOGGER.warning("Rolled back partial setup for %s", entry.title)
 
@@ -475,25 +466,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         caller_stack,
     )
 
-    # Clean up SoC Controller + Modbus proxy + MQTT bridge (concurrently)
+    # Clean up SoC Controller + Modbus proxy + MQTT bridge (sequentially
+    # to give the inverter time to release connections between stops)
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
-    parallel_cleanup: list[tuple[str, Awaitable[object]]] = []
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
-        parallel_cleanup.append(("SoC controller stop", soc_ctrl.stop()))
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
-        parallel_cleanup.append(("Modbus proxy stop", modbus_proxy.stop()))
+        await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
     mqtt_bridge = entry_data.get("mqtt_bridge")
     if mqtt_bridge:
-        parallel_cleanup.append(("MQTT bridge stop", mqtt_bridge.async_stop()))
-    if parallel_cleanup:
-        await asyncio.gather(
-            *(
-                _await_cleanup_step(label, step)
-                for label, step in parallel_cleanup
-            )
-        )
+        await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
         try:
