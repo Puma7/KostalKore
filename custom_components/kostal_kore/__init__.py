@@ -235,9 +235,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         if modbus_coordinator and entry.options.get(
             CONF_MQTT_BRIDGE_ENABLED, False
         ):
-            device_id = plenticore.device_info.get("serial_number", entry.entry_id)
-            if isinstance(device_id, tuple):
-                device_id = str(entry.entry_id)
+            # Extract device identifier from DeviceInfo identifiers set.
+            device_id: str = str(entry.entry_id)
+            for _domain, _ident in plenticore.device_info.get("identifiers", set()):
+                if _domain == DOMAIN and _ident != "unknown":
+                    device_id = str(_ident)
+                    break
             mqtt_bridge = KostalMqttBridge(
                 hass, modbus_coordinator, str(device_id),
                 soc_controller=soc_controller,
