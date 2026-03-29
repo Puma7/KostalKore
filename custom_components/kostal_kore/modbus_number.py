@@ -76,7 +76,7 @@ async def _probe_modbus_access(coordinator: ModbusDataUpdateCoordinator) -> bool
             soc_value,
         )
         return True
-    except (ModbusClientError, OSError, asyncio.TimeoutError) as err:
+    except Exception as err:
         _LOGGER.debug("Battery management registers not readable: %s", err)
         return False
 
@@ -354,7 +354,7 @@ class ModbusNumberEntity(
                     "Read-back mismatch for %s: wrote %s, read %s",
                     self._register.name, value, readback,
                 )
-        except (ModbusClientError, OSError, asyncio.TimeoutError, TypeError, ValueError):
+        except Exception:
             _LOGGER.debug("Read-back verification skipped for %s", self._register.name)
 
         await self.coordinator.async_request_refresh()
@@ -391,13 +391,19 @@ class ModbusNumberEntity(
                         "G3 keepalive: re-wrote %s = %s",
                         self._register.name, self._keepalive_value,
                     )
-                except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+                except Exception as err:
                     _LOGGER.warning(
                         "G3 keepalive write failed for %s: %s",
                         self._register.name, err,
                     )
         except asyncio.CancelledError:
             return
+        except Exception as exc:
+            _LOGGER.error(
+                "G3 keepalive crashed for %s: %s — inverter may revert to fallback limits",
+                self._register.name,
+                exc,
+            )
 
     def _get_keepalive_interval(self) -> int:
         """Calculate keepalive interval from the fallback time register."""

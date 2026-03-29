@@ -33,6 +33,7 @@ class _DummyMixin:
 
     def __init__(self, plenticore) -> None:
         self._plenticore = plenticore
+        self.config_entry = plenticore.config_entry
 
 
 async def test_async_write_data_verification_and_validation_paths(

@@ -218,8 +218,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client)
         try:
             await modbus_coordinator.async_setup()
-            if endianness == "auto":
-                await modbus_client.detect_endianness()
+            # detect_endianness() is already called inside async_setup(),
+            # no need to call it again here.
             _LOGGER.info("Modbus TCP connected to %s:%s", host, port)
         except Exception as err:
             _LOGGER.warning(

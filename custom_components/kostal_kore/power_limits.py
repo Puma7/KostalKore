@@ -41,7 +41,7 @@ def get_device_power_limit_w(
     try:
         device_info = getattr(coordinator, "device_info_data", None) or {}
         raw_limit = device_info.get("inverter_max_power")
-    except (AttributeError, TypeError):
+    except Exception:
         raw_limit = None
 
     parsed = _to_finite_positive(raw_limit)

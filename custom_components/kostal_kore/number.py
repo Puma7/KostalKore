@@ -92,7 +92,7 @@ DEFAULT_PERCENTAGE_STEP: Final[int] = 1
 DEFAULT_TIME_MAX_SECONDS: Final[int] = 86400
 DEFAULT_TIME_MIN_SECONDS: Final[int] = 0
 DEFAULT_TIME_STEP_SECONDS: Final[int] = 1
-SETTINGS_TIMEOUT_SECONDS: Final[float] = 30.0
+SETTINGS_TIMEOUT_SECONDS: Final[float] = 15.0
 
 # Battery-specific constants
 BATTERY_MAX_POWER_WATTS: Final[int] = 1000000
@@ -1840,6 +1840,12 @@ class PlenticoreDataNumber(
                         break
         except asyncio.CancelledError:
             return
+        except Exception as exc:
+            _LOGGER.error(
+                "G3 keepalive crashed for %s: %s — inverter may revert to fallback limits",
+                self.module_id,
+                exc,
+            )
 
     async def async_added_to_hass(self) -> None:
         """Register this entity on the Update Coordinator."""

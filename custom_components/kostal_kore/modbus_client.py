@@ -562,7 +562,16 @@ class KostalModbusClient:
                     raw += struct.pack(">H", reg_val)
                 return raw
             except asyncio.TimeoutError as err:
-                raise ModbusTransientError(
+                # Close connection to flush stale data from the TCP buffer.
+                # Without this, the delayed response pollutes the next
+                # transaction (pymodbus "got id=N-1, Skipping" error).
+                if self._client is not None:
+                    try:
+                        self._client.close()
+                    except Exception:
+                        pass
+                self._client = None
+                raise ModbusConnectionError(
                     f"Timeout reading register {address} (>{READ_TIMEOUT}s)"
                 ) from err
             except (PyConnectionException, OSError) as err:
@@ -617,7 +626,14 @@ class KostalModbusClient:
                 if resp.isError():
                     raise _classify_exception_response(resp)
             except asyncio.TimeoutError as err:
-                raise ModbusTransientError(
+                # Close connection to flush stale data from the TCP buffer.
+                if self._client is not None:
+                    try:
+                        self._client.close()
+                    except Exception:
+                        pass
+                self._client = None
+                raise ModbusConnectionError(
                     f"Timeout writing register {address} (>{READ_TIMEOUT}s)"
                 ) from err
             except (PyConnectionException, OSError) as err:
