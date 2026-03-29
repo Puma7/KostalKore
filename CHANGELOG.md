@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.10-rc.3] — 2026-03-29 — CI Fixes, Test Coverage, QA Regression Fixes
+
+Third pass: CI compliance (mypy, test coverage 100%), plus self-review
+regression analysis that found and fixed 4 real bugs introduced by prior fixes.
+
+### Fixed — CI Compliance
+- **mypy**: Replaced function-attribute debounce pattern (`_feed_health_data._clear_sent`) with closure-captured dict to satisfy mypy `attr-defined` when `@callback` is properly typed in CI.
+- **test coverage**: Added 17+ test functions across `test_phase5_coverage.py`, `test_helper.py` to reach 100% branch coverage on all 9 measured files.
+- **test assertion**: Fixed stale `format_round_back(4.4) == "4"` → `"4.4"` to match new fractional-precision behavior.
+
+### Fixed — Regressions Found by QA Self-Review
+- **coordinator.py (R5)**: `_fetch_device_metadata` now catches `asyncio.TimeoutError` in addition to `TimeoutError`. Required because `get_hostname_id` now re-raises the original `asyncio.TimeoutError` instead of wrapping it in `ApiException`.
+- **charge_block_switch.py (R7)**: Restored `try/except` in `_write_block()` — a failed Modbus write no longer propagates unhandled through `async_turn_on()`, which would leave the switch in an inconsistent state (keepalive not started, `_is_on` not set). `async_turn_on` now discards the snapshot on write failure and returns gracefully.
+- **__init__.py (R1)**: `async_setup_entry` now clears both legacy unscoped issue IDs (`kostal_kore_auth_failed`) AND new entry-scoped IDs (`kostal_kore_{entry_id}_auth_failed`). Prevents phantom repair issues surviving an upgrade from the old ID scheme.
+- **notifications.py (P1)**: `notify_safety_clear` now fires all dismiss calls via `asyncio.gather()` instead of sequential awaits. Also dismisses legacy unscoped notification IDs for upgrade compatibility.
+
 ### Added
 - **Backlog implementation wave completed**:
   - Event intelligence coordinator with bounded history + dedup/cooldown.

@@ -131,13 +131,15 @@ async def test_notify_safety_clear_dismisses_all_risk_levels_and_categories() ->
     with patch("custom_components.kostal_kore.notifications.dismiss", new=AsyncMock()) as dismiss_mock:
         await notifications.notify_safety_clear(hass, entry_id="entry1")
 
-    # Each risk level should dismiss the legacy ID + all category-qualified IDs
-    expected = []
+    # With entry_id, should dismiss: legacy unscoped, scoped, and all category combos
+    expected_ids: set[str] = set()
     for level in notifications.SAFETY_RISK_LEVELS:
-        expected.append(call(hass, f"entry1_safety_{level}"))
+        expected_ids.add(f"safety_{level}")  # legacy unscoped
+        expected_ids.add(f"entry1_safety_{level}")  # scoped
         for cat in notifications.SAFETY_ALERT_CATEGORIES:
-            expected.append(call(hass, f"entry1_safety_{cat}_{level}"))
-    assert dismiss_mock.await_args_list == expected
+            expected_ids.add(f"entry1_safety_{cat}_{level}")
+    actual_ids = {c.args[1] for c in dismiss_mock.call_args_list}
+    assert actual_ids == expected_ids
 
 
 async def test_notify_safety_clear_without_entry_id() -> None:
@@ -147,12 +149,14 @@ async def test_notify_safety_clear_without_entry_id() -> None:
     with patch("custom_components.kostal_kore.notifications.dismiss", new=AsyncMock()) as dismiss_mock:
         await notifications.notify_safety_clear(hass)
 
-    expected = []
+    # Without entry_id, should dismiss: level-only + category combos (all unscoped)
+    expected_ids: set[str] = set()
     for level in notifications.SAFETY_RISK_LEVELS:
-        expected.append(call(hass, f"safety_{level}"))
+        expected_ids.add(f"safety_{level}")
         for cat in notifications.SAFETY_ALERT_CATEGORIES:
-            expected.append(call(hass, f"safety_{cat}_{level}"))
-    assert dismiss_mock.await_args_list == expected
+            expected_ids.add(f"safety_{cat}_{level}")
+    actual_ids = {c.args[1] for c in dismiss_mock.call_args_list}
+    assert actual_ids == expected_ids
 
 
 @pytest.mark.parametrize("status", ["ok", "warnung", "kritisch"])
