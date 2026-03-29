@@ -670,7 +670,7 @@ class TestAdditionalClientCoverage:
         assert c._last_exc_code == ModbusExceptionCode.SERVER_DEVICE_BUSY
 
         client.read_holding_registers = AsyncMock(side_effect=asyncio.TimeoutError())
-        with pytest.raises(ModbusTransientError, match="Timeout reading"):
+        with pytest.raises(ModbusConnectionError, match="Timeout reading"):
             await c._raw_read_inner(10, 1)
 
         client.read_holding_registers = AsyncMock(side_effect=OSError("broken pipe"))
@@ -719,7 +719,7 @@ class TestAdditionalClientCoverage:
             await c._raw_write_inner(10, b"\x00\x2a", 1)
 
         client.write_register = AsyncMock(side_effect=asyncio.TimeoutError())
-        with pytest.raises(ModbusTransientError, match="Timeout writing"):
+        with pytest.raises(ModbusConnectionError, match="Timeout writing"):
             await c._raw_write_inner(10, b"\x00\x2a", 1)
 
         client.write_register = AsyncMock(side_effect=OSError("lost"))

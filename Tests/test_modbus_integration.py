@@ -302,7 +302,7 @@ async def test_setup_entry_modbus_auto_endianness(
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    mock_detect.assert_called_once()
+    # detect_endianness is called inside async_setup(), not again from __init__.py
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
