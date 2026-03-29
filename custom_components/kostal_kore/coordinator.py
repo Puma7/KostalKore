@@ -308,7 +308,7 @@ class Plenticore:
                     "scb:network": [hostname_id],
                 }
             )
-        except (ApiException, ClientError, TimeoutError, KeyError) as err:
+        except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError, KeyError) as err:
             _LOGGER.error("Could not fetch device metadata: %s", err)
             # Set default device info to prevent setup failure
             self._set_default_device_info()

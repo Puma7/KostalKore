@@ -162,10 +162,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         _log_setup_metrics(start_time, False)
         return False
 
-    clear_issue(hass, "auth_failed", entry_id=entry.entry_id)
-    clear_issue(hass, "api_unreachable", entry_id=entry.entry_id)
-    clear_issue(hass, "inverter_busy", entry_id=entry.entry_id)
-    clear_issue(hass, "installer_required", entry_id=entry.entry_id)
+    # Clear both legacy (unscoped) and new (entry-scoped) issue IDs so that
+    # issues created by a previous version are also dismissed after upgrade.
+    for _suffix in ("auth_failed", "api_unreachable", "inverter_busy", "installer_required"):
+        clear_issue(hass, _suffix)  # legacy unscoped ID
+        clear_issue(hass, _suffix, entry_id=entry.entry_id)  # new scoped ID
 
     entry.runtime_data = plenticore
 

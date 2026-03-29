@@ -12,6 +12,7 @@ Notification levels:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Final
 
@@ -140,11 +141,17 @@ SAFETY_ALERT_CATEGORIES: Final[tuple[str, ...]] = (
 async def notify_safety_clear(hass: HomeAssistant, *, entry_id: str = "") -> None:
     """Dismiss safety alerts when system returns to safe state."""
     scope = f"{entry_id}_" if entry_id else ""
+    ids_to_dismiss: list[str] = []
     for level in SAFETY_RISK_LEVELS:
-        # Dismiss both legacy (level-only) and category-qualified IDs
-        await dismiss(hass, f"{scope}safety_{level}")
+        # Legacy (level-only) IDs
+        ids_to_dismiss.append(f"safety_{level}")
+        if scope:
+            ids_to_dismiss.append(f"{scope}safety_{level}")
+        # Category-qualified IDs
         for category in SAFETY_ALERT_CATEGORIES:
-            await dismiss(hass, f"{scope}safety_{category}_{level}")
+            ids_to_dismiss.append(f"{scope}safety_{category}_{level}")
+    # Fire all dismissals concurrently to avoid blocking the event loop
+    await asyncio.gather(*(dismiss(hass, nid) for nid in ids_to_dismiss))
 
 
 async def notify_diagnosis(

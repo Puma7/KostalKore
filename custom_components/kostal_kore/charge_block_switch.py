@@ -96,7 +96,11 @@ class BatteryChargeBlockSwitch(SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Block battery charging: REG 1038 = 0."""
         await self._snapshot_charge_limit()
-        await self._write_block()
+        try:
+            await self._write_block()
+        except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError):
+            self._original_charge_limit = None  # discard snapshot on failure
+            return
         self._is_on = True
         self._start_keepalive()
         self.async_write_ha_state()
@@ -135,7 +139,11 @@ class BatteryChargeBlockSwitch(SwitchEntity):
     async def _write_block(self) -> None:
         reg = REGISTER_BY_NAME.get("bat_max_charge_limit")
         if reg:
-            await self._coord.async_write_register(reg, 0.0)
+            try:
+                await self._coord.async_write_register(reg, 0.0)
+            except (ModbusClientError, OSError, asyncio.TimeoutError, ValueError) as err:
+                _LOGGER.warning("Failed to block charging: %s", err)
+                raise
 
     async def _write_normal(self, watts: float | None = None) -> None:
         limit = watts if watts is not None else self._normal_limit_w
