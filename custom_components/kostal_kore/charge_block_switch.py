@@ -178,6 +178,11 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                 _LOGGER.debug("Charge block keepalive: REG 1038 = 0")
         except asyncio.CancelledError:
             return
+        except Exception as exc:
+            _LOGGER.error(
+                "Charge block keepalive crashed: %s — inverter may resume charging",
+                exc,
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         """Restore charging on entity removal."""

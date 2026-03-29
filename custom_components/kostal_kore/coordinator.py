@@ -613,7 +613,7 @@ class DataUpdateCoordinatorMixin:
         # CHANGELOG (Codex, 2026-02-05):
         # Successful write confirms recovery from prior inverter_busy state.
         if (hass := getattr(self._plenticore, "hass", None)) is not None:
-            clear_issue(hass, "inverter_busy")
+            clear_issue(hass, "inverter_busy", entry_id=self.config_entry.entry_id)
 
         return True
 

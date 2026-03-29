@@ -398,6 +398,12 @@ class ModbusNumberEntity(
                     )
         except asyncio.CancelledError:
             return
+        except Exception as exc:
+            _LOGGER.error(
+                "G3 keepalive crashed for %s: %s — inverter may revert to fallback limits",
+                self._register.name,
+                exc,
+            )
 
     def _get_keepalive_interval(self) -> int:
         """Calculate keepalive interval from the fallback time register."""
