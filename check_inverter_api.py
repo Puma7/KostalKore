@@ -12,6 +12,7 @@ Aufruf:
 
 import asyncio
 import sys
+from typing import Optional
 
 sys.path.insert(0, "pykoplenti-master")
 
@@ -29,7 +30,7 @@ async def query_single(client, module_id: str, key: str):
         return None, str(e)
 
 
-async def main(host: str, key: str, service_code: str | None) -> None:
+async def main(host: str, key: str, service_code: Optional[str]) -> None:
     async with aiohttp.ClientSession() as session:
         client = ApiClient(session, host)
         if service_code:
