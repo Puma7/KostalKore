@@ -566,3 +566,173 @@ instead of consulting the better source.
 Clamps are not the right tool when the lower bound represents
 "missing information". Map "missing" to a state that triggers the
 fallback chain, not to a valid-looking default.
+
+---
+
+## 30) Three-stage review (Developer → QA → Red Team) catches what self-review misses
+
+### What we learned
+A single self-review pass after a fix tends to confirm what the
+implementer already believes. Layering three explicit roles caught
+real defects at each stage:
+
+| Stage | Role | Caught |
+|-------|------|--------|
+| 1 | Developer (implement) | the original 11 bugs |
+| 2 | QA (adversarial self-review) | a too-aggressive clamp, an over-loud log path, a missing diagnostic notification |
+| 3 | Red Team (independent skeptic) | a wrong entity-registry field name that would have made the QA-added fix silently no-op for the entire target cohort; an unverifiable claim baked into a code comment |
+
+The Red Team stage is the most valuable when it explicitly assumes
+the prior two stages may have hallucinated, instead of building on
+their conclusions.
+
+### Process recommendation
+For non-trivial fixes:
+1. Implement.
+2. Switch role — review your own diff with a "this is broken until
+   proven otherwise" stance.
+3. Switch role again — challenge the QA findings themselves. Ask:
+   "is the bug even real, or did the QA invent a failure mode that
+   the original code never actually had?"
+
+Each stage must explicitly distrust the previous one. Without that,
+later stages just rubber-stamp earlier ones.
+
+---
+
+## 31) HA entity_registry has two unit fields — pick the right one
+
+### What we learned
+`RegistryEntry` exposes two unit-of-measurement attributes that look
+interchangeable but are not:
+
+| Field | Meaning | Default for users without UI override |
+|-------|---------|---------------------------------------|
+| `unit_of_measurement` | the user's UI override | often `None` |
+| `original_unit_of_measurement` | the entity-reported unit at last registration | the actual current unit |
+
+A migration check written as `entry.unit_of_measurement == "Ah"`
+silently misses every user who never opened the UI cog and adjusted
+the unit — exactly the population the migration notice is meant for.
+
+### Implemented decision
+- Read the effective unit as
+  `entry.unit_of_measurement or entry.original_unit_of_measurement`.
+- Treat `unit_of_measurement` as override-only.
+
+### Lesson
+When an HA registry attribute has both an `xxx` and an
+`original_xxx` variant, assume they hold different things and verify
+which one represents the "current effective" value before relying
+on it.
+
+---
+
+## 32) `suggested_unit_of_measurement` does not retroactively re-format existing entities
+
+### What we learned
+Setting `suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR`
+in the entity description applies the kWh display only when the
+entity is **registered for the first time**. For entities already
+present in the registry (every existing install), the registry's
+stored `unit_of_measurement` keeps the previously persisted value
+and the suggestion has no effect.
+
+### Implemented decision
+- Keep `suggested_unit_of_measurement` in the entity description for
+  new installs.
+- Document in the migration Repairs issue that existing users must
+  manually change the unit through the entity settings cog if they
+  want the kWh display.
+
+### Lesson
+HA's `suggested_*` attributes are first-registration hints, not
+runtime preferences. Any breaking unit change must surface a
+manual-action notice for existing entities, because the registry
+will hold the old value indefinitely otherwise.
+
+---
+
+## 33) Don't bake unverified architectural claims into code comments
+
+### What we learned
+A QA finding claimed `EntityCategory.DIAGNOSTIC` filters entities
+out of the Home Assistant Energy Dashboard's auto-suggestion picker
+and therefore neutralizes `device_class=ENERGY_STORAGE`. The Red
+Team pass could not confirm that claim from HA's published behavior
+— the actual Energy Dashboard filter is on `device_class`,
+`state_class`, and `hidden_by`, not on `entity_category`.
+
+The fix (removing DIAGNOSTIC) was still correct, but for a different
+reason: it was a **consistency** violation against the sibling
+battery sensors `SoC`, `P`, `U` in the same definition, which are
+user-facing and carry no DIAGNOSTIC.
+
+### Implemented decision
+- Removed the unverifiable claim from the inline comment.
+- Replaced with the verifiable consistency argument.
+
+### Lesson
+Code comments that justify a change with an unverified third-party
+behavior claim are technical debt. If the claim later turns out to
+be wrong, the comment misleads future maintainers about why the
+code is the way it is. Prefer comments that cite facts visible in
+the same repository (sibling code patterns, in-repo conventions).
+
+---
+
+## 34) Custom Repairs issues can be redundant with HA's built-in validators
+
+### What we learned
+Home Assistant's recorder includes a `validate_statistics` pass that
+automatically surfaces unit-of-measurement mismatches between the
+current entity and stored statistics. The user already gets a
+"Fix Issue" button in *Developer Tools → Statistics* — without the
+integration doing anything.
+
+A custom Repairs issue in the Repairs panel adds value only if it
+provides instructions or context that HA's built-in validator does
+not — for example, telling the user that an additional manual step
+(display-unit override on the entity) is needed, or explaining
+*why* the unit changed.
+
+### Implemented decision
+- Keep our custom Repairs issue, but use it to **augment** HA's
+  built-in mechanism, not duplicate it: the description lists both
+  the Developer-Tools-Statistics step and the entity-settings-cog
+  step, and explains the root cause (Ah/Wh confusion).
+- Auto-clear the issue once the registry reflects the new unit.
+
+### Lesson
+Before adding a Repairs issue for a known HA-handled scenario,
+check what HA already exposes natively. If our addition does not
+carry new actionable information, drop it. If it does, keep it but
+make the marginal value explicit in the description.
+
+---
+
+## 35) Diagnostic / one-off scripts shouldn't take credentials as positional CLI args
+
+### What we learned
+The diagnostic script `check_inverter_api.py` originally took the
+inverter password (or installer master-key + service-code) as
+positional `sys.argv` entries. That puts the secret into
+`~/.bash_history`, PowerShell transcript logs, `ps aux` output,
+and any container or CI log that captures process invocations.
+
+The script was committed to the repository root, so the unsafe
+pattern was visible to anyone reading the repo and could be
+copy-pasted into other operational scripts.
+
+### Implemented decision
+- Default to `getpass.getpass()` for credential entry, falling back
+  to positional args only for backwards compatibility.
+- Document the trade-off in the script's docstring.
+- Use `--installer` as a mode flag instead of relying on argument
+  count alone, so the master-mode is explicit.
+
+### Lesson
+Even short-lived diagnostic scripts deserve secure-by-default input
+handling once they're committed to a repository. Anything that
+lives in the repo gets imitated; make the safe path the obvious
+one.
