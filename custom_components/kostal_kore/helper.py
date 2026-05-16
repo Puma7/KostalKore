@@ -86,7 +86,7 @@ def normalize_isolation_resistance_ohm(
         return numeric
     if inverter_state in (0, 1, 10, 15):
         return numeric
-    if 0 < abs(numeric) <= ISOLATION_KOHM_HEURISTIC_MAX:
+    if 0 < abs(numeric) < ISOLATION_KOHM_HEURISTIC_MAX:
         return numeric * 1000.0
     return numeric
 

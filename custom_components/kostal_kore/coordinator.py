@@ -846,14 +846,17 @@ class ProcessDataUpdateCoordinator(
                 continue
 
             result[module_id] = {}
+            failed_fields: list[str] = []
             for process_data_id in keys:
                 try:
                     result[module_id][process_data_id] = str(module_data[process_data_id].value)
-                except (AttributeError, TypeError, KeyError, ValueError) as err:
-                    _LOGGER.warning(
-                        "Error processing field %s in module %s: %s",
-                        process_data_id, module_id, err,
-                    )
+                except (AttributeError, TypeError, KeyError, ValueError):
+                    failed_fields.append(process_data_id)
+            if failed_fields:
+                _LOGGER.warning(
+                    "Skipped %d field(s) in module %s: %s",
+                    len(failed_fields), module_id, ", ".join(failed_fields),
+                )
 
         if result:
             self._last_result = result

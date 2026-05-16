@@ -398,8 +398,7 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="FullChargeCap_E",
         name="Battery Full Charge Capacity",
-        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement="Ah",
         icon="mdi:battery-high",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -409,8 +408,7 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="WorkCapacity",
         name="Battery Work Capacity",
-        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement="Ah",
         icon="mdi:battery-medium",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -1519,13 +1517,16 @@ async def async_setup_entry(
         if _modbus_strings is not None:
             try:
                 raw = int(_modbus_strings)
-                dc_string_count = max(1, min(raw, MAX_SANE_STRING_COUNT))
-                if raw != dc_string_count:
+                if raw > MAX_SANE_STRING_COUNT:
                     _LOGGER.warning(
-                        "Modbus DC string count %d out of sane range, clamped to %d",
-                        raw, dc_string_count,
+                        "Modbus DC string count %d exceeds sane max %d, clamped",
+                        raw, MAX_SANE_STRING_COUNT,
                     )
-                _LOGGER.info("Discovered %d DC strings via Modbus register 34", dc_string_count)
+                    dc_string_count = MAX_SANE_STRING_COUNT
+                else:
+                    dc_string_count = raw  # raw <= 0 fällt durch zum REST-Fallback
+                if dc_string_count >= 1:
+                    _LOGGER.info("Discovered %d DC strings via Modbus register 34", dc_string_count)
             except (TypeError, ValueError):
                 pass
 
@@ -2212,13 +2213,10 @@ class CalculatedPvSumSensor(
         total_power = 0.0
         available_pv_count = 0
         
-        # Iterate only registered DC strings to avoid summing unexpected modules
-        for dc_num in range(1, self.dc_string_count + 1):
-            module_id = f"{MODULE_ID_PREFIX}{dc_num}"
-            if module_id in self.coordinator.data and "P" in self.coordinator.data[module_id]:
+        for module_id in self.coordinator.data:
+            if module_id.startswith(MODULE_ID_PREFIX) and "P" in self.coordinator.data[module_id]:
                 try:
                     pv_power = self.coordinator.data[module_id]["P"]
-                    
                     if pv_power is not None:
                         total_power += float(pv_power)
                         available_pv_count += 1
@@ -2237,12 +2235,10 @@ class CalculatedPvSumSensor(
         base_available = super().available
         coordinator_data = self.coordinator.data is not None
         
-        # Check if any registered DC string has power data available
         pv_available = False
         if coordinator_data:
-            for dc_num in range(1, self.dc_string_count + 1):
-                module_id = f"{MODULE_ID_PREFIX}{dc_num}"
-                if module_id in self.coordinator.data and "P" in self.coordinator.data[module_id]:
+            for module_id in self.coordinator.data:
+                if module_id.startswith(MODULE_ID_PREFIX) and "P" in self.coordinator.data[module_id]:
                     pv_available = True
                     break
         
