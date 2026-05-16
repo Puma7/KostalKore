@@ -176,7 +176,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     )
     if _existing_id is not None:
         _entry_reg = _ent_reg.async_get(_existing_id)
-        if _entry_reg is not None and _entry_reg.unit_of_measurement == "Ah":
+        # GEÄNDERT: prüfe beide Felder. `unit_of_measurement` ist HAs User-Override
+        # (oft None bei Nutzern, die nie über die UI angepasst haben);
+        # `original_unit_of_measurement` ist der von der Entity zuletzt gemeldete
+        # Wert und damit der zuverlässige Indikator für Bestandsinstallationen.
+        _effective_unit = (
+            _entry_reg.unit_of_measurement or _entry_reg.original_unit_of_measurement
+            if _entry_reg is not None else None
+        )
+        if _effective_unit == "Ah":
             create_battery_capacity_unit_migration_issue(hass, entry_id=entry.entry_id)
         else:
             clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)

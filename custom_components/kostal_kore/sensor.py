@@ -414,10 +414,10 @@ SENSOR_PROCESS_DATA = [
         device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-medium",
         state_class=SensorStateClass.MEASUREMENT,
-        # GEÄNDERT: entity_category=DIAGNOSTIC entfernt — DIAGNOSTIC würde die Entity
-        # aus dem Energy-Dashboard-Auto-Vorschlag filtern und ENERGY_STORAGE wirkungslos
-        # machen. Diese Metrik ist user-facing (verfügbare Speicherenergie), genauso wie
-        # SoC/P/U in derselben Definition (Zeilen 344-371).
+        # GEÄNDERT: entity_category=DIAGNOSTIC entfernt. Begründung: die Schwester-
+        # Sensoren SoC, P, U (Zeilen 344-371) sind ebenfalls user-facing und tragen
+        # kein DIAGNOSTIC; das hier war eine Inkonsistenz. WorkCapacity zeigt die
+        # aktuell verfügbare Speicherenergie — eine Hauptmetrik, kein Diagnosewert.
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
