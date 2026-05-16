@@ -1,3 +1,4 @@
+import asyncio
 from base64 import b64decode, b64encode
 from collections.abc import Mapping
 import contextlib
@@ -86,14 +87,25 @@ class ModuleNotFoundException(ApiException):
 
 
 def _relogin(fn):
-    """Decorator for automatic re-login if session was expired."""
+    """Decorator for automatic re-login if session was expired.
+
+    Uses a per-client lock so that concurrent callers share a single
+    re-login attempt instead of racing against each other and
+    invalidating each other's freshly created sessions.
+    """
 
     @functools.wraps(fn)
     async def _wrapper(self: "ApiClient", *args, **kwargs):
         with contextlib.suppress(AuthenticationException, NotAuthorizedException):
             return await fn(self, *args, **kwargs)
         _logger.debug("Request failed - try to re-login")
-        await self._login()
+        async with self._login_lock:
+            # After acquiring the lock another caller may already have
+            # re-authenticated.  Optimistically retry the request first;
+            # only re-login if the retry still fails.
+            with contextlib.suppress(AuthenticationException, NotAuthorizedException):
+                return await fn(self, *args, **kwargs)
+            await self._login()
         return await fn(self, *args, **kwargs)
 
     return _wrapper
@@ -161,6 +173,7 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
         self._key: Union[str, None] = None
         self._service_code: Union[str, None] = None
         self._user: Union[str, None] = None
+        self._login_lock: asyncio.Lock = asyncio.Lock()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """Logout support for context manager."""

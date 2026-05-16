@@ -235,9 +235,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         if modbus_coordinator and entry.options.get(
             CONF_MQTT_BRIDGE_ENABLED, False
         ):
-            device_id = plenticore.device_info.get("serial_number", entry.entry_id)
-            if isinstance(device_id, tuple):
-                device_id = str(entry.entry_id)
+            # Extract device identifier from DeviceInfo identifiers set.
+            device_id: str = str(entry.entry_id)
+            for _domain, _ident in plenticore.device_info.get("identifiers", set()):
+                if _domain == DOMAIN and _ident != "unknown":
+                    device_id = str(_ident)
+                    break
             mqtt_bridge = KostalMqttBridge(
                 hass, modbus_coordinator, str(device_id),
                 soc_controller=soc_controller,
@@ -377,6 +380,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         _LOGGER.info("Battery chemistry: %s (%s)", bat_thresholds.chemistry, bat_thresholds.chemistry_full)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "_setup_options": dict(entry.options),
         "modbus_coordinator": modbus_coordinator,
         "ksem_coordinator": ksem_coordinator,
         "event_coordinator": event_coordinator,
@@ -434,7 +438,18 @@ async def _rollback_setup(
 async def _async_options_updated(
     hass: HomeAssistant, entry: PlenticoreConfigEntry
 ) -> None:
-    """Reload integration when options change."""
+    """Reload integration when options actually change."""
+    domain_data = hass.data.get(DOMAIN, {})
+    entry_data = domain_data.get(entry.entry_id)
+    if entry_data is not None:
+        prev = entry_data.get("_setup_options")
+        if prev is not None and dict(entry.options) == prev:
+            _LOGGER.debug(
+                "Config entry %s updated but options unchanged – skipping reload",
+                entry.entry_id,
+            )
+            return
+    _LOGGER.info("Options changed for %s, reloading integration", entry.entry_id)
     await hass.config_entries.async_reload(entry.entry_id)
 
 
