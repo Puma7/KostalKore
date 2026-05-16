@@ -369,3 +369,200 @@ adversarial review of our own diffs caught:
 After a batch of fixes, explicitly diff all changes and review them
 assuming they are wrong. This second pass is cheap and consistently
 finds issues that the implementation mindset overlooks.
+
+---
+
+## 23) Verify unit assumptions against live hardware before "fixing" them
+
+### What we learned
+The static bug analysis identified both `FullChargeCap_E` and `WorkCapacity`
+on `devices:local:battery` as wrongly labeled `Ah` (should be `Wh`). The
+analysis relied on:
+- the `_E` suffix suggesting "Energy",
+- the Modbus register `1068` documented as `Wh`,
+- internal test fixtures using values around 35000.
+
+Verification against a real inverter (INSTALLER role, bulk REST query)
+showed the two keys behave differently:
+
+| Key              | Live value | Unit | Reasoning                                     |
+|------------------|-----------:|------|-----------------------------------------------|
+| `WorkCapacity`   | 35700      | Wh   | 35.7 kWh fits a 7-module BYD pack at 94 % SoC |
+| `FullChargeCap_E`| 50         | Ah   | 50 Ah × ~760 V ≈ 38 kWh matches the SoC math  |
+
+35700 Ah at 743 V would be 26.5 MWh — physically impossible. Conversely
+50 Wh would be nonsensically small.
+
+### Lesson
+- Plenticore key names are not a reliable source of units. The `_E` suffix
+  is misleading on `FullChargeCap_E`.
+- For any unit change that affects HA long-term statistics, require a live
+  measurement plus a physics plausibility check (P = U × I, SoC × capacity,
+  module count × per-module Wh) before committing.
+- Internal test fixtures can reinforce a wrong assumption — they are not
+  evidence about the real device.
+
+### Process recommendation
+When in doubt, write a small diagnostic script that authenticates against
+a live inverter and dumps the raw values. A 10-line script costs less than
+shipping a wrong unit fix to user installations.
+
+---
+
+## 24) Plenticore REST: individual process-value queries return HTTP 500
+
+### What we observed
+On a real Plenticore device (INSTALLER role), POSTs to `/api/v1/processdata`
+with a single `processdataIds` entry return **500 Internal Server Error** for
+many keys that exist in the module's key listing — even harmless string
+keys like `BatManufacturer`. The bulk query (no `processdataIds` filter)
+returns all values successfully in the same session.
+
+```
+Test 1: Massenabfrage ohne Key-Filter
+  ✅ 13 Werte erhalten (BatManufacturer, FullChargeCap_E, WorkCapacity, ...)
+
+Test 2: Einzelabfrage harmloser String-Keys
+  BatManufacturer: ❌ API Error: Unknown API response [500]
+```
+
+### Implication
+- This is a Plenticore firmware behavior, not a client bug.
+- `pykoplenti`'s use of bulk queries for the polling path is the right
+  pattern — single-key fetches must not be assumed reliable.
+- Any future code that wants "just one value" should still bulk-fetch and
+  index in the client.
+
+### Lesson
+Don't infer a key is unsupported because the single-key endpoint returns
+500. Confirm via the bulk endpoint, which is the only reliable path on
+this firmware.
+
+---
+
+## 25) Translation parity: `strings.json` and `en.json` drift silently
+
+### What we learned
+`strings.json` (the canonical translation source) contained 4 KSEM option
+keys plus a `reauth_confirm.description` that were never copied into
+`translations/en.json`. HA silently renders empty labels for missing
+English translations — there is no build-time check.
+
+### Implemented decision
+- `en.json` is now kept in lockstep with `strings.json` (KSEM options in
+  both `options.step.init.data` and `config.step.setup_options.data`,
+  reauth description, and the `entity.button.reset_modbus_registers`
+  block).
+- The `ModbusResetButton` was switched from `_attr_name = "..."` to
+  `_attr_translation_key = "reset_modbus_registers"` so the translation
+  is actually used.
+
+### Process recommendation
+Whenever `strings.json` gains a key, do a diff against `translations/en.json`
+in the same commit. Treat the parity check as part of "is this PR ready",
+not as a follow-up.
+
+---
+
+## 26) Field-level error handling beats module-level for partial responses
+
+### What we learned
+The coordinator's REST response processing used a dict comprehension
+inside a single try/except per module:
+
+```python
+result[module_id] = {
+    pid: str(module_data[pid].value) for pid in module_data.keys()
+}
+```
+
+If a single field lacked `.value` (or raised on access), the entire
+comprehension failed and the `except` block set `result[module_id] = {}`.
+A single bad field made 10–15 sensors of that module go `unavailable`.
+
+### Implemented decision
+- Iterate fields explicitly, catching per-field.
+- Collect failed field names into a list and emit **one** aggregated warning
+  per module per cycle instead of one warning per failing field (which
+  would otherwise produce dozens of log lines per polling cycle).
+
+### Lesson
+Fault isolation granularity should match the smallest unit of data the
+user cares about. For sensor data, that unit is the field, not the module.
+And log aggregation matters — per-field warnings under load are worse
+than no warning at all because they hide everything else.
+
+---
+
+## 27) Be conservative when tightening or loosening safety heuristics
+
+### What we learned
+The isolation resistance normalizer used `0 < |x| < 1000` to decide whether
+a value should be interpreted as kΩ (and multiplied by 1000 to get Ω).
+Bug analysis flagged the strict `<` as a "boundary bug": a value of exactly
+1000 would skip the kΩ-to-Ω conversion and trip the critical alarm.
+
+### Why we did NOT change it
+- A reading of exactly `1000` is genuinely ambiguous: it could be 1000 kΩ
+  (= 1 MΩ, healthy) or 1000 Ω (= 1 kΩ, critical fault).
+- Changing `<` to `<=` would silently re-interpret a real 1000 Ω fault
+  as a healthy reading.
+- The "false alarm at exactly 1000" failure mode (user sees a critical
+  notification, investigates, finds nothing) is recoverable. The
+  "missed fault at exactly 1000" failure mode is not.
+
+### Lesson
+On safety-critical heuristics, prefer the failure mode that is loud and
+recoverable over the failure mode that is silent and dangerous. Don't
+"fix" a boundary case without checking which side of the boundary is
+actually safer.
+
+---
+
+## 28) Range-based loops over coordinator data lose self-healing
+
+### What we learned
+A first attempt to fix `CalculatedPvSumSensor` replaced the
+`for module_id in self.coordinator.data` scan with
+`for i in range(1, dc_string_count + 1)`. This passed unit tests but
+broke a subtle self-healing property: if a PV string came online *after*
+init (e.g. firmware re-detected it, or the discovery race finished late),
+the coordinator-data scan would pick it up automatically while the
+range loop never would.
+
+### Implemented decision
+- Revert to scanning `coordinator.data` for module IDs starting with
+  `MODULE_ID_PREFIX`.
+- Use the `MODULE_ID_PREFIX` constant everywhere (no more hardcoded
+  `"devices:local:pv"` literals).
+- Keep `dc_string_count` only for explicit fetch registration in
+  `async_added_to_hass`, where being exact matters.
+
+### Lesson
+Coordinator-data scans are dynamic by nature. Replacing them with
+range loops feels cleaner but trades adaptive behavior for a static
+view of the world. Choose which property you actually want before
+"tidying up" the loop.
+
+---
+
+## 29) Cap upper bounds but let invalid lower values fall through
+
+### What we learned
+A first attempt to clamp the Modbus-discovered DC string count used
+`max(1, min(raw, MAX_SANE_STRING_COUNT))`. This was over-aggressive:
+when Modbus returned `0` (register not yet populated, or genuinely
+unknown), the clamp mapped it to `1`, which then satisfied the
+`if dc_string_count >= 1:` guard and **bypassed the REST API fallback**.
+The integration silently started with a wrong, default string count
+instead of consulting the better source.
+
+### Implemented decision
+- Cap the upper bound only: `if raw > MAX_SANE_STRING_COUNT: ...` warn
+  and clamp to the max.
+- Let `raw <= 0` flow through, so the REST API fallback path runs.
+
+### Lesson
+Clamps are not the right tool when the lower bound represents
+"missing information". Map "missing" to a state that triggers the
+fallback chain, not to a valid-looking default.
