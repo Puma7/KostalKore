@@ -45,34 +45,36 @@ async def main(host: str, password: str) -> None:
             if not wanted:
                 print(f"  ⚠️  Keiner der gesuchten Keys vorhanden.")
             else:
-                try:
-                    bat = await client.get_process_data_values(
-                        "devices:local:battery", wanted
-                    )
-                    bat_data = bat.get("devices:local:battery", {})
-
-                    for key in wanted:
-                        entry = bat_data.get(key)
+                # Einzeln abfragen — bulk gibt manchmal 500 bei Plenticore
+                results: dict[str, object] = {}
+                for key in wanted:
+                    try:
+                        bat = await client.get_process_data_values(
+                            "devices:local:battery", [key]
+                        )
+                        entry = bat.get("devices:local:battery", {}).get(key)
                         val = entry.value if entry is not None else "n/a"
+                        results[key] = val
                         print(f"  {key}: {val}")
+                    except Exception as e:
+                        print(f"  {key}: ❌ {e}")
+                        results[key] = None
 
-                    cap_e = bat_data.get("FullChargeCap_E")
-                    work  = bat_data.get("WorkCapacity")
-
-                    for label, entry in [("FullChargeCap_E", cap_e), ("WorkCapacity", work)]:
-                        if entry is None:
-                            continue
-                        raw = float(entry.value)
-                        print()
-                        print(f"  Interpretation {label} = {raw}:")
-                        print(f"    Als Wh:  {raw:.0f} Wh  = {raw/1000:.2f} kWh")
-                        print(f"    Als Ah:  {raw:.0f} Ah  = {raw * 48 / 1000:.1f} kWh (bei 48V-System)")
-                        if raw > 500:
-                            print(f"    → Wert >500: wahrscheinlich Wh (typisch 5.000–20.000 Wh)")
-                        else:
-                            print(f"    → Wert ≤500: wahrscheinlich Ah (typisch 50–200 Ah)")
-                except Exception as e:
-                    print(f"  ❌ Fehler beim Abfragen der Battery-Keys: {e}")
+                for label in ("FullChargeCap_E", "WorkCapacity"):
+                    if results.get(label) in (None, "n/a"):
+                        continue
+                    try:
+                        raw = float(results[label])
+                    except (TypeError, ValueError):
+                        continue
+                    print()
+                    print(f"  Interpretation {label} = {raw}:")
+                    print(f"    Als Wh:  {raw:.0f} Wh  = {raw/1000:.2f} kWh")
+                    print(f"    Als Ah:  {raw:.0f} Ah  = {raw * 48 / 1000:.1f} kWh (bei 48V-System)")
+                    if raw > 500:
+                        print(f"    → Wert >500: wahrscheinlich Wh (typisch 5.000–20.000 Wh)")
+                    else:
+                        print(f"    → Wert ≤500: wahrscheinlich Ah (typisch 50–200 Ah)")
 
         # ── Bug #11: PV-Energiestatistik ─────────────────────────────────────
         print()
@@ -105,17 +107,16 @@ async def main(host: str, password: str) -> None:
             print(f"     Sensor-Definitionen für EnergyPv4–{max_pv_num} fehlen im Code.")
 
         if pv_keys:
-            try:
-                vals = await client.get_process_data_values(
-                    "scb:statistic:EnergyFlow", pv_keys
-                )
-                pv_vals = vals.get("scb:statistic:EnergyFlow", {})
-                print("\n  Aktuelle Tageswerte:")
-                for k in sorted(k for k in pv_keys if ":Day" in k):
-                    v = pv_vals.get(k)
+            print("\n  Aktuelle Tageswerte (einzeln abgefragt):")
+            for k in sorted(k for k in pv_keys if ":Day" in k):
+                try:
+                    vals = await client.get_process_data_values(
+                        "scb:statistic:EnergyFlow", [k]
+                    )
+                    v = vals.get("scb:statistic:EnergyFlow", {}).get(k)
                     print(f"    {k}: {v.value if v else 'n/a'}")
-            except Exception as e:
-                print(f"  ❌ Fehler beim Lesen der Werte: {e}")
+                except Exception as e:
+                    print(f"    {k}: ❌ {e}")
 
         # ── DC-String-Anzahl aus Settings ─────────────────────────────────────
         print()
