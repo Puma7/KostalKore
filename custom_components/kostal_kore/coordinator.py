@@ -189,10 +189,10 @@ class Plenticore:
                 ),
                 timeout=15.0,
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as timeout_err:  # GEÄNDERT: named for chain
             _LOGGER.error("Login to %s timed out after 15s", self.host)
             create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
-            raise ConfigEntryNotReady("Login timed out") from None
+            raise ConfigEntryNotReady("Login timed out") from timeout_err  # GEÄNDERT
         except AuthenticationException as err:
             _LOGGER.error(
                 "Authentication exception connecting to %s: %s", self.host, err
@@ -819,8 +819,6 @@ class ProcessDataUpdateCoordinator(
                 # Soft backoff while keeping entities responsive.
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
-            self._record_failure()
-
             # 503 on first fetch (empty _last_result): retry once before giving up
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                 _LOGGER.warning(
@@ -833,14 +831,18 @@ class ProcessDataUpdateCoordinator(
                         client.get_process_data_values(self._fetch),
                         timeout=15.0,
                     )
-                    self._record_success()
+                    self._record_success()  # GEÄNDERT: only record success, not prior failure
+                    if (hass := getattr(self._plenticore, "hass", None)) is not None:
+                        clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)  # NEU
                     _LOGGER.info("Retry after 503 succeeded for %s", self.name)
                 except Exception as retry_err:
+                    self._record_failure()  # GEÄNDERT: only record failure if retry also fails
                     raise UpdateFailed(
                         f"Inverter busy/internal error: {error_msg}"
                     ) from retry_err
                 # Retry succeeded – fall through to result processing below.
             else:
+                self._record_failure()  # GEÄNDERT: moved here for non-503 errors
                 if isinstance(err, ApiException):
                     modbus_err = parse_modbus_exception(err)
                     _LOGGER.error("Error fetching process data for %s: %s", self.name, modbus_err.message)
@@ -851,6 +853,7 @@ class ProcessDataUpdateCoordinator(
                 raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
 
         result: dict[str, dict[str, str]] = {}
+        fresh_result: dict[str, dict[str, str]] = {}  # NEU: only freshly parsed values
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
@@ -875,6 +878,9 @@ class ProcessDataUpdateCoordinator(
                 except (AttributeError, TypeError, KeyError, ValueError):
                     failed_fields.append(process_data_id)
 
+            # Snapshot fresh fields BEFORE backfill so _last_result stays stale-free. // GEÄNDERT
+            fresh_result[module_id] = dict(result[module_id])
+
             if failed_fields:
                 last_module = self._last_result.get(module_id, {})
                 restored: list[str] = []
@@ -882,7 +888,7 @@ class ProcessDataUpdateCoordinator(
                 for process_data_id in failed_fields:
                     last_val = last_module.get(process_data_id)
                     if last_val is not None:
-                        result[module_id][process_data_id] = last_val
+                        result[module_id][process_data_id] = last_val  # backfill into result only
                         restored.append(process_data_id)
                     else:
                         still_missing.append(process_data_id)
@@ -897,8 +903,8 @@ class ProcessDataUpdateCoordinator(
                         len(still_missing), module_id, ", ".join(still_missing),
                     )
 
-        if result:
-            self._last_result = result
+        if fresh_result:  # GEÄNDERT: cache only fresh data, preventing stale cascade
+            self._last_result = fresh_result
         return result
 
 

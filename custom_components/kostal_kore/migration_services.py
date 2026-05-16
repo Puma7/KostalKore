@@ -427,20 +427,20 @@ def _merge_statistics_metadata(
                     "unit mismatch (%s vs %s). Manual cleanup required.",
                     old_entity_id, new_entity_id, old_unit, new_unit,
                 )
-            else:
-                stats_rows_moved += _merge_statistics_table(
-                    session,
-                    Statistics,
-                    old_metadata_id=old_meta_id,
-                    new_metadata_id=new_meta_id,
-                )
-                short_term_rows_moved += _merge_statistics_table(
-                    session,
-                    StatisticsShortTerm,
-                    old_metadata_id=old_meta_id,
-                    new_metadata_id=new_meta_id,
-                )
-                session.delete(matching_new)
+                continue  # GEÄNDERT: skip rename + delete to keep both rows intact
+            stats_rows_moved += _merge_statistics_table(
+                session,
+                Statistics,
+                old_metadata_id=old_meta_id,
+                new_metadata_id=new_meta_id,
+            )
+            short_term_rows_moved += _merge_statistics_table(
+                session,
+                StatisticsShortTerm,
+                old_metadata_id=old_meta_id,
+                new_metadata_id=new_meta_id,
+            )
+            session.delete(matching_new)
         old_meta.statistic_id = new_entity_id
         rebound_done = True
 

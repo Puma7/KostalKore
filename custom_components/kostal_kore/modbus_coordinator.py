@@ -113,7 +113,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._client.detect_endianness()
         await self._read_device_info()
         await self._load_register_capability_state()
-        await self._restore_isolation_sample()
+        # NOTE: _restore_isolation_sample() is called from __init__.py
+        # AFTER _health_monitor is injected, not here.
 
     async def async_shutdown(self) -> None:
         """Disconnect from the inverter."""
@@ -146,13 +147,14 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             batch_result = await self._client.read_registers_batch(fast_regs)
             data.update(batch_result)
-            # Count how many expected registers actually came back
+            # Single snapshot of suppressed addresses – no side effects, no TOCTOU. // GEÄNDERT
+            suppressed_snapshot = self._client.unavailable_registers
             fast_errors = sum(
                 1 for r in fast_regs
-                if r.name not in batch_result and not self._client._is_suppressed(r.address)
+                if r.name not in batch_result and r.address not in suppressed_snapshot
             )
             permanent_skip = sum(
-                1 for r in fast_regs if self._client._is_suppressed(r.address)
+                1 for r in fast_regs if r.address in suppressed_snapshot
             )
         except ModbusConnectionError as err:
             raise UpdateFailed(f"Modbus connection lost: {err}") from err

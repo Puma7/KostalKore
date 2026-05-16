@@ -2562,8 +2562,10 @@ class PlenticoreDataSensor(
             return None
         value = self._formatter(self.coordinator.data[self.module_id][self.data_id])
         if value is None:
-            # Formatter returned None (e.g. NaN/Inf from inverter): keep last good value
-            # so the entity stays in "known" state rather than dropping to "unknown".
+            # Formatter returned None (e.g. NaN/Inf): keep last good value unless this
+            # is a cumulative counter – those must be allowed to reset to 0. // GEÄNDERT
+            if self.entity_description.state_class == SensorStateClass.TOTAL_INCREASING:
+                return None
             return cast(StateType, self._last_valid_native_value)
         if (
             self.entity_description.state_class == SensorStateClass.TOTAL_INCREASING
