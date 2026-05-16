@@ -2,15 +2,21 @@
 """
 Diagnoseskript für Bug #1 (Battery-Einheit) und Bug #11 (PV-Energiestatistik).
 
-Aufruf:
-    # User-Modus (normales Passwort):
-    python3 check_inverter_api.py <HOST> <PASSWORT>
+Aufruf (Credentials werden interaktiv via getpass abgefragt, falls weggelassen):
+    # User-Modus:
+    python3 check_inverter_api.py <HOST>
+    python3 check_inverter_api.py <HOST> <PASSWORT>                      # alt, weniger sicher
 
-    # Master/Installer-Modus (Master-Key + Service-Code):
-    python3 check_inverter_api.py <HOST> <MASTER_KEY> <SERVICE_CODE>
+    # Master/Installer-Modus:
+    python3 check_inverter_api.py <HOST> --installer
+    python3 check_inverter_api.py <HOST> <MASTER_KEY> <SERVICE_CODE>     # alt, weniger sicher
+
+Warnung: Wenn Credentials als CLI-Argumente übergeben werden, landen sie in
+Shell-History und Prozessliste. Bevorzuge den interaktiven Modus.
 """
 
 import asyncio
+import getpass   # NEU: sichere interaktive Eingabe ohne Shell-History
 import sys
 from typing import Optional
 
@@ -139,13 +145,29 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3:
-        host, key = sys.argv[1], sys.argv[2]
-        asyncio.run(main(host, key, None))
-    elif len(sys.argv) == 4:
-        host, master_key, service_code = sys.argv[1], sys.argv[2], sys.argv[3]
+    # GEÄNDERT: getpass-Fallback bei fehlenden Credentials.
+    # Alte Aufrufformen (Passwort/Key als CLI-Args) bleiben rückwärtskompatibel.
+    args = sys.argv[1:]
+    if not args:
+        print("Aufruf:")
+        print("  User-Modus:    python3 check_inverter_api.py <HOST>")
+        print("  Master-Modus:  python3 check_inverter_api.py <HOST> --installer")
+        sys.exit(1)
+
+    host = args[0]
+    rest = args[1:]
+
+    if rest and rest[0] == "--installer":
+        master_key = getpass.getpass("Master-Key: ")
+        service_code = getpass.getpass("Service-Code: ")
         asyncio.run(main(host, master_key, service_code))
+    elif len(rest) == 0:
+        password = getpass.getpass("Passwort: ")
+        asyncio.run(main(host, password, None))
+    elif len(rest) == 1:
+        asyncio.run(main(host, rest[0], None))
+    elif len(rest) == 2:
+        asyncio.run(main(host, rest[0], rest[1]))
     else:
-        print("User-Modus:    python3 check_inverter_api.py <HOST> <PASSWORT>")
-        print("Master-Modus:  python3 check_inverter_api.py <HOST> <MASTER_KEY> <SERVICE_CODE>")
+        print("Zu viele Argumente.")
         sys.exit(1)

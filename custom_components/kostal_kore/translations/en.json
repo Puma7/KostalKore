@@ -109,6 +109,10 @@
         "installer_required": {
             "title": "Installer access required",
             "description": "This action requires the installer/service code. Reconfigure the integration with the service code to enable advanced controls."
+        },
+        "battery_capacity_unit_migration": {
+            "title": "Battery Work Capacity unit changed",
+            "description": "The unit of `sensor.battery_work_capacity` was corrected from Ah to Wh (1 Wh ≠ 1 Ah; the previous label was wrong). Existing long-term statistics still carry the old unit. Open **Developer Tools → Statistics**, locate `Battery Work Capacity`, and resolve the unit-change warning to keep history continuous. This notice clears automatically after migration."
         }
     },
     "exceptions": {

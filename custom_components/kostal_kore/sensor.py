@@ -409,10 +409,15 @@ SENSOR_PROCESS_DATA = [
         key="WorkCapacity",
         name="Battery Work Capacity",
         native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,  # NEU: zeigt "35.7 kWh" statt "35700 Wh"
+        suggested_display_precision=2,  # NEU
         device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-medium",
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
+        # GEÄNDERT: entity_category=DIAGNOSTIC entfernt — DIAGNOSTIC würde die Entity
+        # aus dem Energy-Dashboard-Auto-Vorschlag filtern und ENERGY_STORAGE wirkungslos
+        # machen. Diese Metrik ist user-facing (verfügbare Speicherenergie), genauso wie
+        # SoC/P/U in derselben Definition (Zeilen 344-371).
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(

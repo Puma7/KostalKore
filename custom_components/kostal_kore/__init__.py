@@ -67,7 +67,7 @@ from .migration_services import (
     async_unregister_migration_services_if_unused,
 )
 from .mqtt_bridge import KostalMqttBridge
-from .repairs import clear_issue
+from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -163,6 +163,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     for _suffix in ("auth_failed", "api_unreachable", "inverter_busy", "installer_required"):
         clear_issue(hass, _suffix)  # legacy unscoped ID
         clear_issue(hass, _suffix, entry_id=entry.entry_id)  # new scoped ID
+
+    # NEU: one-shot migration notice for Battery Work Capacity unit (Ah -> Wh).
+    # Triggered only when the entity registry still records the old "Ah" unit;
+    # auto-clears on subsequent setups once HA has updated the registry entry.
+    from homeassistant.helpers import entity_registry as er
+    _ent_reg = er.async_get(hass)
+    _existing_id = _ent_reg.async_get_entity_id(
+        "sensor",
+        DOMAIN,
+        f"{entry.entry_id}_devices:local:battery_WorkCapacity",
+    )
+    if _existing_id is not None:
+        _entry_reg = _ent_reg.async_get(_existing_id)
+        if _entry_reg is not None and _entry_reg.unit_of_measurement == "Ah":
+            create_battery_capacity_unit_migration_issue(hass, entry_id=entry.entry_id)
+        else:
+            clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
+    else:
+        clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
 
     entry.runtime_data = plenticore
 
