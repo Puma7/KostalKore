@@ -296,7 +296,7 @@ class InverterHealthMonitor:
         self._total_polls += 1
         self._apply_grid_profile(data)
         total_dc = _safe_float(data.get("total_dc_power"))
-        pv_active = total_dc is not None and total_dc > 50
+        pv_active = total_dc is not None and total_dc > 5
         inverter_state_raw = _safe_float(data.get("inverter_state"))
         inverter_state = (
             int(inverter_state_raw) if inverter_state_raw is not None else None
@@ -329,10 +329,11 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
-                        # Only record isolation when PV is active to avoid
-                        # mixed-unit day/night values that flip between Ω
-                        # and kΩ in HA long-term statistics.
-                        if not pv_active:
+                        # Record isolation when PV is active (>5 W) or during
+                        # IsoMeas state (state=2), where the inverter actively
+                        # measures isolation before grid connection.
+                        iso_meas_active = inverter_state == 2
+                        if not pv_active and not iso_meas_active:
                             continue
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,

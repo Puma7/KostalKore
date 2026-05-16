@@ -182,10 +182,17 @@ class Plenticore:
         self._client = ExtendedApiClient(session, host=self.host)  # pyright: ignore[reportArgumentType]
         
         try:
-            await self._client.login(
-                self.config_entry.data[CONF_PASSWORD],
-                service_code=self.config_entry.data.get(CONF_SERVICE_CODE),
+            await asyncio.wait_for(
+                self._client.login(
+                    self.config_entry.data[CONF_PASSWORD],
+                    service_code=self.config_entry.data.get(CONF_SERVICE_CODE),
+                ),
+                timeout=15.0,
             )
+        except asyncio.TimeoutError:
+            _LOGGER.error("Login to %s timed out after 15s", self.host)
+            create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
+            raise ConfigEntryNotReady("Login timed out") from None
         except AuthenticationException as err:
             _LOGGER.error(
                 "Authentication exception connecting to %s: %s", self.host, err
@@ -814,19 +821,34 @@ class ProcessDataUpdateCoordinator(
                 return self._last_result
             self._record_failure()
 
-            # Handle 503 errors (internal communication error)
+            # 503 on first fetch (empty _last_result): retry once before giving up
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
-                _LOGGER.warning("Inverter internal communication error (503) fetching process data - retrying later")
-                raise UpdateFailed(f"Inverter busy/internal error: {error_msg}") from err
-
-            if isinstance(err, ApiException):
-                modbus_err = parse_modbus_exception(err)
-                _LOGGER.error("Error fetching process data for %s: %s", self.name, modbus_err.message)
-            elif "Unknown API response [500]" in error_msg:
-                _LOGGER.warning("Inverter API returned 500 error fetching process data for %s - feature likely not supported", self.name)
+                _LOGGER.warning(
+                    "Inverter busy (503) on first fetch for %s – retrying once after 3s",
+                    self.name,
+                )
+                await asyncio.sleep(3.0)
+                try:
+                    fetched_data = await asyncio.wait_for(
+                        client.get_process_data_values(self._fetch),
+                        timeout=15.0,
+                    )
+                    self._record_success()
+                    _LOGGER.info("Retry after 503 succeeded for %s", self.name)
+                except Exception as retry_err:
+                    raise UpdateFailed(
+                        f"Inverter busy/internal error: {error_msg}"
+                    ) from retry_err
+                # Retry succeeded – fall through to result processing below.
             else:
-                _LOGGER.error("Error fetching process data for %s: %s", self.name, err)
-            raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
+                if isinstance(err, ApiException):
+                    modbus_err = parse_modbus_exception(err)
+                    _LOGGER.error("Error fetching process data for %s: %s", self.name, modbus_err.message)
+                elif "Unknown API response [500]" in error_msg:
+                    _LOGGER.warning("Inverter API returned 500 error fetching process data for %s - feature likely not supported", self.name)
+                else:
+                    _LOGGER.error("Error fetching process data for %s: %s", self.name, err)
+                raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
 
         result: dict[str, dict[str, str]] = {}
         for module_id in fetched_data:
@@ -852,11 +874,28 @@ class ProcessDataUpdateCoordinator(
                     result[module_id][process_data_id] = str(module_data[process_data_id].value)
                 except (AttributeError, TypeError, KeyError, ValueError):
                     failed_fields.append(process_data_id)
+
             if failed_fields:
-                _LOGGER.warning(
-                    "Skipped %d field(s) in module %s: %s",
-                    len(failed_fields), module_id, ", ".join(failed_fields),
-                )
+                last_module = self._last_result.get(module_id, {})
+                restored: list[str] = []
+                still_missing: list[str] = []
+                for process_data_id in failed_fields:
+                    last_val = last_module.get(process_data_id)
+                    if last_val is not None:
+                        result[module_id][process_data_id] = last_val
+                        restored.append(process_data_id)
+                    else:
+                        still_missing.append(process_data_id)
+                if restored:
+                    _LOGGER.debug(
+                        "Restored %d cached field(s) in module %s after parse failure: %s",
+                        len(restored), module_id, ", ".join(restored),
+                    )
+                if still_missing:
+                    _LOGGER.warning(
+                        "Skipped %d field(s) in module %s (no cached value available): %s",
+                        len(still_missing), module_id, ", ".join(still_missing),
+                    )
 
         if result:
             self._last_result = result
@@ -899,7 +938,10 @@ class SettingDataUpdateCoordinator(
         _LOGGER.debug("Fetching %s for %s", self.name, fetch)
 
         try:
-            result = await client.get_setting_values(fetch)
+            result = await asyncio.wait_for(
+                client.get_setting_values(fetch),
+                timeout=20.0,
+            )
             self._last_result = result
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy once settings communication recovers.

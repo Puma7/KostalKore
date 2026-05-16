@@ -419,19 +419,28 @@ def _merge_statistics_metadata(
         matching_new = new_by_source.pop(str(old_meta.source), None)
         if matching_new is not None:
             new_meta_id = int(matching_new.id)
-            stats_rows_moved += _merge_statistics_table(
-                session,
-                Statistics,
-                old_metadata_id=old_meta_id,
-                new_metadata_id=new_meta_id,
-            )
-            short_term_rows_moved += _merge_statistics_table(
-                session,
-                StatisticsShortTerm,
-                old_metadata_id=old_meta_id,
-                new_metadata_id=new_meta_id,
-            )
-            session.delete(matching_new)
+            old_unit = getattr(old_meta, "unit_of_measurement", None)
+            new_unit = getattr(matching_new, "unit_of_measurement", None)
+            if old_unit and new_unit and old_unit != new_unit:
+                _LOGGER.warning(
+                    "Skipping statistics merge from %s → %s: "
+                    "unit mismatch (%s vs %s). Manual cleanup required.",
+                    old_entity_id, new_entity_id, old_unit, new_unit,
+                )
+            else:
+                stats_rows_moved += _merge_statistics_table(
+                    session,
+                    Statistics,
+                    old_metadata_id=old_meta_id,
+                    new_metadata_id=new_meta_id,
+                )
+                short_term_rows_moved += _merge_statistics_table(
+                    session,
+                    StatisticsShortTerm,
+                    old_metadata_id=old_meta_id,
+                    new_metadata_id=new_meta_id,
+                )
+                session.delete(matching_new)
         old_meta.statistic_id = new_entity_id
         rebound_done = True
 

@@ -92,6 +92,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             f"kostal_kore_modbus_caps_{client.host}_{client.port}",
         )
         self._last_saved_capability_state: str = ""
+        self._isolation_store = Store[dict[str, Any]](
+            hass,
+            1,
+            f"kostal_kore_isolation_{client.host}_{client.port}",
+        )
+        self._health_monitor: Any | None = None  # injected after init if available
 
     @property
     def client(self) -> KostalModbusClient:
@@ -107,6 +113,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._client.detect_endianness()
         await self._read_device_info()
         await self._load_register_capability_state()
+        await self._restore_isolation_sample()
 
     async def async_shutdown(self) -> None:
         """Disconnect from the inverter."""
@@ -129,23 +136,26 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
         data: dict[str, Any] = {}
-        fast_errors = 0
         fast_total = 0
-
+        fast_errors = 0
         permanent_skip = 0
-        for reg in MONITORING_REGISTERS:
-            if reg.group not in FAST_GROUPS:
-                continue
-            fast_total += 1
-            try:
-                data[reg.name] = await self._client.read_register(reg)
-            except ModbusPermanentError:
-                permanent_skip += 1
-            except ModbusConnectionError as err:
-                raise UpdateFailed(f"Modbus connection lost: {err}") from err
-            except ModbusClientError as err:
-                fast_errors += 1
-                _LOGGER.debug("Fast-poll read failed for %s: %s", reg.name, err)
+
+        fast_regs = [r for r in MONITORING_REGISTERS if r.group in FAST_GROUPS]
+        fast_total = len(fast_regs)
+
+        try:
+            batch_result = await self._client.read_registers_batch(fast_regs)
+            data.update(batch_result)
+            # Count how many expected registers actually came back
+            fast_errors = sum(
+                1 for r in fast_regs
+                if r.name not in batch_result and not self._client._is_suppressed(r.address)
+            )
+            permanent_skip = sum(
+                1 for r in fast_regs if self._client._is_suppressed(r.address)
+            )
+        except ModbusConnectionError as err:
+            raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
         if fast_total > 0 and fast_errors >= fast_total:
             raise UpdateFailed(
@@ -160,15 +170,14 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._slow_tick += 1
         if self._slow_tick >= 6:
             self._slow_tick = 0
-            for reg in MONITORING_REGISTERS:
-                if reg.group not in SLOW_GROUPS:
-                    continue
-                try:
-                    data[reg.name] = await self._client.read_register(reg)
-                except ModbusPermanentError:
-                    pass
-                except ModbusClientError as err:
-                    _LOGGER.debug("Slow-poll read failed for %s: %s", reg.name, err)
+            slow_regs = [r for r in MONITORING_REGISTERS if r.group in SLOW_GROUPS]
+            try:
+                slow_result = await self._client.read_registers_batch(slow_regs)
+                data.update(slow_result)
+            except ModbusConnectionError as err:
+                _LOGGER.debug("Slow-poll connection lost: %s", err)
+            except ModbusClientError as err:
+                _LOGGER.debug("Slow-poll batch failed: %s", err)
 
         self._device_info_tick += 1
         if self._device_info_tick >= 60:
@@ -220,6 +229,33 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_saved_capability_state = encoded_state
         except Exception as err:
             _LOGGER.debug("Could not persist Modbus capability state: %s", err)
+
+    async def _restore_isolation_sample(self) -> None:
+        """Seed the health-monitor deque with the last persisted isolation value."""
+        try:
+            stored = await self._isolation_store.async_load()
+        except Exception:
+            return
+        if not stored:
+            return
+        iso_ohm = stored.get("isolation_ohm")
+        if iso_ohm is None:
+            return
+        if self._health_monitor is not None and hasattr(self._health_monitor, "isolation"):
+            try:
+                self._health_monitor.isolation.record(float(iso_ohm))
+                _LOGGER.debug(
+                    "Restored last isolation resistance: %.0f Ω", float(iso_ohm)
+                )
+            except (TypeError, ValueError):
+                pass
+
+    async def _save_isolation_sample(self, iso_ohm: float) -> None:
+        """Persist the most recent isolation resistance value."""
+        try:
+            await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
+        except Exception as err:
+            _LOGGER.debug("Could not persist isolation resistance: %s", err)
 
     async def _read_device_info(self) -> None:
         """Read static device information registers."""

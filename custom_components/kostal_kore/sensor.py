@@ -2215,43 +2215,36 @@ class CalculatedPvSumSensor(
         """Return the calculated sum of PV powers from all available DC strings."""
         if self.coordinator.data is None:
             return None
-        
+
         total_power = 0.0
         available_pv_count = 0
-        
-        for module_id in self.coordinator.data:
-            if module_id.startswith(MODULE_ID_PREFIX) and "P" in self.coordinator.data[module_id]:
+
+        for dc_num in range(1, self.dc_string_count + 1):
+            module_id = f"{MODULE_ID_PREFIX}{dc_num}"
+            module_data = self.coordinator.data.get(module_id, {})
+            if "P" in module_data:
                 try:
-                    pv_power = self.coordinator.data[module_id]["P"]
+                    pv_power = module_data["P"]
                     if pv_power is not None:
                         total_power += float(pv_power)
                         available_pv_count += 1
-                except (IndexError, ValueError, TypeError) as e:
+                except (ValueError, TypeError) as e:
                     _LOGGER.debug("PV Sum Sensor: Error processing %s: %s", module_id, e)
-                    continue
-        
+
         if available_pv_count == 0:
             return None
-        
+
         return cast(StateType, self._formatter(str(total_power)))
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return True if the sensor is available."""
-        base_available = super().available
-        coordinator_data = self.coordinator.data is not None
-        
-        pv_available = False
-        if coordinator_data:
-            for module_id in self.coordinator.data:
-                if module_id.startswith(MODULE_ID_PREFIX) and "P" in self.coordinator.data[module_id]:
-                    pv_available = True
-                    break
-        
-        return (
-            base_available
-            and coordinator_data
-            and pv_available
+        if not super().available or self.coordinator.data is None:
+            return False
+
+        return any(
+            "P" in self.coordinator.data.get(f"{MODULE_ID_PREFIX}{dc_num}", {})
+            for dc_num in range(1, self.dc_string_count + 1)
         )
 
     async def async_added_to_hass(self) -> None:
@@ -2530,6 +2523,7 @@ class PlenticoreDataSensor(
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
         self._attr_name = name
+        self._last_valid_native_value: Any = None
 
         tk = _sensor_translation_key(description.module_id, description.key)
         if tk is not None:
@@ -2567,10 +2561,15 @@ class PlenticoreDataSensor(
         ):
             return None
         value = self._formatter(self.coordinator.data[self.module_id][self.data_id])
+        if value is None:
+            # Formatter returned None (e.g. NaN/Inf from inverter): keep last good value
+            # so the entity stays in "known" state rather than dropping to "unknown".
+            return cast(StateType, self._last_valid_native_value)
         if (
             self.entity_description.state_class == SensorStateClass.TOTAL_INCREASING
             and isinstance(value, (int, float))
             and value < 0
         ):
-            return cast(StateType, 0.0)
+            value = 0.0
+        self._last_valid_native_value = value
         return cast(StateType, value)

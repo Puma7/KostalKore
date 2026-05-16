@@ -363,12 +363,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         degradation_tracker = DegradationTracker()
         _clear_sent: dict[str, bool] = {"value": False}
 
+        modbus_coordinator._health_monitor = health_monitor  # for isolation restore on startup
+
         @callback
         def _feed_health_data() -> None:  # pragma: no cover
             data = modbus_coordinator.data
             if data:
                 health_monitor.update_from_modbus(data)
                 degradation_tracker.update_from_modbus(data)
+                iso_current = health_monitor.isolation.current
+                if iso_current is not None:
+                    hass.async_create_task(
+                        modbus_coordinator._save_isolation_sample(iso_current)
+                    )
                 new_alerts = fire_safety.analyze(data)
                 if new_alerts:
                     _clear_sent["value"] = False

@@ -247,21 +247,29 @@ class ModbusTcpProxyServer:
 
         try:
             while True:
-                header = await reader.readexactly(MBAP_HEADER_SIZE)
+                try:
+                    header = await asyncio.wait_for(
+                        reader.readexactly(MBAP_HEADER_SIZE), timeout=60.0
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.debug("Modbus proxy: client %s idle timeout, closing", peer)
+                    break
                 txn_id, proto_id, length, unit_id = struct.unpack(">HHHB", header)
 
                 if proto_id != 0:
                     _LOGGER.debug("Non-Modbus protocol ID %d, ignoring", proto_id)
-                    await reader.readexactly(length - 1)
+                    await asyncio.wait_for(reader.readexactly(length - 1), timeout=10.0)
                     continue
 
                 if length < 2 or length > 260:
                     _LOGGER.debug("Proxy: invalid MBAP length %d, dropping", length)
                     if length > 1:
-                        await reader.readexactly(min(length - 1, 260))
+                        await asyncio.wait_for(
+                            reader.readexactly(min(length - 1, 260)), timeout=10.0
+                        )
                     continue
 
-                pdu = await reader.readexactly(length - 1)
+                pdu = await asyncio.wait_for(reader.readexactly(length - 1), timeout=10.0)
                 response_pdu = await self._process_pdu(pdu, unit_id)
 
                 resp_length = len(response_pdu) + 1
