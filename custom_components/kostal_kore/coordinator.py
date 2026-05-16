@@ -790,7 +790,7 @@ class ProcessDataUpdateCoordinator(
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
                 clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
             self._record_success()
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as timeout_err:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
             if self._last_result:
                 _LOGGER.warning(
@@ -801,7 +801,7 @@ class ProcessDataUpdateCoordinator(
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
             self._record_failure()
-            raise UpdateFailed("Timeout fetching process data") from None
+            raise UpdateFailed("Timeout fetching process data") from timeout_err
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
             if self._last_result:
