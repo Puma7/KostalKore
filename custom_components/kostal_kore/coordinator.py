@@ -833,21 +833,27 @@ class ProcessDataUpdateCoordinator(
             try:
                 module_data = fetched_data[module_id]
                 if hasattr(module_data, 'items') and callable(getattr(module_data, 'items')):
-                    result[module_id] = {
-                        process_data_id: str(module_data[process_data_id].value)
-                        for process_data_id in module_data.keys()
-                    }
+                    keys = list(module_data.keys())
                 elif hasattr(module_data, '__iter__') and hasattr(module_data, '__getitem__'):
-                    result[module_id] = {
-                        process_data_id: str(module_data[process_data_id].value)
-                        for process_data_id in module_data
-                    }
+                    keys = list(module_data)
                 else:
                     _LOGGER.warning("Unsupported data type for module %s: %s", module_id, type(module_data))
                     result[module_id] = {}
-            except (AttributeError, TypeError, KeyError, ValueError) as err:
-                _LOGGER.warning("Error processing module %s: %s", module_id, err)
+                    continue
+            except (AttributeError, TypeError) as err:
+                _LOGGER.warning("Error inspecting module %s: %s", module_id, err)
                 result[module_id] = {}
+                continue
+
+            result[module_id] = {}
+            for process_data_id in keys:
+                try:
+                    result[module_id][process_data_id] = str(module_data[process_data_id].value)
+                except (AttributeError, TypeError, KeyError, ValueError) as err:
+                    _LOGGER.warning(
+                        "Error processing field %s in module %s: %s",
+                        process_data_id, module_id, err,
+                    )
 
         if result:
             self._last_result = result

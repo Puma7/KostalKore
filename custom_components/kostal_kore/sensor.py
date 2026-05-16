@@ -29,7 +29,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import AddConfigEntryEntitiesCallback
+from .const import AddConfigEntryEntitiesCallback, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId
 from .coordinator import (
     EventDataUpdateCoordinator,
@@ -398,7 +398,8 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="FullChargeCap_E",
         name="Battery Full Charge Capacity",
-        native_unit_of_measurement="Ah",
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-high",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -408,7 +409,8 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="WorkCapacity",
         name="Battery Work Capacity",
-        native_unit_of_measurement="Ah",
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-medium",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -1516,7 +1518,13 @@ async def async_setup_entry(
         _modbus_strings = _modbus_coord.device_info_data.get("num_pv_strings")
         if _modbus_strings is not None:
             try:
-                dc_string_count = int(_modbus_strings)
+                raw = int(_modbus_strings)
+                dc_string_count = max(1, min(raw, MAX_SANE_STRING_COUNT))
+                if raw != dc_string_count:
+                    _LOGGER.warning(
+                        "Modbus DC string count %d out of sane range, clamped to %d",
+                        raw, dc_string_count,
+                    )
                 _LOGGER.info("Discovered %d DC strings via Modbus register 34", dc_string_count)
             except (TypeError, ValueError):
                 pass
@@ -2204,9 +2212,10 @@ class CalculatedPvSumSensor(
         total_power = 0.0
         available_pv_count = 0
         
-        # Iterate through all available DC strings and sum their power
-        for module_id in self.coordinator.data:
-            if module_id.startswith("devices:local:pv") and "P" in self.coordinator.data[module_id]:
+        # Iterate only registered DC strings to avoid summing unexpected modules
+        for dc_num in range(1, self.dc_string_count + 1):
+            module_id = f"{MODULE_ID_PREFIX}{dc_num}"
+            if module_id in self.coordinator.data and "P" in self.coordinator.data[module_id]:
                 try:
                     pv_power = self.coordinator.data[module_id]["P"]
                     
@@ -2228,11 +2237,12 @@ class CalculatedPvSumSensor(
         base_available = super().available
         coordinator_data = self.coordinator.data is not None
         
-        # Check if any DC string with power data is available
+        # Check if any registered DC string has power data available
         pv_available = False
         if coordinator_data:
-            for module_id in self.coordinator.data:
-                if module_id.startswith("devices:local:pv") and "P" in self.coordinator.data[module_id]:
+            for dc_num in range(1, self.dc_string_count + 1):
+                module_id = f"{MODULE_ID_PREFIX}{dc_num}"
+                if module_id in self.coordinator.data and "P" in self.coordinator.data[module_id]:
                     pv_available = True
                     break
         
@@ -2248,13 +2258,13 @@ class CalculatedPvSumSensor(
         # Only fetch data for DC strings that actually exist (safe fetching)
         _LOGGER.debug("PV Sum Sensor: Starting data fetch for %d DC strings", self.dc_string_count)
         for dc_num in range(1, self.dc_string_count + 1):
-            self.coordinator.start_fetch_data(f"devices:local:pv{dc_num}", "P")
+            self.coordinator.start_fetch_data(f"{MODULE_ID_PREFIX}{dc_num}", "P")
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister this entity from the Update Coordinator."""
         # Stop fetching data only for DC strings that exist
         for dc_num in range(1, self.dc_string_count + 1):
-            self.coordinator.stop_fetch_data(f"devices:local:pv{dc_num}", "P")
+            self.coordinator.stop_fetch_data(f"{MODULE_ID_PREFIX}{dc_num}", "P")
         await super().async_will_remove_from_hass()
 
 
