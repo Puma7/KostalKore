@@ -92,21 +92,25 @@ def test_bug1_work_capacity_uses_watt_hour() -> None:
     )
 
 
-def test_bug1_full_charge_cap_unit_is_wh() -> None:
-    """FullChargeCap_E must use Wh, matching the REST API which reports energy (not charge).
+def test_bug1_full_charge_cap_unit_is_ah() -> None:
+    """FullChargeCap_E is the REST-API ampere-hour register — expected Ah.
 
-    Modbus register 1070 reports in Wh; the REST API follows the same convention.
-    A value of 35000 means 35 kWh — not 35 kAh which would be physically absurd.
+    This test documents the current state. Real hardware returns ~50 for this
+    register (50 Ah ≈ 38 kWh at nominal voltage) — confirmed in LEARNINGS.md.
+    The "_E" suffix is misleading; this is charge capacity, not energy.
+    If the API is ever confirmed to report Wh, change the assertion and update
+    the sensor description accordingly.
     """
     import kostal_plenticore.sensor as sensor_mod
-    from homeassistant.const import UnitOfEnergy
 
     desc = next(
         d for d in sensor_mod.SENSOR_PROCESS_DATA
         if d.key == "FullChargeCap_E" and d.module_id == "devices:local:battery"
     )
-    assert desc.native_unit_of_measurement == UnitOfEnergy.WATT_HOUR, (
-        f"FullChargeCap_E unit should be Wh, got: {desc.native_unit_of_measurement!r}"
+    # The REST API FullChargeCap_E register is reported in Ah by Kostal firmware.
+    # If this assertion fails it means the unit was changed — verify against API docs.
+    assert desc.native_unit_of_measurement == "Ah", (
+        f"FullChargeCap_E unit changed unexpectedly: {desc.native_unit_of_measurement!r}"
     )
 
 

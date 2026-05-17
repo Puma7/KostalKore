@@ -736,3 +736,98 @@ Even short-lived diagnostic scripts deserve secure-by-default input
 handling once they're committed to a repository. Anything that
 lives in the repo gets imitated; make the safe path the obvious
 one.
+
+---
+
+## 36) Multi-pass AI bug audits can hallucinate bugs and then hallucinate fixes
+
+### What happened
+A structured omniscient audit (Round 1) identified `FullChargeCap_E` as having
+the wrong unit: "Ah should be Wh because _E = Energy". This reasoning sounded
+plausible. The same audit also found `modbus_registers.py` reporting Wh for the
+equivalent Modbus register (1070) — and used that as corroborating evidence.
+
+Round 2 wrote the fix (changed `"Ah"` → `UnitOfEnergy.WATT_HOUR`, added
+`device_class=ENERGY_STORAGE`, `suggested_unit_of_measurement=kWh`). Round 2
+also renamed the protective regression test from `test_bug1_full_charge_cap_unit_is_ah`
+to `test_bug1_full_charge_cap_unit_is_wh` — destroying the guard that existed
+precisely to prevent this mistake.
+
+A subsequent independent Red Team audit (Round 3) cross-checked `LEARNINGS.md`
+section 23, which documents real hardware measurement: the register returns `50`,
+and 50 Ah × ~760 V ≈ 38 kWh (physically correct). 50 Wh would be absurdly
+small for a home battery. `docs/BUGFIX_LOG.md` also explicitly warned:
+"regression test documents this as the expected baseline so a future 'fix'
+doesn't silently flip it."
+
+### Why the hallucination was convincing
+1. The `_E` suffix pattern (Energy) was applied mechanically without checking
+   actual firmware output.
+2. The Modbus register (`WorkCapacity` Modbus, 1070) genuinely is in Wh — but
+   the REST-API register `FullChargeCap_E` is a different register reporting a
+   different physical quantity (charge, not energy).
+3. Internal test fixtures and docstrings used "Wh" language for the battery
+   system generically, which was read as evidence without distinguishing which
+   register was being described.
+
+### The protective test was destroyed by the same session that introduced the bug
+The most dangerous moment: Round 2 renamed `test_bug1_full_charge_cap_unit_is_ah`
+(a red-flag canary) to match the new (wrong) assertion. After that rename, the
+test suite stayed green while the code was wrong. A canary test that is renamed
+in the same commit as the behavior change provides no protection.
+
+### Lessons
+- **Naming conventions are not units.** Always cross-reference against live
+  hardware data or confirmed API documentation, not naming patterns.
+- **Regression tests that document "current known-good state" must never be
+  renamed by the same session that changes the behavior.** They exist exactly to
+  survive well-intentioned but wrong fixes. If a test name contradicts your new
+  code, treat that as a warning signal, not a test to rename.
+- **Multi-pass AI audits compound errors.** An auditor that wrote the original
+  fix and then reviews the fix will rationalise it. Independent review (Red Team
+  mode) that re-reads primary evidence (real hardware logs, `LEARNINGS.md`,
+  `BUGFIX_LOG.md`) is the only reliable check.
+- **Physics plausibility check is mandatory for any unit change** that affects
+  HA long-term statistics: P = U × I, E = Q × U, SoC × capacity, module count
+  × per-module spec. A 10-second sanity check costs far less than shipping a
+  wrong unit to user installations.
+
+---
+
+## 37) Omniscient audits must be followed by an independent Red Team pass
+
+### What happened
+After a 12-bug audit and fix session, a structured 3-stage Red Team audit
+(Reality Check → Blast Radius → Edge-Case Simulation) was conducted. It caught
+the Fix #1 hallucination (see section 36) that had survived two full review
+passes.
+
+### The 3-stage Red Team process that worked
+**Stage 1 — Reality Check:** For each fix, locate the *primary source* (real
+hardware logs, official docs, API responses) and verify the assumption. Do not
+trust the audit's own reasoning as evidence.
+
+**Stage 2 — Blast Radius:** For each fix, ask: "What is the worst case if this
+fix is wrong?" For a unit change on a `TOTAL_INCREASING` sensor, the answer is
+"all historical data corrupted in HA long-term statistics" — a high-severity
+blast. That severity justifies extra scrutiny.
+
+**Stage 3 — Edge-Case Simulation:** Trace what happens with boundary inputs
+(zero, negative, very large, NaN, None). Confirm the fix handles them correctly
+and that the test suite actually exercises those paths.
+
+### Why this order matters
+Stage 1 failing (wrong assumption) makes Stages 2 and 3 irrelevant — no amount
+of edge-case correctness saves a fix built on a false premise. Do Stage 1 first.
+
+### Lesson
+Schedule a Red Team pass as a mandatory step after any AI-generated batch of
+fixes, especially for fixes that:
+- Change units of measurement
+- Rename or delete existing tests
+- Touch long-term statistics storage
+- Involve physical quantities (voltage, current, energy, charge)
+
+The Red Team auditor must have read-only access to primary evidence (hardware
+logs, official firmware docs) and must be instructed to *challenge* the fixes,
+not validate them.
