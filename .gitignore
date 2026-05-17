@@ -55,6 +55,7 @@ test_error_handling.py
 sitecustomize.py
 
 # Debug / test outputs
+*_debug.log
 test_*_output*.txt
 test_debug_output.txt
 test_output*.txt
