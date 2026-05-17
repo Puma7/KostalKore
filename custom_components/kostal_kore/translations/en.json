@@ -843,6 +843,12 @@
         "button": {
             "reset_modbus_registers": {
                 "name": "Reset Modbus Registers"
+            },
+            "run_modbus_diagnostics": {
+                "name": "Run Modbus Diagnostics"
+            },
+            "battery_charge_discharge_test": {
+                "name": "Battery Charge/Discharge Test"
             }
         }
     }

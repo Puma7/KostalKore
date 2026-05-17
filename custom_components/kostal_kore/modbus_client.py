@@ -345,6 +345,7 @@ class KostalModbusClient:
         - Suppression auto-expires so firmware updates are picked up
         - Manual reset via reset_unavailable() after inverter swap
         """
+        self._last_exc_code = None
         if self._is_suppressed(register.address):
             raise ModbusPermanentError(
                 f"Register {register.name} (addr {register.address}) "
@@ -775,7 +776,7 @@ class KostalModbusClient:
             return struct.unpack(">f", struct.pack(">HH", lo, hi))[0]
 
         if dt == DataType.STRING:
-            return raw.decode("ascii", errors="replace").rstrip("\x00").strip()
+            return raw.decode("latin-1", errors="ignore").rstrip("\x00").strip()
 
         if dt == DataType.BOOL:
             return struct.unpack(">H", raw[:2])[0] != 0

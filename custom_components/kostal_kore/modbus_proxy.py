@@ -95,7 +95,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
 
     if dt == DataType.STRING:
         s = str(value) if value is not None else ""
-        raw = s.encode("ascii", errors="replace")
+        raw = s.encode("latin-1", errors="ignore")
         padded = raw.ljust(register.count * 2, b"\x00")[:register.count * 2]
         return padded
 
@@ -372,28 +372,6 @@ class ModbusTcpProxyServer:
                 "Proxy: forwarded read failed at addr=%d: %s", start_addr, err,
             )
             return None
-
-    def _check_write_arbitration(self, address: int, peer: str = "") -> bytes | None:
-        """Check if a write to this address is allowed.
-
-        Returns a Modbus error response if blocked, None if allowed.
-        Battery control registers are blocked when the internal SoC
-        controller is active (returns 0x06 = Server Device Busy).
-        """
-        if address not in BATTERY_CONTROL_REGISTERS:
-            return None
-
-        ctrl = self._soc_controller
-        if ctrl is not None and getattr(ctrl, "active", False):
-            _LOGGER.warning(
-                "Proxy: BLOCKED external write to battery register %d "
-                "(SoC Controller is active, target=%.0f%%). "
-                "Stop the SoC Controller first to allow external control.",
-                address, ctrl.target_soc or 0,
-            )
-            return None  # We return 0x06 below per function code
-
-        return None
 
     async def _handle_write_single(self, pdu: bytes) -> bytes:
         """Handle FC 06: Write Single Register with arbitration."""

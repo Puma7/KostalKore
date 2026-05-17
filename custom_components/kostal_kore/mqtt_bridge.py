@@ -112,6 +112,7 @@ class KostalMqttBridge:
         self._started = False
         self._last_write: dict[str, float] = {}
         self._write_lock = asyncio.Lock()
+        self._publish_task: asyncio.Task[None] | None = None
 
     @property
     def topic_base(self) -> str:
@@ -174,6 +175,14 @@ class KostalMqttBridge:
             self._unsub_coordinator()
             self._unsub_coordinator = None
 
+        if self._publish_task is not None and not self._publish_task.done():
+            self._publish_task.cancel()
+            try:
+                await self._publish_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._publish_task = None
+
         for unsub in self._unsub_command:
             unsub()
         self._unsub_command.clear()
@@ -200,7 +209,9 @@ class KostalMqttBridge:
         data = self._coordinator.data
         if data is None:
             return
-        self._hass.async_create_task(self._publish_data(data))
+        if self._publish_task is not None and not self._publish_task.done():
+            self._publish_task.cancel()
+        self._publish_task = self._hass.async_create_task(self._publish_data(data))
 
     async def _publish_data(self, data: dict[str, Any]) -> None:
         """Publish register values and simplified proxy topics."""
@@ -222,11 +233,17 @@ class KostalMqttBridge:
             json.dumps(safe, default=str), QOS, retain=True,
         )
 
-        for key, val in safe.items():
-            payload = json.dumps(val, default=str) if not isinstance(val, str) else val
-            await mqtt.async_publish(  # type: ignore[attr-defined]
-                self._hass, f"{self._topic_base}/register/{key}", payload, QOS, retain=True,
+        publishes = [
+            mqtt.async_publish(  # type: ignore[attr-defined]
+                self._hass,
+                f"{self._topic_base}/register/{key}",
+                json.dumps(val, default=str) if not isinstance(val, str) else val,
+                QOS,
+                retain=True,
             )
+            for key, val in safe.items()
+        ]
+        await asyncio.gather(*publishes, return_exceptions=True)
 
         await self._publish_proxy_topics(safe)
 
@@ -331,11 +348,14 @@ class KostalMqttBridge:
         topic: str = msg.topic
         payload: str = msg.payload
 
-        parts = topic.split("/")
-        if len(parts) < 2:
+        expected_prefix = f"{self._topic_base}/command/"
+        if not topic.startswith(expected_prefix):
             _LOGGER.warning("Malformed command topic: %s", topic)
             return
-        reg_name = parts[-1]
+        reg_name = topic[len(expected_prefix):]
+        if not reg_name or "/" in reg_name:
+            _LOGGER.warning("Malformed command topic: %s", topic)
+            return
 
         reg = REGISTER_BY_NAME.get(reg_name)
         if reg is None:
@@ -357,10 +377,14 @@ class KostalMqttBridge:
         topic: str = msg.topic
         payload: str = msg.payload
 
-        parts = topic.split("/")
-        if len(parts) < 2:
+        expected_prefix = f"{self._proxy_base}/command/"
+        if not topic.startswith(expected_prefix):
+            _LOGGER.warning("Malformed proxy command topic: %s", topic)
             return
-        proxy_name = parts[-1]
+        proxy_name = topic[len(expected_prefix):]
+        if not proxy_name or "/" in proxy_name:
+            _LOGGER.warning("Malformed proxy command topic: %s", topic)
+            return
 
         reg = PROXY_COMMAND_MAP.get(proxy_name)
         if reg is None:

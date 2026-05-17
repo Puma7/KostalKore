@@ -164,30 +164,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         clear_issue(hass, _suffix)  # legacy unscoped ID
         clear_issue(hass, _suffix, entry_id=entry.entry_id)  # new scoped ID
 
-    # NEU: one-shot migration notice for Battery Work Capacity unit (Ah -> Wh).
-    # Triggered only when the entity registry still records the old "Ah" unit;
-    # auto-clears on subsequent setups once HA has updated the registry entry.
+    # One-shot migration notice for Battery capacity sensors (Ah -> Wh).
+    # Covers both WorkCapacity and FullChargeCap_E; triggered only when the
+    # entity registry still records the old "Ah" unit.
     from homeassistant.helpers import entity_registry as er
     _ent_reg = er.async_get(hass)
-    _existing_id = _ent_reg.async_get_entity_id(
-        "sensor",
-        DOMAIN,
+    _legacy_unique_ids = (
         f"{entry.entry_id}_devices:local:battery_WorkCapacity",
+        f"{entry.entry_id}_devices:local:battery_FullChargeCap_E",
     )
-    if _existing_id is not None:
+    _trigger_migration_issue = False
+    for _uid in _legacy_unique_ids:
+        _existing_id = _ent_reg.async_get_entity_id("sensor", DOMAIN, _uid)
+        if _existing_id is None:
+            continue
         _entry_reg = _ent_reg.async_get(_existing_id)
-        # GEÄNDERT: prüfe beide Felder. `unit_of_measurement` ist HAs User-Override
-        # (oft None bei Nutzern, die nie über die UI angepasst haben);
-        # `original_unit_of_measurement` ist der von der Entity zuletzt gemeldete
-        # Wert und damit der zuverlässige Indikator für Bestandsinstallationen.
         _effective_unit = (
             _entry_reg.unit_of_measurement or _entry_reg.original_unit_of_measurement
             if _entry_reg is not None else None
         )
         if _effective_unit == "Ah":
-            create_battery_capacity_unit_migration_issue(hass, entry_id=entry.entry_id)
-        else:
-            clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
+            _trigger_migration_issue = True
+            break
+    if _trigger_migration_issue:
+        create_battery_capacity_unit_migration_issue(hass, entry_id=entry.entry_id)
     else:
         clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
 
@@ -364,11 +364,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         _clear_sent: dict[str, bool] = {"value": False}
 
         modbus_coordinator._health_monitor = health_monitor
-        # QA-1: schedule `_restore_isolation_sample()` HERE (after the monitor
-        # is injected), not inside `modbus_coordinator.async_setup()`. The
-        # restore writes into `health_monitor.isolation.deque`, which doesn't
-        # exist before this line. Using `async_create_task` keeps setup fast.
-        hass.async_create_task(modbus_coordinator._restore_isolation_sample())
+        # Await restore synchronously so the listener registered below cannot
+        # observe a partially-restored isolation deque. The task-based form
+        # had a race where the first coordinator update arrived before the
+        # restore coroutine ran.
+        await modbus_coordinator._restore_isolation_sample()
 
         @callback
         def _feed_health_data() -> None:  # pragma: no cover

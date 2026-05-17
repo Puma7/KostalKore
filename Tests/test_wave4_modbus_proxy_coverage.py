@@ -269,11 +269,6 @@ async def test_modbus_proxy_read_and_forward_paths() -> None:
     proxy = _make_proxy(client=client)
     assert await proxy._forward_read(40000, 1) is None
 
-    assert proxy._check_write_arbitration(9999) is None
-    proxy = _make_proxy(soc_active=True)
-    assert proxy._check_write_arbitration(1034) is None
-    proxy = _make_proxy(soc_active=False)
-    assert proxy._check_write_arbitration(1034) is None
 
 
 @pytest.mark.asyncio

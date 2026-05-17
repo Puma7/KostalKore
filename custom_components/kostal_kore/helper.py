@@ -277,7 +277,10 @@ class PlenticoreDataFormatter:
             if math.isnan(value) or math.isinf(value):
                 return None
             if value < 0:
-                return 0.0
+                # Return None instead of 0.0 to avoid a counter-reset on
+                # TOTAL_INCREASING sensors. None makes the sensor unavailable
+                # for one tick without touching the running total.
+                return None
             return value
         except (TypeError, ValueError):
             _handle_format_error(state, "energy")

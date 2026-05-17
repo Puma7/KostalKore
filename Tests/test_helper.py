@@ -237,8 +237,9 @@ def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
     ) is None
 
 
-def test_format_energy_clamps_negative_values() -> None:
-    assert PlenticoreDataFormatter.format_energy("-100") == 0.0
+def test_format_energy_returns_none_for_negative_values() -> None:
+    # Negative energy returns None (not 0.0) to avoid resetting TOTAL_INCREASING counters.
+    assert PlenticoreDataFormatter.format_energy("-100") is None
     assert PlenticoreDataFormatter.format_energy("2500") == 2.5
 
 

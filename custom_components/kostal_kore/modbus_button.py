@@ -70,7 +70,7 @@ class ModbusDiagnosticsButton(ButtonEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:stethoscope"
     _attr_has_entity_name = True
-    _attr_name = "Run Modbus Diagnostics"
+    _attr_translation_key = "run_modbus_diagnostics"
 
     def __init__(
         self,
@@ -253,7 +253,7 @@ class BatteryTestButton(ButtonEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:battery-sync"
     _attr_has_entity_name = True
-    _attr_name = "Battery Charge/Discharge Test"
+    _attr_translation_key = "battery_charge_discharge_test"
 
     def __init__(
         self,

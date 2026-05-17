@@ -593,8 +593,12 @@ class TestAdditionalClientCoverage:
                 await c.read_register(REG_TOTAL_DC_POWER)
 
         c = KostalModbusClient("127.0.0.1")
-        c._last_exc_code = ModbusExceptionCode.ILLEGAL_DATA_ADDRESS
-        with patch.object(c, "_raw_read", AsyncMock(side_effect=ModbusPermanentError("illegal"))):
+
+        async def _fake_raw_read_illegal(addr: int, count: int) -> bytes:
+            c._last_exc_code = ModbusExceptionCode.ILLEGAL_DATA_ADDRESS
+            raise ModbusPermanentError("illegal")
+
+        with patch.object(c, "_raw_read", side_effect=_fake_raw_read_illegal):
             with pytest.raises(ModbusPermanentError):
                 await c.read_register(REG_TOTAL_DC_POWER)
         assert c._unavailable_strikes[REG_TOTAL_DC_POWER.address] == 1

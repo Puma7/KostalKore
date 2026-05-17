@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import logging
@@ -408,7 +409,19 @@ def _merge_statistics_metadata(
             select(StatisticsMeta).where(StatisticsMeta.statistic_id == new_entity_id)
         ).scalars()
     )
-    new_by_source = {str(meta.source): meta for meta in new_meta_rows}
+    source_counter = Counter(str(meta.source) for meta in new_meta_rows)
+    duplicate_sources = {src for src, count in source_counter.items() if count > 1}
+    if duplicate_sources:
+        _LOGGER.warning(
+            "StatisticsMeta has duplicate sources %s for %s — "
+            "skipping merge for these sources; manual cleanup required.",
+            duplicate_sources, new_entity_id,
+        )
+    new_by_source = {
+        str(meta.source): meta
+        for meta in new_meta_rows
+        if str(meta.source) not in duplicate_sources
+    }
 
     stats_rows_moved = 0
     short_term_rows_moved = 0
