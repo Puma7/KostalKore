@@ -364,7 +364,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         _clear_sent: dict[str, bool] = {"value": False}
 
         modbus_coordinator._health_monitor = health_monitor
-        # Restore is called here, after _health_monitor is available. // NEU
+        # QA-1: schedule `_restore_isolation_sample()` HERE (after the monitor
+        # is injected), not inside `modbus_coordinator.async_setup()`. The
+        # restore writes into `health_monitor.isolation.deque`, which doesn't
+        # exist before this line. Using `async_create_task` keeps setup fast.
         hass.async_create_task(modbus_coordinator._restore_isolation_sample())
 
         @callback

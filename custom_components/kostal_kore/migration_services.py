@@ -422,12 +422,17 @@ def _merge_statistics_metadata(
             old_unit = getattr(old_meta, "unit_of_measurement", None)
             new_unit = getattr(matching_new, "unit_of_measurement", None)
             if old_unit and new_unit and old_unit != new_unit:
+                # QA-2: on unit mismatch we MUST `continue`, not fall through.
+                # Without this, `old_meta.statistic_id = new_entity_id` below
+                # (outside the `if matching_new` block) would silently rename
+                # the old row to clash with the new row's statistic_id while
+                # the units still differ → guaranteed Recorder corruption.
                 _LOGGER.warning(
                     "Skipping statistics merge from %s → %s: "
                     "unit mismatch (%s vs %s). Manual cleanup required.",
                     old_entity_id, new_entity_id, old_unit, new_unit,
                 )
-                continue  # GEÄNDERT: skip rename + delete to keep both rows intact
+                continue
             stats_rows_moved += _merge_statistics_table(
                 session,
                 Statistics,

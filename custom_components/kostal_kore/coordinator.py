@@ -819,7 +819,11 @@ class ProcessDataUpdateCoordinator(
                 # Soft backoff while keeping entities responsive.
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
-            # 503 on first fetch (empty _last_result): retry once before giving up
+            # Bug #8 / QA-6: 503 on first fetch (empty _last_result) → retry once
+            # before giving up. The inverter often returns 503 during warm-up;
+            # a single 3-second pause is usually enough to recover.
+            # _record_failure() is intentionally deferred to the retry-failure
+            # branch so a successful retry leaves the adaptive interval untouched.
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                 _LOGGER.warning(
                     "Inverter busy (503) on first fetch for %s – retrying once after 3s",
@@ -852,8 +856,13 @@ class ProcessDataUpdateCoordinator(
                     _LOGGER.error("Error fetching process data for %s: %s", self.name, err)
                 raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
 
+        # QA-5: two separate dicts.
+        #   `result`  → what we return to HA (may contain backfilled values).
+        #   `fresh_result` → what we cache in `_last_result` (only freshly parsed
+        #   values, never backfilled). Keeping these separate prevents a stale
+        #   cascade where backfilled values are re-cached and perpetuated forever.
         result: dict[str, dict[str, str]] = {}
-        fresh_result: dict[str, dict[str, str]] = {}  # NEU: only freshly parsed values
+        fresh_result: dict[str, dict[str, str]] = {}
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
@@ -870,6 +879,9 @@ class ProcessDataUpdateCoordinator(
                 result[module_id] = {}
                 continue
 
+            # Bug #7: parse field-by-field instead of as one dict-comprehension.
+            # Previously, a single bad ProcessData.value access wiped the entire
+            # module's data and made every sensor on it "unavailable".
             result[module_id] = {}
             failed_fields: list[str] = []
             for process_data_id in keys:

@@ -87,6 +87,9 @@ def normalize_isolation_resistance_ohm(
     if inverter_state in (0, 1, 10, 15):
         return numeric
     if 0 < abs(numeric) <= ISOLATION_KOHM_HEURISTIC_MAX:
+        # Bug #10: boundary is INCLUSIVE. A reading of exactly 1000 kΩ (= 1 MΩ)
+        # is a healthy isolation value and must be converted to 1_000_000 Ω.
+        # The strict `<` form would leave 1000 as raw Ω → false critical alarm.
         return numeric * 1000.0
     return numeric
 

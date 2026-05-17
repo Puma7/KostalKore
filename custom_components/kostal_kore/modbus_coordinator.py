@@ -147,7 +147,10 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             batch_result = await self._client.read_registers_batch(fast_regs)
             data.update(batch_result)
-            # Single snapshot of suppressed addresses – no side effects, no TOCTOU. // GEÄNDERT
+            # QA-3: take a single snapshot of the suppressed-address set via the
+            # public `unavailable_registers` property (returns a frozenset and has
+            # no side effects). Calling `_is_suppressed()` here would mutate the
+            # client's internal strike map between consecutive `sum()` calls.
             suppressed_snapshot = self._client.unavailable_registers
             fast_errors = sum(
                 1 for r in fast_regs

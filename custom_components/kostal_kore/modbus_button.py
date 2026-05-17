@@ -37,6 +37,8 @@ class ModbusResetButton(ButtonEntity):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:restart"
     _attr_has_entity_name = True
+    # Bug #4: use translation_key (not _attr_name) so the button label is
+    # localizable via translations/<lang>.json:entity.button.reset_modbus_registers.
     _attr_translation_key = "reset_modbus_registers"
 
     def __init__(

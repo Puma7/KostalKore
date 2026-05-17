@@ -677,6 +677,11 @@ SENSOR_PROCESS_DATA = [
         state_class=SensorStateClass.TOTAL_INCREASING,
         formatter="format_energy",
     ),
+    # Bug #11 (known limitation): PV energy statistics are hardcoded for PV1–PV3
+    # only. Inverters with 1–2 strings see PV2/PV3 entities as "unavailable";
+    # inverters with 4–6 strings lose energy stats for the extra strings.
+    # The Kostal REST API exposes Statistic:EnergyPv{N}:* dynamically; future work
+    # is to mirror generate_dc_sensor_descriptions() for the energy statistics.
     PlenticoreSensorEntityDescription(
         module_id="scb:statistic:EnergyFlow",
         key="Statistic:EnergyPv1:Day",
@@ -1523,6 +1528,9 @@ async def async_setup_entry(
         if _modbus_strings is not None:
             try:
                 raw = int(_modbus_strings)
+                # Bug #6: clamp to MAX_SANE_STRING_COUNT. A corrupted Modbus
+                # response (e.g. 99) would otherwise spawn 297 phantom sensors.
+                # diagnostics.py and switch.py already clamp the same value.
                 if raw > MAX_SANE_STRING_COUNT:
                     _LOGGER.warning(
                         "Modbus DC string count %d exceeds sane max %d, clamped",
@@ -2219,6 +2227,10 @@ class CalculatedPvSumSensor(
         total_power = 0.0
         available_pv_count = 0
 
+        # Bug #8/#9: iterate exactly dc_string_count strings using MODULE_ID_PREFIX.
+        # Earlier versions iterated all coordinator-data keys with a hardcoded
+        # "devices:local:pv" string, which (a) ignored the configured string
+        # count and (b) duplicated a magic value defined elsewhere.
         for dc_num in range(1, self.dc_string_count + 1):
             module_id = f"{MODULE_ID_PREFIX}{dc_num}"
             module_data = self.coordinator.data.get(module_id, {})
@@ -2523,6 +2535,10 @@ class PlenticoreDataSensor(
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
         self._attr_name = name
+        # QA-4: cache the last good value so MEASUREMENT sensors survive a
+        # single NaN/Inf parse from the API instead of flickering to None.
+        # TOTAL_INCREASING sensors deliberately do NOT use this cache –
+        # see native_value() below.
         self._last_valid_native_value: Any = None
 
         tk = _sensor_translation_key(description.module_id, description.key)
