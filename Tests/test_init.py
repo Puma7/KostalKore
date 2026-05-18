@@ -1,14 +1,36 @@
 """Test the Kostal Plenticore Solar Inverter initialization."""
 
-from unittest.mock import call, patch
+import importlib
+from unittest.mock import AsyncMock, call, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er, issue_registry as ir
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from custom_components.kostal_kore.const import DOMAIN
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
+
+
+class _DummyPlenticore:
+    """Minimal stand-in for Plenticore used to focus on migration-check coverage."""
+
+    def __init__(self, *_args) -> None:
+        self.device_info: DeviceInfo = DeviceInfo(
+            identifiers={(DOMAIN, "12345")},
+            manufacturer="Kostal",
+            name="scb",
+        )
+        self._request_scheduler = None
+
+    async def async_setup(self) -> bool:
+        return True
+
+    async def async_unload(self) -> None:
+        pass
 
 async def test_setup_unload_entry(
     hass: HomeAssistant,
@@ -52,7 +74,11 @@ async def test_migration_check_creates_issue_when_unit_is_ah(
     mock_config_entry: MockConfigEntry,
     mock_plenticore_client,
 ) -> None:
-    """Migration check fires repair issue when WorkCapacity entity still has Ah unit."""
+    """Migration check fires repair issue when WorkCapacity entity still has Ah unit.
+
+    Uses the real create_battery_capacity_unit_migration_issue so repairs.py is
+    also exercised (the issue ends up in the issue registry).
+    """
     mock_config_entry.add_to_hass(hass)
 
     entity_registry = er.async_get(hass)
@@ -75,7 +101,6 @@ async def test_migration_check_creates_issue_when_unit_is_ah(
 async def test_migration_check_clears_issue_when_unit_already_migrated(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_plenticore_client,
 ) -> None:
     """Migration check clears repair issue when WorkCapacity entity no longer has Ah unit."""
     mock_config_entry.add_to_hass(hass)
@@ -90,10 +115,14 @@ async def test_migration_check_clears_issue_when_unit_already_migrated(
     entity_registry.async_update_entity(reg_entry.entity_id, unit_of_measurement="Wh")
 
     with patch(
+        "custom_components.kostal_kore.__init__.Plenticore", _DummyPlenticore
+    ), patch(
+        "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+        AsyncMock(return_value=True),
+    ), patch(
         "custom_components.kostal_kore.__init__.clear_issue"
     ) as mock_clear:
-        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-        await hass.async_block_till_done()
+        assert await kp_init.async_setup_entry(hass, mock_config_entry) is True
 
     battery_migration_calls = [
         c for c in mock_clear.call_args_list
