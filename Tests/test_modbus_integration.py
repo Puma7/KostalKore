@@ -16,6 +16,8 @@ KNOWN_LINGERING_TIMER_TESTS = {
     "test_setup_entry_modbus_enabled_success",
     "test_setup_entry_modbus_auto_endianness",
     "test_setup_entry_mqtt_bridge_enabled",
+    "test_setup_entry_mqtt_bridge_empty_identifiers",
+    "test_setup_entry_mqtt_bridge_nonmatching_identifier",
 }
 
 
@@ -307,6 +309,107 @@ async def test_setup_entry_modbus_auto_endianness(
     await hass.async_block_till_done()
 
 
+async def _run_setup_with_mqtt_bridge(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    identifiers,
+) -> MagicMock:
+    """Helper: run async_setup_entry with a DummyPlenticore having custom identifiers.
+
+    Returns the mock KostalMqttBridge constructor so callers can inspect calls.
+    """
+    from homeassistant.helpers.device_registry import DeviceInfo
+
+    class _DummyPlenticoreWithIds:
+        def __init__(self, *_args):
+            self.device_info = DeviceInfo(
+                identifiers=identifiers,
+                manufacturer="Kostal",
+                name="scb",
+            )
+            self._request_scheduler = None
+
+        async def async_setup(self):
+            return True
+
+        async def async_unload(self):
+            pass
+
+    mock_modbus_coord = MagicMock()
+    mock_modbus_coord.async_setup = AsyncMock()
+    mock_modbus_coord.async_shutdown = AsyncMock()
+    mock_modbus_coord._restore_isolation_sample = AsyncMock()
+    mock_bridge = MagicMock()
+    mock_bridge.async_start = AsyncMock()
+    mock_bridge.async_stop = AsyncMock()
+
+    mock_soc = MagicMock()
+    mock_soc.stop = AsyncMock()
+
+    with (
+        patch("custom_components.kostal_kore.__init__.Plenticore", _DummyPlenticoreWithIds),
+        patch("custom_components.kostal_kore.__init__.KostalModbusClient"),
+        patch(
+            "custom_components.kostal_kore.__init__.ModbusDataUpdateCoordinator",
+            return_value=mock_modbus_coord,
+        ),
+        patch(
+            "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+            return_value=mock_soc,
+        ),
+        patch("custom_components.kostal_kore.__init__.KostalMqttBridge", return_value=mock_bridge) as mock_bridge_cls,
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        assert await kp_init.async_setup_entry(hass, entry) is True
+
+    return mock_bridge_cls
+
+
+async def test_setup_entry_mqtt_bridge_empty_identifiers(
+    hass: HomeAssistant,
+) -> None:
+    """MQTT bridge uses entry_id when identifiers is empty (covers branch 262→266)."""
+    entry = MockConfigEntry(
+        entry_id="mqtt_empty_ids",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_enabled": True, "modbus_port": 1502, "modbus_unit_id": 71,
+                 "modbus_endianness": "little", "mqtt_bridge_enabled": True},
+    )
+    entry.add_to_hass(hass)
+
+    mock_bridge_cls = await _run_setup_with_mqtt_bridge(hass, entry, identifiers=set())
+
+    mock_bridge_cls.assert_called_once()
+    device_id_arg = mock_bridge_cls.call_args[0][2]
+    assert device_id_arg == entry.entry_id
+
+
+async def test_setup_entry_mqtt_bridge_nonmatching_identifier(
+    hass: HomeAssistant,
+) -> None:
+    """MQTT bridge skips non-domain identifiers before matching (covers branch 263→262)."""
+    entry = MockConfigEntry(
+        entry_id="mqtt_nonmatch_ids",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_enabled": True, "modbus_port": 1502, "modbus_unit_id": 71,
+                 "modbus_endianness": "little", "mqtt_bridge_enabled": True},
+    )
+    entry.add_to_hass(hass)
+
+    # Use a list to control iteration order: non-matching first, matching second.
+    identifiers = [("other_domain", "ignored"), (DOMAIN, "SN-99999")]
+    mock_bridge_cls = await _run_setup_with_mqtt_bridge(hass, entry, identifiers=identifiers)
+
+    mock_bridge_cls.assert_called_once()
+    device_id_arg = mock_bridge_cls.call_args[0][2]
+    assert device_id_arg == "SN-99999"
+
+
 async def test_setup_entry_mqtt_bridge_enabled(
     hass: HomeAssistant,
     mock_plenticore_client,
@@ -394,3 +497,39 @@ async def test_options_updated_triggers_reload(
 
     await kp_init._async_options_updated(hass, mock_config_entry)
     await hass.async_block_till_done()
+
+
+async def test_options_updated_no_prior_setup_triggers_reload(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """_async_options_updated reloads when entry_data is absent (branch 478→486)."""
+    mock_config_entry.add_to_hass(hass)
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+
+
+async def test_options_updated_changed_options_triggers_reload(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+) -> None:
+    """_async_options_updated reloads when options actually changed (branch 480→486)."""
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Overwrite the saved snapshot so it looks like options changed.
+    hass.data[DOMAIN][mock_config_entry.entry_id]["_setup_options"] = {"stale": True}
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
