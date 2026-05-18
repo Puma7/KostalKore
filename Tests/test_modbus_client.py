@@ -534,7 +534,7 @@ class TestAdditionalClientCoverage:
             ),
             patch("kostal_plenticore.modbus_client.asyncio.sleep", AsyncMock()),
         ):
-            with pytest.raises(ModbusReadError, match="after 5 retries"):
+            with pytest.raises(ModbusReadError, match="after 2 retries"):
                 await c.read_register(REG_TOTAL_DC_POWER)
 
         with (
@@ -788,7 +788,7 @@ class TestAdditionalClientCoverage:
             patch.object(c, "_raw_write", AsyncMock(side_effect=ModbusTransientError("busy forever"))),
             patch("kostal_plenticore.modbus_client.asyncio.sleep", AsyncMock()),
         ):
-            with pytest.raises(ModbusWriteError, match="after 5 retries"):
+            with pytest.raises(ModbusWriteError, match="after 2 retries"):
                 await c.write_register(writable, 5)
 
         with (
