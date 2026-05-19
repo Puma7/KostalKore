@@ -37,8 +37,8 @@
         "error": {
             "cannot_connect": "Failed to connect",
             "invalid_auth": "Invalid authentication",
-            "no_discovered_inverter": "No inverter found automatically. Enter host/IP manually.",
-            "timeout": "Failed to connect",
+            "no_discovered_inverter": "No inverter found automatically. Enter the host/IP manually.",
+            "timeout": "Connection timed out. The inverter may be overloaded or unreachable — try again later.",
             "unknown": "Unexpected error",
             "invalid_inverter_model": "Inverter model not supported or incompatible",
             "inverter_error": "Inverter internal error, check device status",
@@ -48,7 +48,7 @@
             "reauth_confirm": {
                 "description": "Re-enter your credentials. The host from the existing configuration will be used.",
                 "data": {
-                    "host": "Host/IP (optional for auto-discovery)",
+                    "host": "Host/IP (read-only, uses existing entry)",
                     "password": "Password",
                     "service_code": "Service code"
                 }

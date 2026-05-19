@@ -451,10 +451,14 @@ async def test_process_setting_event_and_select_remaining_edges(
         timedelta(seconds=10),
         plenticore,
     )
+    # Stale TTL fix (HIGH-06): cache return requires a recent _last_success_ts.
+    import time as _time_mod
     events._last_result = {"cached": "api"}
+    events._last_success_ts = _time_mod.monotonic()
     plenticore._client.get_events = AsyncMock(side_effect=ApiException("illegal function"))
     assert await events._async_update_data() == {"cached": "api"}
     events._last_result = {"cached": "client"}
+    events._last_success_ts = _time_mod.monotonic()
     plenticore._client.get_events = AsyncMock(side_effect=ClientError("client boom"))
     assert await events._async_update_data() == {"cached": "client"}
 

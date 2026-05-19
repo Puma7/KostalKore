@@ -265,8 +265,17 @@ def test_normalize_options_enables_modbus_dependencies() -> None:
 
 
 def test_installer_access_unknown_role_falls_back_to_service_code() -> None:
+    # Explicit role strings: hard-coded mapping, no service-code influence.
+    assert kore_config_flow._installer_access_from_role("INSTALLER", None) is True
+    assert kore_config_flow._installer_access_from_role("USER", "12345") is False
+    # Truly unknown role ("UNKNOWN" / "") falls back to service code.
+    assert kore_config_flow._installer_access_from_role("UNKNOWN", None) is False
+    assert kore_config_flow._installer_access_from_role("UNKNOWN", "12345") is True
+    assert kore_config_flow._installer_access_from_role("", "12345") is True
+    # Unrecognised role strings ("mystery", "INSTALLER_TRIAL", …) are denied
+    # even with a service code — only explicitly-known roles unlock writes.
     assert kore_config_flow._installer_access_from_role("mystery", None) is False
-    assert kore_config_flow._installer_access_from_role("mystery", "12345") is True
+    assert kore_config_flow._installer_access_from_role("mystery", "12345") is False
 
 
 async def test_reconfigure_updates_entry_with_access_profile(
@@ -515,7 +524,14 @@ async def test_flow_step_helpers_cover_remaining_branches(hass: HomeAssistant) -
     assert result == {"step_id": "setup_modbus_test"}
 
     flow._pending_options = {"modbus_enabled": True}
-    result = await flow.async_step_setup_modbus_test({"confirm": True})
+    # Submit now re-runs the connection test (HIGH-01 fix): a passing test
+    # must be mocked, otherwise Submit returns a form with modbus_test_failed
+    # instead of creating the entry.
+    with patch(
+        "custom_components.kostal_kore.config_flow.run_modbus_connection_test",
+        AsyncMock(return_value=(True, "ok")),
+    ):
+        result = await flow.async_step_setup_modbus_test({"confirm": True})
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
     with patch(

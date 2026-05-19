@@ -93,7 +93,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - Local network access to the inverter's web interface
 
 ### Software Requirements
-- Home Assistant 2023.1 or newer
+- Home Assistant 2024.1 or newer
 - Python package: `pykoplenti==1.5.0` (automatically installed)
 
 ### Network Requirements
@@ -197,18 +197,37 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 - Battery charge/discharge control setpoints are intentionally **Modbus-only**.
 - If you need deterministic charge/discharge control, enable Modbus and use Modbus-backed entities.
 
+### Optional: External KSEM (Kostal Smart Energy Meter)
+
+If you have a KSEM at the grid connection point, you can enable an additional
+Modbus-TCP source to read the meter directly (independent of the inverter's
+own grid measurement). Configure under **Options**:
+
+- `ksem_enabled` — turn on the KSEM source
+- `ksem_host` — KSEM IP/hostname (leave empty to reuse the inverter host)
+- `ksem_port` — Modbus TCP port (default `502`)
+- `ksem_unit_id` — Modbus unit id (default `71`)
+
+When enabled, KSEM-sourced grid power, frequency, power factor, per-phase
+voltages and per-phase active power become available as additional sensors.
+
 ## Data Update
 
 The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from the inverter at regular intervals:
 
-| Data Type | Update Interval | Description |
+| Data Type | Update Interval (REST only) | Description |
 |-----------|----------------|-------------|
 | Process Data (sensors) | 10 seconds | Real-time power, voltage, current measurements |
 | Settings Data (numbers/switches) | 30 seconds | Battery limits, operating modes, switch states |
 | Select Data (selects) | 30 seconds | Charging/usage mode selections |
 
+When Modbus is enabled, the platforms (sensor/number/switch/select) reduce
+their REST polling — Modbus polls fast registers every ~5 s and settings/selects
+fall back to ~90 s so the inverter is not double-polled. The Modbus coordinator
+itself runs the 5 s loop independently.
+
 - All API calls are serialised by the coordinator to avoid overloading the inverter.
-- Settings data implements a last-result fallback for transient 503 errors.
+- Settings data implements a last-result fallback for transient 503 errors (TTL-bounded).
 - Failed API calls are automatically retried on the next coordinator cycle.
 
 ## Known Limitations

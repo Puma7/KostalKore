@@ -116,10 +116,14 @@ def _build_register_image(
 ) -> bytes | None:
     """Build raw register bytes for a read request from cached data.
 
-    Returns *quantity * 2* bytes or None if the range is completely unknown.
+    Returns *quantity * 2* bytes only when EVERY register in the requested
+    range is populated from the cache. Partial coverage returns None so
+    that the caller can fall back to a real-inverter forward read instead
+    of serving zero-bytes for unknown gaps — external clients (evcc, EMS)
+    would otherwise interpret those zeros as genuine measurements.
     """
     image = bytearray(quantity * 2)
-    found_any = False
+    covered = bytearray(quantity)  # one byte per Modbus register (0=miss, 1=hit)
 
     for base_addr, reg in _SORTED_REGISTERS:
         reg_end = base_addr + reg.count
@@ -140,16 +144,24 @@ def _build_register_image(
         for i in range(reg.count):
             abs_addr = base_addr + i
             if start_addr <= abs_addr < start_addr + quantity:
-                offset = (abs_addr - start_addr) * 2
+                reg_idx = abs_addr - start_addr
                 reg_byte_offset = i * 2
                 if reg_byte_offset + 2 <= len(raw):
-                    image[offset : offset + 2] = raw[reg_byte_offset : reg_byte_offset + 2]
-                    found_any = True
+                    image[reg_idx * 2 : reg_idx * 2 + 2] = (
+                        raw[reg_byte_offset : reg_byte_offset + 2]
+                    )
+                    covered[reg_idx] = 1
 
-    return bytes(image) if found_any else None
+    if not any(covered):
+        return None
+    if not all(covered):
+        # Partial coverage: do NOT return a half-zeroed image; let the
+        # caller forward the read to the inverter so consumers see real
+        # data or a clean Modbus error rather than fabricated zeros.
+        return None
+    return bytes(image)
 
 
-WRITE_LOCK_SECONDS: Final[float] = 5.0
 BATTERY_CONTROL_REGISTERS: Final[frozenset[int]] = frozenset({
     1034, 1038, 1040, 1042, 1044,  # Section 3.4 battery management
     1280, 1282, 1284, 1286, 1288,  # Section 3.5 G3 battery limits

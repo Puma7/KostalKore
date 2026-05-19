@@ -944,12 +944,22 @@ class SettingDataUpdateCoordinator(
         """Initialize with last-result fallback for 503 errors."""
         super().__init__(*args, **kwargs)
         self._last_result: Mapping[str, Mapping[str, str]] = {}
+        # NEU: TTL-Stempel parallel zu _last_result, damit der 503-Fallback
+        # nicht beliebig alte Settings weiterserviert (Konsistenz mit
+        # ProcessDataUpdateCoordinator._stale_cache_usable).
+        self._last_success_ts: float = 0.0
         self._init_adaptive_polling(
             default_base_seconds=30,
             max_interval_floor_seconds=300,
             max_interval_multiplier=8,
             failure_multiplier_cap=8,
         )
+
+    def _stale_cache_usable(self) -> bool:
+        """Return True if cached settings are within STALE_DATA_MAX_AGE_SECONDS."""
+        if not self._last_result or self._last_success_ts <= 0.0:
+            return False
+        return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         if (client := self._plenticore.client) is None:
@@ -974,6 +984,7 @@ class SettingDataUpdateCoordinator(
                 timeout=20.0,
             )
             self._last_result = result
+            self._last_success_ts = time.monotonic()  # NEU: TTL-Stempel
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy once settings communication recovers.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
@@ -991,8 +1002,9 @@ class SettingDataUpdateCoordinator(
 
             # Handle 503 errors (internal communication error)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
-                 # Fallback to last known data to avoid entity unavailability
-                 if self._last_result:
+                 # Fallback to last known data only while within stale-TTL,
+                 # otherwise the inverter could serve months-old switch states.
+                 if self._stale_cache_usable():
                      _LOGGER.warning(
                          "Inverter internal communication error (503) - using last known data for settings"
                      )
@@ -1056,6 +1068,16 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._history: deque[dict[str, Any]] = deque(maxlen=EVENT_HISTORY_MAX)
         self._last_signature_ts: dict[str, float] = {}
         self._last_result: dict[str, Any] = {}
+        # NEU: TTL-Stempel für Stale-Cache-Begrenzung im Fehlerpfad. Ohne TTL
+        # konnte ein altes Event-Snapshot beliebig lange "letztes Ereignis"
+        # melden, obwohl die Verbindung längst stand.
+        self._last_success_ts: float = 0.0
+
+    def _stale_cache_usable(self) -> bool:
+        """Return True if cached events are within STALE_DATA_MAX_AGE_SECONDS."""
+        if not self._last_result or self._last_success_ts <= 0.0:
+            return False
+        return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     @property
     def history(self) -> list[dict[str, Any]]:
@@ -1139,22 +1161,25 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
 
             self._last_result = result
+            self._last_success_ts = time.monotonic()  # NEU: TTL-Stempel
             return result
 
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                 _LOGGER.debug("Event fetch busy (503), using last event snapshot")
-                return self._last_result
+                # Only serve cached snapshot while within stale TTL; beyond
+                # that the data is too old to be a meaningful "last event".
+                return self._last_result if self._stale_cache_usable() else {}
             if isinstance(err, ApiException):
                 modbus_err = parse_modbus_exception(err)
                 _LOGGER.debug("Event fetch failed: %s", modbus_err.message)
             else:
                 _LOGGER.debug("Event fetch failed: %s", err)
-            return self._last_result
+            return self._last_result if self._stale_cache_usable() else {}
         except Exception as err:
             _LOGGER.debug("Event fetch failed unexpectedly: %s", err)
-            return self._last_result
+            return self._last_result if self._stale_cache_usable() else {}
 
 
 class PlenticoreSelectUpdateCoordinator(DataUpdateCoordinator[_DataT]):

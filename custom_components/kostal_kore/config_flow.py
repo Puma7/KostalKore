@@ -94,14 +94,28 @@ DATA_SCHEMA: Final[vol.Schema] = vol.Schema(
 
 
 def _installer_access_from_role(access_role: str, service_code: str | None) -> bool:
-    """Return whether the current authenticated role may write installer settings."""
+    """Return whether the current authenticated role may write installer settings.
+
+    Role is the source of truth. The service-code fallback only applies when
+    the firmware explicitly reports an empty or "UNKNOWN" role (older
+    pre-1.50 firmware) — not for any unrecognised string. This prevents
+    odd firmware-side role names ("INSTALLER_TRIAL", "GUEST_EXT", …) from
+    silently unlocking installer writes just because a service code was
+    typed in during setup.
+    """
     normalized = access_role.strip().upper()
     if normalized in {"INSTALLER", "SERVICE", "TECHNICIAN", "ADMIN"}:
         return True
     if normalized in {"USER", "GUEST", "ANONYMOUS"}:
         return False
-    # Fallback for unknown role names on older firmware generations.
-    return bool(service_code)
+    if normalized in {"", "UNKNOWN"}:
+        return bool(service_code)
+    _LOGGER.warning(
+        "Unrecognised inverter access role %r — denying installer writes; "
+        "report this role to the integration so it can be whitelisted",
+        access_role,
+    )
+    return False
 
 
 def _sanitize_auth_input(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -529,6 +543,9 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         self._pending_entry_data: dict[str, Any] = {}
         self._pending_entry_title: str = ""
         self._pending_options: dict[str, Any] = {}
+        # Tracks the most recent run_modbus_connection_test result so that
+        # Submit on the test step cannot bypass a failed test.
+        self._modbus_test_passed: bool = False
 
     @staticmethod
     @callback
@@ -603,18 +620,34 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Optional Modbus test before creating first config entry."""
+        host = str(self._pending_entry_data.get(CONF_HOST, ""))
+
         if user_input is not None:
-            return self.async_create_entry(
-                title=self._pending_entry_title,
-                data=self._pending_entry_data,
+            # Re-run the test on submit so that Submit cannot bypass a
+            # previously-failed result by simply clicking through the form.
+            test_passed, description = await run_modbus_connection_test(
+                host=host,
                 options=self._pending_options,
             )
+            self._modbus_test_passed = test_passed
+            if test_passed:
+                return self.async_create_entry(
+                    title=self._pending_entry_title,
+                    data=self._pending_entry_data,
+                    options=self._pending_options,
+                )
+            return self.async_show_form(
+                step_id="setup_modbus_test",
+                data_schema=vol.Schema({}),
+                description_placeholders={"test_result": description},
+                errors={"base": "modbus_test_failed"},
+            )
 
-        host = str(self._pending_entry_data.get(CONF_HOST, ""))
         test_passed, description = await run_modbus_connection_test(
             host=host,
             options=self._pending_options,
         )
+        self._modbus_test_passed = test_passed
         return self.async_show_form(
             step_id="setup_modbus_test",
             data_schema=vol.Schema({}),
@@ -738,10 +771,23 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Run Modbus test before saving options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=self._user_input)
-
         host = str(self.config_entry.data.get(CONF_HOST, ""))
+
+        if user_input is not None:
+            # Re-run the test on submit so Submit cannot bypass a failed test.
+            test_passed, description = await run_modbus_connection_test(
+                host=host,
+                options=self._user_input,
+            )
+            if test_passed:
+                return self.async_create_entry(title="", data=self._user_input)
+            return self.async_show_form(
+                step_id="modbus_test",
+                data_schema=vol.Schema({}),
+                description_placeholders={"test_result": description},
+                errors={"base": "modbus_test_failed"},
+            )
+
         test_passed, description = await run_modbus_connection_test(
             host=host,
             options=self._user_input,

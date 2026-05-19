@@ -684,3 +684,205 @@ async def test_qa7_process_data_timeout_preserves_exception_chain(
         "UpdateFailed must chain the original TimeoutError (not 'from None')"
     )
     assert isinstance(raised.__cause__, asyncio.TimeoutError)
+
+
+# ---------------------------------------------------------------------------
+# HIGH-02 — Modbus proxy must not zero-fill register gaps
+# ---------------------------------------------------------------------------
+
+def test_high02_proxy_partial_coverage_returns_none() -> None:
+    """Partial coverage of a read range must not return zero-filled bytes.
+
+    Returning fabricated zeros to evcc/EMS for unknown gaps led to wrong
+    energy decisions (export looked like idle). The fix returns None so
+    the proxy falls back to a real-inverter forward read.
+    """
+    from kostal_plenticore.modbus_proxy import _build_register_image
+    from kostal_plenticore.modbus_registers import (
+        ModbusRegister, DataType, Access, RegisterGroup,
+    )
+
+    reg_a = ModbusRegister(
+        100, "rega", "rega", DataType.UINT16, 1, Access.RO, RegisterGroup.POWER
+    )
+    reg_b = ModbusRegister(
+        102, "regb", "regb", DataType.UINT16, 1, Access.RO, RegisterGroup.POWER
+    )
+    with patch(
+        "kostal_plenticore.modbus_proxy._SORTED_REGISTERS",
+        [(100, reg_a), (102, reg_b)],
+    ):
+        # Range 100..102 — addr 101 has no register → gap → must be None.
+        assert _build_register_image(
+            100, 3, {"rega": 1, "regb": 2}, "little"
+        ) is None
+        # Full coverage of just the populated addresses works.
+        assert _build_register_image(100, 1, {"rega": 1}, "little") is not None
+        # Empty data → None.
+        assert _build_register_image(100, 1, {}, "little") is None
+
+
+# ---------------------------------------------------------------------------
+# HIGH-05 — SettingDataUpdateCoordinator stale-cache TTL
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_high05_settings_stale_cache_expires_after_ttl(hass: HomeAssistant) -> None:
+    """After STALE_DATA_MAX_AGE_SECONDS, 503 must no longer return cached data."""
+    from kostal_plenticore.coordinator import (
+        SettingDataUpdateCoordinator,
+        STALE_DATA_MAX_AGE_SECONDS,
+    )
+
+    entry = _mock_entry()
+    from kostal_plenticore.coordinator import Plenticore
+    p = Plenticore.__new__(Plenticore)
+    p.hass = hass
+    p.config_entry = entry
+    p._client = MagicMock()
+    p._client.get_setting_values = AsyncMock(
+        side_effect=ApiException("[503] internal communication error")
+    )
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = SettingDataUpdateCoordinator.__new__(SettingDataUpdateCoordinator)
+        coord.hass = hass
+        coord.logger = logging.getLogger(__name__)
+        coord.name = "settings-stale"
+        coord._fetch = {"devices:local": ["Battery:MinSoc"]}
+        coord._last_result = {"devices:local": {"Battery:MinSoc": "5"}}
+        coord._plenticore = p
+        coord.update_interval = timedelta(seconds=30)
+        coord._base_update_interval = timedelta(seconds=30)
+        coord._max_update_interval = timedelta(seconds=300)
+        coord._consecutive_failures = 0
+        coord._failure_multiplier_cap = 8
+
+    coord.async_contexts = lambda: iter([])
+
+    # Fresh ts → cache served.
+    import time as _time
+    coord._last_success_ts = _time.monotonic()
+    assert await coord._async_update_data() == {"devices:local": {"Battery:MinSoc": "5"}}
+
+    # Stale ts (beyond TTL) → cache NOT served; failure path returns {}.
+    coord._last_success_ts = _time.monotonic() - STALE_DATA_MAX_AGE_SECONDS - 1
+    with patch(
+        "kostal_plenticore.coordinator.create_inverter_busy_issue",
+        MagicMock(),
+    ):
+        result = await coord._async_update_data()
+    assert result == {}, "Stale-TTL must drop expired settings cache"
+
+
+# ---------------------------------------------------------------------------
+# HIGH-06 — EventDataUpdateCoordinator stale-cache TTL
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_high06_event_stale_cache_expires_after_ttl(hass: HomeAssistant) -> None:
+    """Beyond STALE_DATA_MAX_AGE_SECONDS, error path must not serve old events."""
+    from kostal_plenticore.coordinator import (
+        EventDataUpdateCoordinator,
+        STALE_DATA_MAX_AGE_SECONDS,
+    )
+    from kostal_plenticore.coordinator import Plenticore
+    from collections import deque
+
+    entry = _mock_entry()
+    p = Plenticore.__new__(Plenticore)
+    p.hass = hass
+    p.config_entry = entry
+    p._client = MagicMock()
+    p._client.get_events = AsyncMock(
+        side_effect=ApiException("[503] internal communication error")
+    )
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = EventDataUpdateCoordinator.__new__(EventDataUpdateCoordinator)
+        coord.hass = hass
+        coord.logger = logging.getLogger(__name__)
+        coord.name = "events-stale"
+        coord._plenticore = p
+        coord._history = deque()
+        coord._last_signature_ts = {}
+        coord._last_result = {"last_event_code": 42}
+        coord.update_interval = timedelta(seconds=30)
+
+    import time as _time
+    # Fresh → cache served.
+    coord._last_success_ts = _time.monotonic()
+    assert await coord._async_update_data() == {"last_event_code": 42}
+    # Stale → empty dict, not old snapshot.
+    coord._last_success_ts = _time.monotonic() - STALE_DATA_MAX_AGE_SECONDS - 1
+    assert await coord._async_update_data() == {}
+
+
+# ---------------------------------------------------------------------------
+# HIGH-07 — async_remove_config_entry_device refuses primary device
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_high07_remove_primary_device_refused(hass: HomeAssistant) -> None:
+    """Primary inverter device must not be removable while entry is active.
+
+    Stale auxiliary devices (different identifier) remain removable.
+    """
+    import kostal_plenticore as kore_init
+    from kostal_plenticore.coordinator import Plenticore
+
+    entry = _mock_entry()
+    plenticore = MagicMock(spec=Plenticore)
+    plenticore._get_persistent_device_id.return_value = "serial-1234"
+    entry.runtime_data = plenticore  # type: ignore[attr-defined]
+
+    from kostal_plenticore.const import DOMAIN
+
+    primary_device = SimpleNamespace(
+        identifiers={(DOMAIN, "serial-1234")},
+    )
+    stale_device = SimpleNamespace(
+        identifiers={(DOMAIN, "old-host")},
+    )
+
+    assert await kore_init.async_remove_config_entry_device(
+        hass, entry, primary_device,
+    ) is False, "primary device must be protected"
+    assert await kore_init.async_remove_config_entry_device(
+        hass, entry, stale_device,
+    ) is True, "auxiliary/stale devices remain removable"
+
+    # When the entry has no runtime_data (already unloaded), allow removal.
+    entry.runtime_data = None  # type: ignore[attr-defined]
+    assert await kore_init.async_remove_config_entry_device(
+        hass, entry, primary_device,
+    ) is True
+
+
+# ---------------------------------------------------------------------------
+# HIGH-08 — Installer access only via known role or explicit UNKNOWN/empty
+# ---------------------------------------------------------------------------
+
+def test_high08_installer_access_rejects_unrecognised_role() -> None:
+    """Unrecognised role strings must NOT unlock writes even with service code."""
+    import kostal_plenticore.config_flow as cf
+
+    # Whitelisted roles → True regardless of service code.
+    assert cf._installer_access_from_role("INSTALLER", None) is True
+    assert cf._installer_access_from_role("SERVICE", None) is True
+    # User roles → always False.
+    assert cf._installer_access_from_role("USER", "1234") is False
+    # Only literal UNKNOWN / empty falls back to service code.
+    assert cf._installer_access_from_role("UNKNOWN", "1234") is True
+    assert cf._installer_access_from_role("", "1234") is True
+    assert cf._installer_access_from_role("UNKNOWN", None) is False
+    # Random unrecognised strings → denied even with service code.
+    assert cf._installer_access_from_role("INSTALLER_TRIAL", "1234") is False
+    assert cf._installer_access_from_role("GUEST_EXT", "1234") is False
+    assert cf._installer_access_from_role("mystery", "1234") is False
