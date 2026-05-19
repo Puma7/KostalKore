@@ -924,3 +924,49 @@ mock_modbus_coord._restore_isolation_sample = AsyncMock()
 
 ### Lesson
 `MagicMock` auto-creates child attributes as `MagicMock` instances, which are not awaitable. When testing async code that `await`s a method on a mock, always set that method to `AsyncMock()` explicitly — or use `AsyncMock` as the top-level mock class if all methods are async.
+
+---
+
+## 43) Migration system audit: 5 bugs found, all fixed
+
+A structured audit of `legacy_migration.py` and `migration_services.py` exposed the following bugs.
+
+### Bug A — Device identifier not rewritten (caused duplicate device in UI)
+
+**Symptom:** After migration the user saw two inverter device cards — one labeled with the legacy domain, one with KORE.
+
+**Root cause:** `async_update_device(..., add_config_entry_id=target_entry.entry_id)` adds the KORE config entry to the legacy device, but the device's `identifiers` tuple still contains `("kostal_plenticore", serial)`. KORE's coordinator calls `async_get_or_create(identifiers={("kostal_kore", serial)})` and, finding no match, creates a second device.
+
+**Fix:** Before the config-entry update call, make a separate `async_update_device(..., merge_identifiers={(DOMAIN, serial)})` call to add the KORE identifier while keeping the legacy one (for the test phase where both run). `finalize_legacy_cleanup` then uses `new_identifiers=cleaned_ids` to replace all legacy-domain identifiers with KORE-domain identifiers.
+
+### Bug B — Legacy integration recreated its entities immediately after rebind
+
+**Symptom:** After `adopt_legacy_entity_ids`, the loaded legacy integration ran its next coordinator refresh and called `async_get_or_create` for entities whose unique_ids had been rewritten away → fresh duplicate entities with `_2` suffix entity_ids appeared.
+
+**Fix:** Added `await hass.config_entries.async_unload(source_entry.entry_id)` after rebind and before `async_reload(target_entry.entry_id)`. The legacy entry stays in the config entry registry (visible in HA UI, re-enableable) but its integration is unloaded so it cannot spawn new entities. This does not apply when `remove_source_entry=True` (already handled by `async_remove`).
+
+### Bug C — `_merge_statistics_metadata` hits UNIQUE constraint on commit (data corruption risk)
+
+**Symptom:** First revealed by real-SQLite tests: `sqlite3.IntegrityError: UNIQUE constraint failed: statistics_meta.statistic_id`.
+
+**Root cause:** The code did `session.delete(new_meta)` followed by `old_meta.statistic_id = new_entity_id` in the same flush. SQLAlchemy's unit-of-work applied the ORM UPDATE before the DELETE, causing both rows to temporarily share the same `statistic_id` → UNIQUE violation → rollback → **no data transferred at all.**
+
+**Fix:** Added `session.flush()` immediately after `session.delete(matching_new)` to force the DELETE to the DB before the rename UPDATE. This is the minimal safe ordering.
+
+**Lesson:** SQLAlchemy ORM does not guarantee DELETE-before-UPDATE ordering within a single flush. When a DELETE and an UPDATE must be ordered due to UNIQUE constraints, always use an explicit `session.flush()` between them.
+
+### Bug D — No real-DB test coverage for SQL merge functions
+
+**Symptom:** All recorder merge tests used `MagicMock` — they verified call signatures but never executed the actual SQL. Bug C survived code review and three AI audit passes because no test ran the SQL against a real SQLite schema.
+
+**Fix:** Added 5 synchronous tests in `test_migration_services.py` that create an in-memory SQLite DB using `Base.metadata.create_all(engine)`, insert real ORM rows, and execute the merge helpers directly.
+
+**Lesson:** For any code that manipulates DB rows (even via ORM), write at least one test that runs against a real in-memory DB. Mock tests can verify call order and arguments but cannot catch constraint violations, wrong column names, or incorrect join semantics.
+
+### Bug E — `_rewrite_unique_id` silent failure when format differs
+
+**Symptom:** If the legacy integration was installed before HA 2022.10 (when entity unique-id format changed), unique_ids don't start with `entry_id_`. The rewrite silently returns the unchanged ID, the entity finds no duplicate, and is not rebound. No history is transferred and no error is logged.
+
+**Fix:** Added a `_LOGGER.warning(...)` when `result.migrated_entities == 0` after migration. The warning explicitly mentions the `{entry_id}_*` format assumption.
+
+**Lesson:** Any function that silently skips items when a pre-condition isn't met should log a warning at the call site when the result is surprising (zero items processed from a non-empty source is always worth a warning).

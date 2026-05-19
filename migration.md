@@ -40,7 +40,8 @@ At this point, both old and new integration entries can coexist temporarily.
 What this does:
 - Imports legacy config/options into the KORE entry.
 - Rebinds legacy entities/devices to KORE.
-- Keeps the old legacy entry for safety.
+- Adds the KORE domain identifier to the legacy device so KORE sees it as the same device (prevents a second duplicate device card appearing in the UI).
+- Unloads (but does not delete) the old legacy entry so it cannot recreate empty entities alongside the rebound ones. The legacy entry stays in your config entry registry and can be re-enabled from the UI if needed.
 
 What to expect:
 - A persistent notification with migrated entity/device counts.

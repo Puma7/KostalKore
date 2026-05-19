@@ -731,3 +731,231 @@ async def test_remaining_helper_and_service_branches(hass: HomeAssistant) -> Non
     async_register_migration_services(hass)
     assert hass.services.has_service(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS)
     assert hass.services.has_service(DOMAIN, SERVICE_COPY_LEGACY_HISTORY)
+
+
+# ---------------------------------------------------------------------------
+# Real SQLite recorder tests — exercise the actual SQL merge logic
+# ---------------------------------------------------------------------------
+
+def _make_sqlite_session():
+    """Return a (engine, Session class) pair backed by an in-memory SQLite DB."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from homeassistant.components.recorder.db_schema import Base
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return engine, Session
+
+
+def test_merge_states_metadata_merges_old_history_into_new_entity():
+    """Old StatesMeta row is renamed and its States rows all end up under new entity_id."""
+    from sqlalchemy import select as sa_select
+    from homeassistant.components.recorder.db_schema import States, StatesMeta
+
+    engine, Session = _make_sqlite_session()
+
+    with Session(engine) as session:
+        old_meta = StatesMeta(entity_id="sensor.old_entity")
+        new_meta = StatesMeta(entity_id="sensor.new_entity")
+        session.add_all([old_meta, new_meta])
+        session.flush()
+        old_meta_id = old_meta.metadata_id
+
+        session.add_all([
+            States(metadata_id=old_meta_id, entity_id="sensor.old_entity"),
+            States(metadata_id=new_meta.metadata_id, entity_id="sensor.new_entity"),
+        ])
+        session.commit()
+
+    with Session(engine) as session:
+        moved, rebound = _merge_states_metadata(
+            session, old_entity_id="sensor.old_entity", new_entity_id="sensor.new_entity"
+        )
+        session.commit()
+
+    with Session(engine) as session:
+        metas = session.execute(sa_select(StatesMeta)).scalars().all()
+        assert len(metas) == 1
+        assert metas[0].entity_id == "sensor.new_entity"
+        assert metas[0].metadata_id == old_meta_id
+
+        states = session.execute(sa_select(States)).scalars().all()
+        assert len(states) == 2
+        assert all(s.entity_id == "sensor.new_entity" for s in states)
+        assert all(s.metadata_id == old_meta_id for s in states)
+
+    assert moved == 1
+    assert rebound is True
+
+
+def test_merge_states_metadata_returns_false_when_old_meta_absent():
+    """Returns (0, False) immediately when the old entity has no States history at all."""
+    from sqlalchemy import select as sa_select
+    from homeassistant.components.recorder.db_schema import States, StatesMeta
+
+    engine, Session = _make_sqlite_session()
+
+    with Session(engine) as session:
+        new_meta = StatesMeta(entity_id="sensor.new_entity")
+        session.add(new_meta)
+        session.flush()
+        session.add(States(metadata_id=new_meta.metadata_id, entity_id="sensor.new_entity"))
+        session.commit()
+
+    with Session(engine) as session:
+        moved, rebound = _merge_states_metadata(
+            session, old_entity_id="sensor.missing", new_entity_id="sensor.new_entity"
+        )
+        session.commit()
+
+    assert moved == 0
+    assert rebound is False
+
+    # new entity's history must be untouched
+    with Session(engine) as session:
+        assert session.execute(sa_select(StatesMeta)).scalars().one().entity_id == "sensor.new_entity"
+
+
+def test_merge_statistics_metadata_merges_rows_into_new_entity():
+    """Statistics rows from old metadata_id are reassigned to new entity after merge."""
+    from sqlalchemy import select as sa_select
+    from homeassistant.components.recorder.db_schema import Statistics, StatisticsMeta, StatisticsShortTerm
+
+    engine, Session = _make_sqlite_session()
+
+    with Session(engine) as session:
+        old_meta = StatisticsMeta(
+            source="recorder",
+            statistic_id="sensor.old_entity",
+            unit_of_measurement="W",
+            has_mean=True,
+            has_sum=False,
+        )
+        new_meta = StatisticsMeta(
+            source="recorder",
+            statistic_id="sensor.new_entity",
+            unit_of_measurement="W",
+            has_mean=True,
+            has_sum=False,
+        )
+        session.add_all([old_meta, new_meta])
+        session.flush()
+        old_meta_id = old_meta.id
+
+        session.add_all([
+            Statistics(metadata_id=old_meta_id, start_ts=1000.0),
+            Statistics(metadata_id=new_meta.id, start_ts=2000.0),
+        ])
+        session.commit()
+
+    with Session(engine) as session:
+        stats_moved, short_term_moved, rebound = _merge_statistics_metadata(
+            session, old_entity_id="sensor.old_entity", new_entity_id="sensor.new_entity"
+        )
+        session.commit()
+
+    with Session(engine) as session:
+        metas = session.execute(sa_select(StatisticsMeta)).scalars().all()
+        assert len(metas) == 1
+        assert metas[0].statistic_id == "sensor.new_entity"
+        assert metas[0].id == old_meta_id
+
+        all_stats = session.execute(sa_select(Statistics)).scalars().all()
+        assert len(all_stats) == 2
+        assert all(s.metadata_id == old_meta_id for s in all_stats)
+
+    assert stats_moved == 1
+    assert short_term_moved == 0
+    assert rebound is True
+
+
+def test_merge_statistics_metadata_skips_on_unit_mismatch():
+    """Merge is skipped without corrupting either row when units differ between old and new."""
+    from sqlalchemy import select as sa_select
+    from homeassistant.components.recorder.db_schema import StatisticsMeta
+
+    engine, Session = _make_sqlite_session()
+
+    with Session(engine) as session:
+        session.add_all([
+            StatisticsMeta(
+                source="recorder",
+                statistic_id="sensor.old_entity",
+                unit_of_measurement="Wh",
+                has_mean=False,
+                has_sum=True,
+            ),
+            StatisticsMeta(
+                source="recorder",
+                statistic_id="sensor.new_entity",
+                unit_of_measurement="kWh",
+                has_mean=False,
+                has_sum=True,
+            ),
+        ])
+        session.commit()
+
+    with Session(engine) as session:
+        stats_moved, short_term_moved, rebound = _merge_statistics_metadata(
+            session, old_entity_id="sensor.old_entity", new_entity_id="sensor.new_entity"
+        )
+        session.commit()
+
+    assert stats_moved == 0
+    assert short_term_moved == 0
+    assert rebound is False
+
+    # Both metadata rows must survive intact
+    with Session(engine) as session:
+        ids = {m.statistic_id for m in session.execute(sa_select(StatisticsMeta)).scalars()}
+    assert ids == {"sensor.old_entity", "sensor.new_entity"}
+
+
+def test_merge_statistics_metadata_deduplicates_overlapping_timestamps():
+    """When old and new rows share a start_ts, old row wins (new duplicate deleted)."""
+    from sqlalchemy import select as sa_select
+    from homeassistant.components.recorder.db_schema import Statistics, StatisticsMeta
+
+    engine, Session = _make_sqlite_session()
+
+    with Session(engine) as session:
+        old_meta = StatisticsMeta(
+            source="recorder",
+            statistic_id="sensor.old_entity",
+            unit_of_measurement="W",
+            has_mean=True,
+            has_sum=False,
+        )
+        new_meta = StatisticsMeta(
+            source="recorder",
+            statistic_id="sensor.new_entity",
+            unit_of_measurement="W",
+            has_mean=True,
+            has_sum=False,
+        )
+        session.add_all([old_meta, new_meta])
+        session.flush()
+
+        # Both have a row at start_ts=1000 — old row takes priority
+        session.add_all([
+            Statistics(metadata_id=old_meta.id, start_ts=1000.0),
+            Statistics(metadata_id=new_meta.id, start_ts=1000.0),
+            Statistics(metadata_id=new_meta.id, start_ts=2000.0),
+        ])
+        session.commit()
+
+    with Session(engine) as session:
+        stats_moved, _, _ = _merge_statistics_metadata(
+            session, old_entity_id="sensor.old_entity", new_entity_id="sensor.new_entity"
+        )
+        session.commit()
+
+    with Session(engine) as session:
+        remaining = session.execute(sa_select(Statistics)).scalars().all()
+        # 3 inserted, 1 deleted (new's start_ts=1000 collides), 1 moved (start_ts=2000) = 2 rows
+        assert len(remaining) == 2
+        start_ts_values = {r.start_ts for r in remaining}
+        assert start_ts_values == {1000.0, 2000.0}
+
+    assert stats_moved == 1

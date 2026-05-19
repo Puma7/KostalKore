@@ -459,6 +459,10 @@ def _merge_statistics_metadata(
                 new_metadata_id=new_meta_id,
             )
             session.delete(matching_new)
+            # Flush the delete before renaming old_meta to avoid a transient
+            # UNIQUE constraint violation: both rows would share statistic_id
+            # inside the same flush if we don't force the DELETE first.
+            session.flush()
         old_meta.statistic_id = new_entity_id
         rebound_done = True
 
