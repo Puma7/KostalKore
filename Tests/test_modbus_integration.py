@@ -170,7 +170,19 @@ async def test_options_flow_modbus_test_confirm_saves(
         "mqtt_bridge_enabled": False,
     }
 
-    result = await flow.async_step_modbus_test(user_input={})
+    # HIGH-01 fix: Submit re-runs run_modbus_connection_test, so the Modbus
+    # client must be mocked to succeed for this re-run too.
+    with patch(
+        "custom_components.kostal_kore.modbus_client.KostalModbusClient",
+    ) as MockClient:
+        instance = AsyncMock()
+        instance.connect = AsyncMock()
+        instance.detect_endianness = AsyncMock(return_value="little")
+        instance.read_register = AsyncMock(return_value="PLENTICORE")
+        instance.disconnect = AsyncMock()
+        MockClient.return_value = instance
+
+        result = await flow.async_step_modbus_test(user_input={})
 
     assert result["type"] == "create_entry"
     assert result["data"]["modbus_enabled"] is True
