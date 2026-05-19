@@ -263,14 +263,15 @@ async def test_coordinator_mixins_and_update_error_paths(hass: HomeAssistant) ->
     assert await select._async_update_data() == {}
 
     p._client = MagicMock()
-    with patch.object(select, "async_read_data", AsyncMock(side_effect=[{}, {"devices:local": {"B": "1"}}])):
-        assert await select._async_get_current_option(select._fetch) == {
-            "devices:local": {"Battery:Mode": "B"}
-        }
-    with patch.object(select, "async_read_data", AsyncMock(return_value={})):
-        assert await select._async_get_current_option(select._fetch) == {
-            "devices:local": {"Battery:Mode": "None"}
-        }
+    # Batch select read: client.get_setting_values({mid: [ids]}) is the new API.
+    p._client.get_setting_values = AsyncMock(return_value={"devices:local": {"B": "1"}})
+    assert await select._async_get_current_option(select._fetch) == {
+        "devices:local": {"Battery:Mode": "B"}
+    }
+    p._client.get_setting_values = AsyncMock(return_value={"devices:local": {}})
+    assert await select._async_get_current_option(select._fetch) == {
+        "devices:local": {"Battery:Mode": "None"}
+    }
 
 
 @pytest.mark.asyncio
