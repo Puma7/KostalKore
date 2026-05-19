@@ -831,3 +831,96 @@ fixes, especially for fixes that:
 The Red Team auditor must have read-only access to primary evidence (hardware
 logs, official firmware docs) and must be instructed to *challenge* the fixes,
 not validate them.
+
+---
+
+## 38) `RegistryEntry.unit_of_measurement` is the correct attribute for persisted unit checks
+
+### What happened
+`__init__.py` migration check used `_entry_reg.unit_of_measurement or _entry_reg.original_unit_of_measurement` to read the effective unit from the entity registry. mypy (strict mode) reported `"RegistryEntry" has no attribute "original_unit_of_measurement"` — and it was correct. The `original_unit_of_measurement` attribute does not exist on the HA version range this integration targets.
+
+### What is true
+`RegistryEntry.unit_of_measurement` holds the effective persisted unit: it is the user override if one was set, or the unit provided at first entity registration otherwise. There is no separate `original_unit_of_measurement` field to fall back to.
+
+### Lesson
+When checking what unit an entity currently reports in the entity registry, `entry.unit_of_measurement` is sufficient and correct. Do not add a fallback to `original_unit_of_measurement` — it does not exist and the fallback logic would silently be dead code at best, an `AttributeError` at worst.
+
+---
+
+## 39) Isolate entity registry pre-fill from HA platform setup when testing migration checks
+
+### What happened
+A test pre-filled the entity registry with `unit_of_measurement="Wh"` and then ran a full `config_entries.async_setup`. The migration check (which runs before `async_forward_entry_setups`) was expected to see "Wh" and call `clear_issue`. Instead it saw a different unit, causing the wrong branch to execute.
+
+### Root cause
+During the full setup path, HA's platform machinery calls `async_get_or_create` for entities as it discovers them. This updates internal registry fields. Even though the migration check runs *before* `async_forward_entry_setups`, something in `Plenticore.async_setup()` (the real client) touched the registry between pre-fill and the migration check.
+
+### Fix
+Use a `_DummyPlenticore` stub + call `async_setup_entry` directly instead of going through `hass.config_entries.async_setup`. Patch `async_forward_entry_setups` to `AsyncMock(return_value=True)` to skip platform setup entirely. Nothing touches the entity registry during `DummyPlenticore.async_setup()`, so the pre-fill state is stable at migration-check time.
+
+### Pattern
+```python
+with patch("custom_components.kostal_kore.__init__.Plenticore", _DummyPlenticore), \
+     patch("homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+           AsyncMock(return_value=True)):
+    assert await kp_init.async_setup_entry(hass, mock_config_entry) is True
+```
+
+---
+
+## 40) Use a list (not a set) when iterating identifiers in branch-coverage tests
+
+### What happened
+`__init__.py` iterates `device_info["identifiers"]` to find the first tuple where `domain == DOMAIN`. To cover the "loop continues past a non-matching identifier" branch, the test needs to guarantee that a non-matching tuple comes *first*. Sets have no guaranteed iteration order, so a `set` of two tuples might be tested in either order depending on CPython's hash randomisation.
+
+### Fix
+Pass `identifiers` as a `list` in tests where iteration order matters:
+```python
+identifiers = [("other_domain", "ignored"), (DOMAIN, "SN-99999")]
+```
+`DeviceInfo` stores identifiers in a `TypedDict` with no runtime type enforcement, so a list is accepted. The for loop in `__init__.py` iterates any iterable, making this safe at runtime.
+
+### Lesson
+When writing branch-coverage tests for code that loops over a set, replace the set with an ordered iterable (list or tuple) so the test deterministically exercises the intended path. This is intentional duck-typing — keep a comment explaining why.
+
+---
+
+## 41) `BatterySocController` runs even inside `# pragma: no cover` blocks
+
+### What happened
+`__init__.py` contains:
+```python
+if modbus_coordinator is not None:  # pragma: no cover
+    ...
+    soc_controller = BatterySocController(...)
+```
+The `# pragma: no cover` tells the *coverage tool* to skip this block. It does not prevent the block from *executing* at runtime. Tests using `_DummyPlenticore` that also mock `ModbusDataUpdateCoordinator` will trigger this block, causing the real `BatterySocController` constructor to receive a `MagicMock` coordinator.
+
+### Fix
+Always patch `BatterySocController` at the source module level in any test that uses `_DummyPlenticore` with a mocked Modbus coordinator:
+```python
+patch("custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+      return_value=mock_soc)
+```
+
+### Lesson
+`# pragma: no cover` is a coverage reporting directive, not a runtime guard. Treat any code inside a `pragma: no cover` block as executable — it will run in tests unless the relevant conditions are also mocked out.
+
+---
+
+## 42) `_restore_isolation_sample` must be `AsyncMock` when mocking the Modbus coordinator
+
+### What happened
+`__init__.py` does `await modbus_coordinator._restore_isolation_sample()` during setup. A plain `MagicMock()` attribute is not awaitable; awaiting it raises `TypeError: object MagicMock can't be used in 'await' expression`.
+
+### Fix
+When constructing a mock Modbus coordinator for tests, set all awaited methods explicitly:
+```python
+mock_modbus_coord = MagicMock()
+mock_modbus_coord.async_setup = AsyncMock()
+mock_modbus_coord.async_shutdown = AsyncMock()
+mock_modbus_coord._restore_isolation_sample = AsyncMock()
+```
+
+### Lesson
+`MagicMock` auto-creates child attributes as `MagicMock` instances, which are not awaitable. When testing async code that `await`s a method on a mock, always set that method to `AsyncMock()` explicitly — or use `AsyncMock` as the top-level mock class if all methods are async.

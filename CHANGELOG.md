@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.10-rc.4] — 2026-05-19 — 100% Branch Coverage
+
+Final push to reach enforced 100% branch + statement coverage on all measured
+files. Includes a latent runtime bug fix in the migration check.
+
+### Fixed
+- **`__init__.py` migration check**: Removed reference to
+  `RegistryEntry.original_unit_of_measurement` which does not exist on the
+  supported HA version range. `unit_of_measurement` alone is the correct
+  attribute — it already holds the effective persisted unit (user override or
+  first-registration value). The original code was a latent `AttributeError`
+  waiting to fire on any installation that had migrated a WorkCapacity entity.
+- **mypy**: Zero errors after the `original_unit_of_measurement` removal.
+
+### Tests
+- **`test_init.py`**: Added 2 migration-check tests covering both branches of
+  the WorkCapacity unit check (Ah → issue created; Wh → issue cleared). The
+  "clear" path uses `_DummyPlenticore` + direct `async_setup_entry` call to
+  prevent HA's platform setup stack from touching the entity registry between
+  pre-fill and the migration check.
+- **`test_modbus_integration.py`**: Added 4 tests covering previously-missed
+  branches: MQTT bridge with empty identifiers (device_id falls back to
+  entry_id), MQTT bridge with a non-matching identifier before a matching one
+  (loop-continues path), `_async_options_updated` when entry_data is absent,
+  and `_async_options_updated` when options changed since last setup.
+
 ## [2.16.10-rc.3] — 2026-03-29 — CI Fixes, Test Coverage, QA Regression Fixes
 
 Third pass: CI compliance (mypy, test coverage 100%), plus self-review
