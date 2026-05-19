@@ -467,15 +467,16 @@ async def test_process_setting_event_and_select_remaining_edges(
         plenticore,
     )
     select.stop_fetch_data("missing:module", "Mode", ["A", "None"])
-    with patch.object(
-        select,
-        "async_read_data",
-        AsyncMock(return_value={"devices:local": {"A": "1"}}),
-    ):
-        result = await select._async_get_current_option(
-            {
-                "devices:local:empty": {},
-                "devices:local:filled": {"Mode": ["A", "None"]},
-            }
-        )
+    # Batch-read coordinator queries client.get_setting_values({mid: [ids]}) once
+    # per module; return "A"=1 only for the "filled" module so the empty module
+    # path is also exercised.
+    plenticore._client.get_setting_values = AsyncMock(
+        return_value={"devices:local:filled": {"A": "1"}}
+    )
+    result = await select._async_get_current_option(
+        {
+            "devices:local:empty": {},
+            "devices:local:filled": {"Mode": ["A", "None"]},
+        }
+    )
     assert result == {"devices:local:filled": {"Mode": "A"}}

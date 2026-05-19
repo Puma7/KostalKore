@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -184,9 +185,11 @@ async def test_coordinator_mixins_and_update_error_paths(hass: HomeAssistant) ->
     with pytest.raises(UpdateFailed):
         await proc._async_update_data()
     proc._last_result = {"devices:local": {"P": "123"}}
+    proc._last_success_ts = time.monotonic()  # stale-cache TTL requires fresh ts
     p._client.get_process_data_values = AsyncMock(side_effect=asyncio.TimeoutError())
     assert await proc._async_update_data() == {"devices:local": {"P": "123"}}
     proc._last_result = {}
+    proc._last_success_ts = 0.0
 
     p._client.get_process_data_values = AsyncMock(side_effect=ApiException("[503] internal communication error"))
     with pytest.raises(UpdateFailed):

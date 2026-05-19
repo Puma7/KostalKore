@@ -287,12 +287,14 @@ async def test_select_coordinator_fetch_snapshot_prevents_mutation_runtime_error
         }
     }
 
-    async def _mutating_read(_module_id: str, _data_id: str):
+    async def _mutating_batch_read(_fetch_arg):
+        # Mutate _fetch mid-update; snapshot at the top of _async_update_data
+        # must prevent the iteration from seeing it.
         coordinator.stop_fetch_data("devices:local", "ModeB", ["Opt2", "None"])
         return {}
 
-    with patch.object(coordinator, "async_read_data", AsyncMock(side_effect=_mutating_read)):
-        result = await coordinator._async_update_data()
+    plenticore.client.get_setting_values = AsyncMock(side_effect=_mutating_batch_read)
+    result = await coordinator._async_update_data()
 
     assert result["devices:local"]["ModeA"] == "None"
     assert result["devices:local"]["ModeB"] == "None"
