@@ -310,7 +310,8 @@ async def test_reconfigure_updates_entry_with_access_profile(
 
     mock_apiclient_class.assert_called_once_with(ANY, "1.1.1.1")
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "reconfigure_successful"
+    # HA < 2024.4 uses "reauth_successful"; 2024.4+ uses "reconfigure_successful"
+    assert result["reason"] in ("reconfigure_successful", "reauth_successful")
     assert mock_config_entry.data[CONF_HOST] == "1.1.1.1"
     assert mock_config_entry.data["access_role"] == "INSTALLER"
     assert mock_config_entry.data["installer_access"] is True

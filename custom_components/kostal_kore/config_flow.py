@@ -103,7 +103,7 @@ def _installer_access_from_role(access_role: str, service_code: str | None) -> b
     silently unlocking installer writes just because a service code was
     typed in during setup.
     """
-    normalized = access_role.strip().upper()
+    normalized = (access_role or "").strip().upper()
     if normalized in {"INSTALLER", "SERVICE", "TECHNICIAN", "ADMIN"}:
         return True
     if normalized in {"USER", "GUEST", "ANONYMOUS"}:
@@ -669,8 +669,18 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors = _handle_config_flow_error(err, "reconfigure")
             else:
                 self._async_abort_entries_match({CONF_HOST: connection_result.host})
+                # _get_reconfigure_entry() was added in HA 2024.4; inline it so
+                # the integration works on HA >= 2024.1 (our declared minimum).
+                _entry_id = self.context.get("entry_id")
+                _reconf_entry = (
+                    self.hass.config_entries.async_get_entry(_entry_id)
+                    if _entry_id
+                    else None
+                )
+                if _reconf_entry is None:
+                    return self.async_abort(reason="unknown_error")
                 return self.async_update_reload_and_abort(
-                    entry=self._get_reconfigure_entry(),
+                    entry=_reconf_entry,
                     title=connection_result.hostname,
                     data=_build_entry_data(auth_input, connection_result),
                 )

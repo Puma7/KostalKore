@@ -158,14 +158,23 @@ async def test_event_coordinator_fallback_paths(hass: HomeAssistant) -> None:
 
     entry = _entry()
     plenticore = Plenticore(hass, entry)
-    coordinator = EventDataUpdateCoordinator(
-        hass,
-        entry,
-        logging.getLogger(__name__),
-        "events",
-        timedelta(seconds=30),
-        plenticore,
-    )
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coordinator = EventDataUpdateCoordinator.__new__(EventDataUpdateCoordinator)
+        coordinator.hass = hass
+        coordinator.logger = logging.getLogger(__name__)
+        coordinator.name = "events"
+        coordinator.data = None
+        coordinator._listeners = {}
+        coordinator._unsub_refresh = None
+        coordinator.last_update_success = True
+        coordinator.update_interval = timedelta(seconds=30)
+        EventDataUpdateCoordinator.__init__(
+            coordinator, hass, entry, coordinator.logger, coordinator.name,
+            coordinator.update_interval, plenticore,
+        )
 
     coordinator._last_result = {"cached": True}
     plenticore._client = None
@@ -396,14 +405,22 @@ async def test_process_setting_event_and_select_remaining_edges(
     plenticore._client = MagicMock()
     plenticore.hass = None
 
-    proc = ProcessDataUpdateCoordinator(
-        hass,
-        entry,
-        logging.getLogger(__name__),
-        "proc-edge",
-        timedelta(seconds=10),
-        plenticore,
-    )
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        proc = ProcessDataUpdateCoordinator.__new__(ProcessDataUpdateCoordinator)
+        proc.hass = hass
+        proc.logger = logging.getLogger(__name__)
+        proc.name = "proc-edge"
+        proc.data = None
+        proc._listeners = {}
+        proc._unsub_refresh = None
+        proc.last_update_success = True
+        proc.update_interval = timedelta(seconds=10)
+        ProcessDataUpdateCoordinator.__init__(
+            proc, hass, entry, proc.logger, proc.name, proc.update_interval, plenticore,
+        )
     proc._fetch = {"devices:local": ["P"]}
     plenticore._client.get_process_data_values = AsyncMock(
         return_value={"devices:local": {"P": SimpleNamespace(value="1")}}
@@ -429,28 +446,44 @@ async def test_process_setting_event_and_select_remaining_edges(
     )
     assert await proc._async_update_data() == {"cached": "503"}
 
-    settings = SettingDataUpdateCoordinator(
-        hass,
-        entry,
-        logging.getLogger(__name__),
-        "settings-edge",
-        timedelta(seconds=10),
-        plenticore,
-    )
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        settings = SettingDataUpdateCoordinator.__new__(SettingDataUpdateCoordinator)
+        settings.hass = hass
+        settings.logger = logging.getLogger(__name__)
+        settings.name = "settings-edge"
+        settings.data = None
+        settings._listeners = {}
+        settings._unsub_refresh = None
+        settings.last_update_success = True
+        settings.update_interval = timedelta(seconds=10)
+        SettingDataUpdateCoordinator.__init__(
+            settings, hass, entry, settings.logger, settings.name, settings.update_interval, plenticore,
+        )
     settings._fetch = {"devices:local": ["Battery:MinSoc"]}
     plenticore._client.get_setting_values = AsyncMock(
         return_value={"devices:local": {"Battery:MinSoc": "8"}}
     )
     assert await settings._async_update_data() == {"devices:local": {"Battery:MinSoc": "8"}}
 
-    events = EventDataUpdateCoordinator(
-        hass,
-        entry,
-        logging.getLogger(__name__),
-        "events-edge",
-        timedelta(seconds=10),
-        plenticore,
-    )
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        events = EventDataUpdateCoordinator.__new__(EventDataUpdateCoordinator)
+        events.hass = hass
+        events.logger = logging.getLogger(__name__)
+        events.name = "events-edge"
+        events.data = None
+        events._listeners = {}
+        events._unsub_refresh = None
+        events.last_update_success = True
+        events.update_interval = timedelta(seconds=10)
+        EventDataUpdateCoordinator.__init__(
+            events, hass, entry, events.logger, events.name, events.update_interval, plenticore,
+        )
     # Stale TTL fix (HIGH-06): cache return requires a recent _last_success_ts.
     import time as _time_mod
     events._last_result = {"cached": "api"}
@@ -462,14 +495,22 @@ async def test_process_setting_event_and_select_remaining_edges(
     plenticore._client.get_events = AsyncMock(side_effect=ClientError("client boom"))
     assert await events._async_update_data() == {"cached": "client"}
 
-    select = SelectDataUpdateCoordinator(
-        hass,
-        entry,
-        logging.getLogger(__name__),
-        "select-edge",
-        timedelta(seconds=10),
-        plenticore,
-    )
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        select = SelectDataUpdateCoordinator.__new__(SelectDataUpdateCoordinator)
+        select.hass = hass
+        select.logger = logging.getLogger(__name__)
+        select.name = "select-edge"
+        select.data = None
+        select._listeners = {}
+        select._unsub_refresh = None
+        select.last_update_success = True
+        select.update_interval = timedelta(seconds=10)
+        SelectDataUpdateCoordinator.__init__(
+            select, hass, entry, select.logger, select.name, select.update_interval, plenticore,
+        )
     select.stop_fetch_data("missing:module", "Mode", ["A", "None"])
     # Batch-read coordinator queries client.get_setting_values({mid: [ids]}) once
     # per module; return "A"=1 only for the "filled" module so the empty module
