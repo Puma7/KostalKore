@@ -18,6 +18,7 @@ KNOWN_LINGERING_TIMER_TESTS = {
     "test_setup_entry_mqtt_bridge_enabled",
     "test_setup_entry_mqtt_bridge_empty_identifiers",
     "test_setup_entry_mqtt_bridge_nonmatching_identifier",
+    "test_modbus_platform_setup_fails_raises_config_entry_not_ready",
 }
 
 
@@ -545,3 +546,74 @@ async def test_options_updated_changed_options_triggers_reload(
         await kp_init._async_options_updated(hass, mock_config_entry)
 
     mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+
+
+async def test_modbus_platform_setup_fails_raises_config_entry_not_ready(
+    hass: HomeAssistant,
+    mock_plenticore_client,
+) -> None:
+    """MODBUS_PLATFORMS forward failure → ConfigEntryNotReady + rollback (lines 441-453, 488)."""
+    from homeassistant.config_entries import ConfigEntryState
+    from homeassistant.const import Platform
+
+    entry = MockConfigEntry(
+        entry_id="modbus_platform_fail",
+        title="scb",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={
+            "modbus_enabled": True,
+            "modbus_port": 1502,
+            "modbus_unit_id": 71,
+            "modbus_endianness": "little",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    async def _forward_side_effect(_entry, platforms):
+        if Platform.BINARY_SENSOR in platforms:
+            raise Exception("binary sensor forward failed")
+        return True
+
+    with (
+        patch(
+            "custom_components.kostal_kore.modbus_coordinator.ModbusDataUpdateCoordinator.async_setup",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+        ) as mock_soc_controller,
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+            side_effect=_forward_side_effect,
+        ),
+    ):
+        mock_soc = MagicMock()
+        mock_soc.stop = AsyncMock()
+        mock_soc_controller.return_value = mock_soc
+        await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_rollback_setup_shuts_down_ksem_coordinator(
+    hass: HomeAssistant,
+) -> None:
+    """_rollback_setup shuts down ksem_coordinator when it is present (line 493)."""
+    mock_ksem = MagicMock()
+    mock_ksem.async_shutdown = AsyncMock()
+
+    entry = MockConfigEntry(entry_id="rollback_ksem_test", domain=DOMAIN, title="scb")
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "ksem_coordinator": mock_ksem,
+        "modbus_coordinator": None,
+    }
+
+    mock_plenticore = MagicMock()
+    mock_plenticore.async_unload = AsyncMock()
+
+    await kp_init._rollback_setup(hass, entry, mock_plenticore)
+
+    mock_ksem.async_shutdown.assert_awaited_once()

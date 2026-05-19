@@ -149,3 +149,21 @@ async def test_async_remove_config_entry_device(
     device_entry = MagicMock()
     result = await async_remove_config_entry_device(hass, mock_config_entry, device_entry)
     assert result is True
+
+
+async def test_async_remove_config_entry_device_primary_id_lookup_error(
+    hass: HomeAssistant,
+) -> None:
+    """_get_persistent_device_id raising is caught; function returns True (lines 626-627, 630)."""
+    from unittest.mock import MagicMock
+
+    mock_plenticore = MagicMock()
+    mock_plenticore._get_persistent_device_id.side_effect = RuntimeError("lookup failed")
+
+    mock_entry = MagicMock()
+    mock_entry.runtime_data = mock_plenticore
+
+    device_entry = MagicMock()
+
+    result = await kp_init.async_remove_config_entry_device(hass, mock_entry, device_entry)
+    assert result is True
