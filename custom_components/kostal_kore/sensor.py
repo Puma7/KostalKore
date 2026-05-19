@@ -398,7 +398,11 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="FullChargeCap_E",
         name="Battery Full Charge Capacity",
-        native_unit_of_measurement="Ah",
+        # GEÄNDERT: Suffix _E = Energy → Wh; vorher fälschlich "Ah" (Ladung).
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=2,
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-high",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -1512,7 +1516,10 @@ async def async_setup_entry(
     except asyncio.TimeoutError:
         _LOGGER.error("Timeout fetching process data - feature may not be supported")
         available_process_data = {}
-    except (ApiException, ClientError, TimeoutError) as err:
+    # GEÄNDERT: asyncio.TimeoutError explizit eintragen. Auf Python 3.10 ist
+    # asyncio.TimeoutError KEIN Subtyp von builtins.TimeoutError und würde
+    # ansonsten unbehandelt durchrutschen → kompletter Setup-Abbruch.
+    except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
         _handle_api_error(err, "process data fetch")
         available_process_data = {}
     
@@ -1557,7 +1564,8 @@ async def async_setup_entry(
             _LOGGER.info("Discovered %d DC strings via REST API", dc_string_count)
         except asyncio.TimeoutError:
             _LOGGER.warning("Timeout fetching DC string count via REST API")
-        except (ApiException, ClientError, TimeoutError) as err:
+        # GEÄNDERT: asyncio.TimeoutError explizit ergänzen (siehe Begründung oben).
+        except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
             _handle_api_error(err, "DC string count fetch")
         except (ValueError, TypeError):
             _LOGGER.warning("Invalid DC string count value from REST API, ignoring")
@@ -1590,51 +1598,11 @@ async def async_setup_entry(
         plenticore: Any,
         dc_string_count: int,  # Add string count for smart filtering
     ) -> list[PlenticoreDataSensor | CalculatedPvSumSensor]:
-        """
-        Create sensor entities in batches for optimal performance.
-        
-        This function implements batch entity creation to minimize overhead during
-        integration setup. It pre-filters descriptions, groups similar entities,
-        and uses list comprehensions for efficient object creation.
-        
-        Performance Benefits:
-        - Reduces function call overhead by 60-70%
-        - Minimizes repeated availability checks
-        - Optimizes memory allocation patterns
-        - Improves setup time for large sensor sets
-        
-        Architecture:
-        - Pre-filtering to avoid repeated API availability checks
-        - Batch creation using list comprehensions
-        - Special handling for calculated sensors
-        - Efficient memory usage patterns
-        
-        Usage Example:
-            >>> entities = create_entities_batch(
-            ...     coordinator, descriptions, available_data, entry, plenticore
-            ... )
-            >>> async_add_entities(entities)
-        
-        Performance Metrics:
-        - Setup time reduction: 40-50% for typical installations
-        - Memory usage: 20-30% more efficient
-        - Function calls: Reduced by 60-70%
-        - CPU usage: 25% lower during setup
-        
-        Args:
-            process_data_update_coordinator: Coordinator for data updates
-            descriptions: List of sensor entity descriptions to create
-            available_process_data: Available modules from API discovery
-            entry: Home Assistant configuration entry
-            plenticore: Plenticore API client instance
-            
-        Returns:
-            List of created sensor entities (regular and calculated)
-            
-        Performance Characteristics:
-            - Time complexity: O(n) where n is number of descriptions
-            - Space complexity: O(n) for entity list creation
-            - Memory efficiency: Optimized for large sensor sets
+        """Filter descriptions by API availability and instantiate sensor entities.
+
+        Skips entities whose module/data_id is not in available_process_data,
+        applies DC-string-count limits, and routes CalculatedPvSumSensor through
+        a dedicated constructor.
         """
         entities: list[PlenticoreDataSensor | CalculatedPvSumSensor] = []
         
@@ -1958,33 +1926,36 @@ class PlenticoreCalculatedSensor(
         try:
             # Extract metric and period from data_id (e.g., BatteryEfficiency:Total)
             metric, period = self.data_id.split(":", 1)
-            if "TotalGridConsumption" in self.data_id:
+            # GEÄNDERT: exakter Match auf `metric` statt fragilem `in self.data_id`.
+            # Vorher hätte z. B. ein Key "ExportFromBatteryDischargeTotal:Day" in den
+            # BatteryDischargeTotal-Zweig fallen können.
+            if metric == "TotalGridConsumption":
                 # Grid to Home + Grid to Battery
                 grid_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeGrid:{period}")
                 grid_battery = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}")
-                
+
                 # If any component is None, return None to avoid calculating partial sums
                 # which would look like sudden data drops/resets to HA statistics
                 if grid_home is None or grid_battery is None:
                     return None
-                    
+
                 val_home = float(grid_home)
                 val_batt = float(grid_battery)
                 return cast(StateType, self._formatter(str(val_home + val_batt)))
-            
-            elif "BatteryDischargeTotal" in self.data_id:
+
+            elif metric == "BatteryDischargeTotal":
                 # Total AC-side battery discharge: Battery → Home + Battery → Grid
                 # Uses pure AC measurements for consistency.
                 battery_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeBat:{period}")
                 battery_grid = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyDischargeGrid:{period}")
-                
+
                 if battery_home is None or battery_grid is None:
                     return None
-                
+
                 total_discharge = float(battery_home) + float(battery_grid)
                 return cast(StateType, self._formatter(str(total_discharge)))
-            
-            elif "BatteryChargeTotal" in self.data_id:
+
+            elif metric == "BatteryChargeTotal":
                 # Battery Charge from Grid + Battery Charge from PV
                 charge_grid = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}")
                 charge_pv = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargePv:{period}")

@@ -59,6 +59,10 @@ EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
 SETUP_FETCH_TIMEOUT_SECONDS: float = 45.0
 SETUP_PREWARM_TIMEOUT_SECONDS: float = 30.0
+# NEU: Obergrenze für gecachte Stale-Daten. Nach Ablauf werfen Koordinatoren
+# UpdateFailed, damit HA-Entities korrekt "Unavailable" werden statt veraltete
+# Werte als "available" anzuzeigen (z. B. bei stundenlangem Inverter-Ausfall).
+STALE_DATA_MAX_AGE_SECONDS: float = 300.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",
@@ -765,12 +769,20 @@ class ProcessDataUpdateCoordinator(
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_result: dict[str, dict[str, str]] = {}
+        # NEU: Zeitstempel des letzten erfolgreichen Fetches für Stale-TTL.
+        self._last_success_ts: float = 0.0
         self._init_adaptive_polling(
             default_base_seconds=10,
             max_interval_floor_seconds=120,
             max_interval_multiplier=6,
             failure_multiplier_cap=3,
         )
+
+    def _stale_cache_usable(self) -> bool:
+        """Return True if the cached _last_result is still within the stale TTL."""
+        if not self._last_result or self._last_success_ts <= 0.0:
+            return False
+        return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
@@ -792,19 +804,20 @@ class ProcessDataUpdateCoordinator(
             self._record_success()
         except asyncio.TimeoutError as timeout_err:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
-            if self._last_result:
+            # GEÄNDERT: Stale-Cache nur innerhalb STALE_DATA_MAX_AGE_SECONDS nutzen.
+            if self._stale_cache_usable():
                 _LOGGER.warning(
                     "Timeout fetching process data for %s - using last known values",
                     self.name,
                 )
-                # Soft backoff while keeping entities responsive.
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
             self._record_failure()
             raise UpdateFailed("Timeout fetching process data") from timeout_err
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
-            if self._last_result:
+            # GEÄNDERT: Stale-Cache TTL-gebunden statt unbegrenzt.
+            if self._stale_cache_usable():
                 if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                     _LOGGER.warning(
                         "Inverter internal communication error (503) fetching process data - "
@@ -816,7 +829,6 @@ class ProcessDataUpdateCoordinator(
                         self.name,
                         error_msg,
                     )
-                # Soft backoff while keeping entities responsive.
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
             # Bug #8 / QA-6: 503 on first fetch (empty _last_result) → retry once
@@ -917,6 +929,7 @@ class ProcessDataUpdateCoordinator(
 
         if fresh_result:  # GEÄNDERT: cache only fresh data, preventing stale cascade
             self._last_result = fresh_result
+            self._last_success_ts = time.monotonic()  # NEU: für Stale-TTL-Check
         return result
 
 
@@ -947,8 +960,12 @@ class SettingDataUpdateCoordinator(
         for module_id, data_ids in self._fetch.items():
             fetch[module_id].update(data_ids)
 
-        for module_id, data_id in self.async_contexts():
-            fetch[module_id].add(data_id)
+        # GEÄNDERT: async_contexts() existiert erst seit HA 2023.x; defensiv prüfen,
+        # damit ältere HA-Versionen den Koordinator nicht mit AttributeError abreißen.
+        contexts_fn = getattr(self, "async_contexts", None)
+        if callable(contexts_fn):
+            for module_id, data_id in contexts_fn():
+                fetch[module_id].add(data_id)
 
         if not fetch:
             return {}
@@ -969,7 +986,12 @@ class SettingDataUpdateCoordinator(
             return result
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
-            self._record_failure()
+            # GEÄNDERT: _record_failure() NICHT mehr unbedingt aufrufen. Bei
+            # erfolgreichem 503-Fallback (cached data returned) wurde der
+            # Koordinator vorher fälschlich gedrosselt, was nach längeren 503-Bursts
+            # zu 4+ Minuten Reaktionszeit führte, obwohl der Wechselrichter wieder
+            # antwortet. Failure wird jetzt nur registriert, wenn wir wirklich
+            # keine Daten liefern können.
 
             # Handle 503 errors (internal communication error)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
@@ -980,11 +1002,15 @@ class SettingDataUpdateCoordinator(
                      )
                      return self._last_result
 
+                 self._record_failure()  # NEU: nur drosseln, wenn kein Cache greift
                  create_inverter_busy_issue(self._plenticore.hass, entry_id=self._plenticore.config_entry.entry_id)
                  _LOGGER.warning(
                      "Inverter internal communication error (503) fetching settings - retrying later"
                  )
                  return {}
+
+            # NEU: für alle anderen Fehler hier eine einzige record_failure-Stelle
+            self._record_failure()
 
             # Handle 404 errors (missing setting) - warn but continue
             if "[404]" in error_msg or "not found" in error_msg.lower():
@@ -1064,6 +1090,14 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._last_signature_ts[signature] = now
         self._history.appendleft(self._event_to_payload(event))
+        # NEU: Stale-Signaturen prunen, sonst wächst _last_signature_ts über
+        # Monate unbegrenzt (eine Entry pro jemals gesehener (code,category,active)-
+        # Kombination). 10× Cooldown ist großzügig (jenseits davon ist der Eintrag
+        # ohnehin funktionslos für die Dedup-Entscheidung).
+        cutoff = now - EVENT_DEDUP_COOLDOWN_SECONDS * 10
+        stale_keys = [k for k, ts in self._last_signature_ts.items() if ts < cutoff]
+        for k in stale_keys:
+            del self._last_signature_ts[k]
 
     async def _async_update_data(self) -> dict[str, Any]:
         client = self._plenticore.client
@@ -1211,28 +1245,59 @@ class SelectDataUpdateCoordinator(
         module_id: dict[str, dict[str, list[str]]],
     ) -> dict[str, dict[str, str]]:
         """Get current option."""
-        # CHANGELOG (Codex, 2026-02-05):
-        # Fix review finding #1: evaluate all options for all tracked select
-        # entities instead of returning after the first entry.
+        # GEÄNDERT: Statt eines HTTP-Requests pro Option (N×1) genau ein
+        # Batch-Request pro Modul mit allen Options als data_ids – die
+        # pykoplenti get_setting_values({module: [ids]})-Form. Reduziert die
+        # API-Last von z. B. 3 Requests pro Select-Update auf 1 und vermeidet
+        # 503-Bursts.
         result: dict[str, dict[str, str]] = {}
+        client = self._plenticore.client
+        if client is None:
+            return result
+
         for mid, data_map in list(module_id.items()):
             module_result: dict[str, str] = {}
+            # Sammle alle data_ids dieses Moduls einmalig (Set → keine Duplikate).
+            options_to_query: list[str] = sorted({
+                opt
+                for all_options in data_map.values()
+                for opt in all_options
+                if opt != "None"
+            })
+
+            module_values: Mapping[str, str] = {}
+            if options_to_query:
+                try:
+                    batch = await client.get_setting_values({mid: options_to_query})
+                    module_values = dict(batch.get(mid, {}))
+                    if (hass := getattr(self._plenticore, "hass", None)) is not None:
+                        clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
+                except (ApiException, ClientError, TimeoutError) as err:
+                    error_msg = str(err)
+                    if "[404]" in error_msg or "not found" in error_msg.lower():
+                        _LOGGER.warning(
+                            "Select options not available on %s (404): %s",
+                            mid, options_to_query,
+                        )
+                    elif "[503]" in error_msg or "internal communication error" in error_msg.lower():
+                        _LOGGER.warning(
+                            "Inverter busy (503) batch-reading select options for %s – retrying later",
+                            mid,
+                        )
+                    else:
+                        _LOGGER.error("Batch select read failed for %s: %s", mid, err)
+                    module_values = {}
+
             for data_id, all_options in list(data_map.items()):
                 selected_option = "None"
-                for all_option in list(all_options):
+                for all_option in all_options:
                     if all_option == "None":
                         continue
-                    val = await self.async_read_data(mid, all_option)
-                    if not val:
-                        continue
-                    for option in val.values():
-                        # Safe dictionary access - use .get() to prevent KeyError
-                        if option.get(all_option) == "1":
-                            selected_option = all_option
-                            break
-                    if selected_option != "None":
+                    if module_values.get(all_option) == "1":
+                        selected_option = all_option
                         break
                 module_result[data_id] = selected_option
+
             if module_result:
                 result[mid] = module_result
         return result

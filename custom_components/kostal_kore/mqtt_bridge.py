@@ -254,12 +254,27 @@ class KostalMqttBridge:
 
         from homeassistant.components import mqtt
 
+        # GEÄNDERT: home_power = home_from_pv + home_from_battery + home_from_grid
+        # Vorher wurde nur home_from_pv (PV→Haus-Anteil) verwendet, was bei Netz-
+        # oder Batteriebezug zu massiv zu niedrigen Werten führte und externe EMS
+        # (evcc/iobroker) zu falschen Lade-/Entladeentscheidungen verleitete.
+        home_pv = data.get("home_from_pv")
+        home_bat = data.get("home_from_battery")
+        home_grid = data.get("home_from_grid")
+        if home_pv is not None and home_bat is not None and home_grid is not None:
+            try:
+                home_total: float | None = float(home_pv) + float(home_bat) + float(home_grid)
+            except (TypeError, ValueError):
+                home_total = None
+        else:
+            home_total = None
+
         proxy_map: dict[str, str | None] = {
             "pv_power": self._fmt(data.get("total_dc_power")),
             "grid_power": self._fmt(data.get("pm_total_active")),
             "battery_power": self._fmt(data.get("battery_cd_power")),
             "battery_soc": self._fmt(data.get("battery_soc")),
-            "home_power": self._fmt(data.get("home_from_pv", data.get("total_ac_power"))),
+            "home_power": self._fmt(home_total),
         }
 
         state_raw = data.get("inverter_state")

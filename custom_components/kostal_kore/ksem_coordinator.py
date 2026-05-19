@@ -130,18 +130,35 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
         raw = struct.unpack(">i", struct.pack(">HH", regs[0], regs[1]))[0]
         return float(raw) * scale
 
+    # NEU: Decoder-Helfer für vorab gebatchte Register-Blöcke.
+    @staticmethod
+    def _decode_u32_at(regs: list[int], offset: int, scale: float) -> float:
+        raw = struct.unpack(">I", struct.pack(">HH", regs[offset], regs[offset + 1]))[0]
+        return float(raw) * scale
+
+    @staticmethod
+    def _decode_i32_at(regs: list[int], offset: int, scale: float) -> float:
+        raw = struct.unpack(">i", struct.pack(">HH", regs[offset], regs[offset + 1]))[0]
+        return float(raw) * scale
+
     async def _async_update_data(self) -> dict[str, float]:
         await self._ensure_connected()
 
-        # Read compact but high-value set for source precedence and diagnostics.
-        active_import = await self._read_u32(0, 0.1)
-        active_export = await self._read_u32(2, 0.1)
-        frequency = await self._read_u32(26, 0.001)
-        power_factor = await self._read_i32(24, 0.001)
+        # GEÄNDERT: Zusammenhängende Adress-Blöcke werden gebatched gelesen.
+        # Vorher: 11 sequentielle Modbus-Frames. Jetzt: 9 Frames; ein einzelner
+        # Timeout reißt damit nicht mehr 11 unabhängige Werte mit sich.
+        # Block 1: import (0..1) + export (2..3) → 1 Frame statt 2
+        import_export = await self._read_registers(0, 4)
+        active_import = self._decode_u32_at(import_export, 0, 0.1)
+        active_export = self._decode_u32_at(import_export, 2, 0.1)
+        # Block 2: power_factor (24..25) + frequency (26..27) → 1 Frame statt 2
+        pf_freq = await self._read_registers(24, 4)
+        power_factor = self._decode_i32_at(pf_freq, 0, 0.001)
+        frequency = self._decode_u32_at(pf_freq, 2, 0.001)
+        # Übrige Register liegen weit auseinander → einzeln lesen.
         l1_voltage = await self._read_u32(62, 0.001)
         l2_voltage = await self._read_u32(102, 0.001)
         l3_voltage = await self._read_u32(142, 0.001)
-        # Per-phase active power is signed on bidirectional meters.
         l1_active = await self._read_i32(40, 0.1)
         l2_active = await self._read_i32(80, 0.1)
         l3_active = await self._read_i32(120, 0.1)
