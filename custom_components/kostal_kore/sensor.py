@@ -398,11 +398,7 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="FullChargeCap_E",
         name="Battery Full Charge Capacity",
-        # GEÄNDERT: Suffix _E = Energy → Wh; vorher fälschlich "Ah" (Ladung).
-        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
-        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=2,
-        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement="Ah",
         icon="mdi:battery-high",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -1516,10 +1512,7 @@ async def async_setup_entry(
     except asyncio.TimeoutError:
         _LOGGER.error("Timeout fetching process data - feature may not be supported")
         available_process_data = {}
-    # GEÄNDERT: asyncio.TimeoutError explizit eintragen. Auf Python 3.10 ist
-    # asyncio.TimeoutError KEIN Subtyp von builtins.TimeoutError und würde
-    # ansonsten unbehandelt durchrutschen → kompletter Setup-Abbruch.
-    except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
+    except (ApiException, ClientError, TimeoutError) as err:
         _handle_api_error(err, "process data fetch")
         available_process_data = {}
     
@@ -1564,8 +1557,7 @@ async def async_setup_entry(
             _LOGGER.info("Discovered %d DC strings via REST API", dc_string_count)
         except asyncio.TimeoutError:
             _LOGGER.warning("Timeout fetching DC string count via REST API")
-        # GEÄNDERT: asyncio.TimeoutError explizit ergänzen (siehe Begründung oben).
-        except (ApiException, ClientError, TimeoutError, asyncio.TimeoutError) as err:
+        except (ApiException, ClientError, TimeoutError) as err:
             _handle_api_error(err, "DC string count fetch")
         except (ValueError, TypeError):
             _LOGGER.warning("Invalid DC string count value from REST API, ignoring")

@@ -960,12 +960,8 @@ class SettingDataUpdateCoordinator(
         for module_id, data_ids in self._fetch.items():
             fetch[module_id].update(data_ids)
 
-        # GEÄNDERT: async_contexts() existiert erst seit HA 2023.x; defensiv prüfen,
-        # damit ältere HA-Versionen den Koordinator nicht mit AttributeError abreißen.
-        contexts_fn = getattr(self, "async_contexts", None)
-        if callable(contexts_fn):
-            for module_id, data_id in contexts_fn():
-                fetch[module_id].add(data_id)
+        for module_id, data_id in self.async_contexts():
+            fetch[module_id].add(data_id)
 
         if not fetch:
             return {}
@@ -1000,9 +996,10 @@ class SettingDataUpdateCoordinator(
                      _LOGGER.warning(
                          "Inverter internal communication error (503) - using last known data for settings"
                      )
+                     self._apply_adaptive_interval(1.5)
                      return self._last_result
 
-                 self._record_failure()  # NEU: nur drosseln, wenn kein Cache greift
+                 self._record_failure()  # nur drosseln, wenn kein Cache greift
                  create_inverter_busy_issue(self._plenticore.hass, entry_id=self._plenticore.config_entry.entry_id)
                  _LOGGER.warning(
                      "Inverter internal communication error (503) fetching settings - retrying later"

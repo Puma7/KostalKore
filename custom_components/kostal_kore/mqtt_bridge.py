@@ -261,13 +261,14 @@ class KostalMqttBridge:
         home_pv = data.get("home_from_pv")
         home_bat = data.get("home_from_battery")
         home_grid = data.get("home_from_grid")
-        if home_pv is not None and home_bat is not None and home_grid is not None:
+        parts = [home_pv, home_bat, home_grid]
+        if all(p is None for p in parts):
+            home_total: float | None = None
+        else:
             try:
-                home_total: float | None = float(home_pv) + float(home_bat) + float(home_grid)
+                home_total = sum(float(p) for p in parts if p is not None)
             except (TypeError, ValueError):
                 home_total = None
-        else:
-            home_total = None
 
         proxy_map: dict[str, str | None] = {
             "pv_power": self._fmt(data.get("total_dc_power")),
