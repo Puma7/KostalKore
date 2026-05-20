@@ -179,8 +179,22 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         except Exception as err:
             _LOGGER.error("Grid Feed-In Optimizer error: %s", err)
         finally:
-            if not self._is_on:
+            # Always restore the inverter charge limit on exit. The previous
+            # `if not self._is_on:` guard only restored on user-initiated
+            # turn_off (which sets _is_on=False before the loop exits). When
+            # an exception raised mid-loop, _is_on was still True, the guard
+            # skipped restore, and the register stayed at whatever the last
+            # write set — often 0 W or a low surplus value — silently
+            # capping charge until the user toggled the optimizer again.
+            # Restore is idempotent so the user-toggle path remains safe.
+            self._is_on = False
+            try:
                 await self._write_charge_limit(self._restore_limit())
+            except Exception as restore_err:  # pragma: no cover
+                _LOGGER.error(
+                    "Failed to restore charge limit on optimizer exit: %s",
+                    restore_err,
+                )
 
     async def _read_float(self, name: str) -> float | None:
         reg = REGISTER_BY_NAME.get(name)

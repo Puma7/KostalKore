@@ -1494,3 +1494,213 @@ async def test_audit_process_partial_field_failure_merges_only_good_fields(
     assert proc._last_result["mod"]["bad"] == "2", (
         "bad-field cache value must persist when fresh parse fails"
     )
+
+
+# ---------------------------------------------------------------------------
+# Audit-Bug7 — BatterySocController must not stop on the first iteration
+#             when SoC is below target and was_charging is still in its
+#             initial state. Previous code: was_charging=False AND
+#             need_discharge=False AND current_soc<=target → false stop
+#             before any _write_charge call.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_audit_soc_controller_charges_when_below_target(hass: HomeAssistant) -> None:
+    """SoC=49%, target=50%, fresh start → must write_charge, NOT stop."""
+    from kostal_plenticore.battery_soc_controller import BatterySocController
+
+    coord = MagicMock()
+    coord.client = MagicMock()
+    ctrl = BatterySocController.__new__(BatterySocController)
+    ctrl._coordinator = coord
+    ctrl.hass = hass
+    ctrl._entry_id = "test"
+    ctrl._target_soc = 50.0
+    ctrl._max_charge_w = 3000.0
+    ctrl._max_discharge_w = 3000.0
+    ctrl._task = None
+    ctrl._status = ""
+    ctrl._last_write = 0.0
+    ctrl._notify = AsyncMock()
+    ctrl._snapshot_limits = AsyncMock()
+    ctrl._write_normal = AsyncMock()
+
+    # Make _write_charge clear target_soc so the loop exits cleanly AFTER
+    # the write — clearing it inside _read_soc would null `target` mid-
+    # iteration (TypeError in the comparison) and abort via the except.
+    async def _write_charge_then_stop(power: float) -> bool:
+        ctrl._target_soc = None
+        return True
+    ctrl._write_charge = AsyncMock(side_effect=_write_charge_then_stop)
+    ctrl._write_discharge = AsyncMock(return_value=True)
+    ctrl._read_temp = AsyncMock(return_value=25.0)
+    ctrl._read_inv_state = AsyncMock(return_value=2)  # operating
+
+    ctrl._read_soc = AsyncMock(return_value=49.0)
+
+    # Patch asyncio.sleep so the loop doesn't actually wait.
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await ctrl._run_loop()
+
+    ctrl._write_charge.assert_awaited(), (
+        "Controller must initiate charge when SoC<target on first iteration"
+    )
+    ctrl._write_discharge.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_audit_soc_controller_discharges_when_above_target(hass: HomeAssistant) -> None:
+    """SoC=51%, target=50%, fresh start → must write_discharge."""
+    from kostal_plenticore.battery_soc_controller import BatterySocController
+
+    coord = MagicMock()
+    coord.client = MagicMock()
+    ctrl = BatterySocController.__new__(BatterySocController)
+    ctrl._coordinator = coord
+    ctrl.hass = hass
+    ctrl._entry_id = "test"
+    ctrl._target_soc = 50.0
+    ctrl._max_charge_w = 3000.0
+    ctrl._max_discharge_w = 3000.0
+    ctrl._task = None
+    ctrl._status = ""
+    ctrl._last_write = 0.0
+    ctrl._notify = AsyncMock()
+    ctrl._snapshot_limits = AsyncMock()
+    ctrl._write_normal = AsyncMock()
+
+    async def _write_discharge_then_stop(power: float) -> bool:
+        ctrl._target_soc = None
+        return True
+    ctrl._write_charge = AsyncMock(return_value=True)
+    ctrl._write_discharge = AsyncMock(side_effect=_write_discharge_then_stop)
+    ctrl._read_temp = AsyncMock(return_value=25.0)
+    ctrl._read_inv_state = AsyncMock(return_value=2)
+
+    ctrl._read_soc = AsyncMock(return_value=51.0)
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await ctrl._run_loop()
+
+    ctrl._write_discharge.assert_awaited()
+    ctrl._write_charge.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_audit_soc_controller_stops_when_at_target(hass: HomeAssistant) -> None:
+    """SoC=50%, target=50% → first stop condition triggers, no write at all."""
+    from kostal_plenticore.battery_soc_controller import BatterySocController
+
+    coord = MagicMock()
+    coord.client = MagicMock()
+    ctrl = BatterySocController.__new__(BatterySocController)
+    ctrl._coordinator = coord
+    ctrl.hass = hass
+    ctrl._entry_id = "test"
+    ctrl._target_soc = 50.0
+    ctrl._max_charge_w = 3000.0
+    ctrl._max_discharge_w = 3000.0
+    ctrl._task = None
+    ctrl._status = ""
+    ctrl._last_write = 0.0
+    ctrl._notify = AsyncMock()
+    ctrl._snapshot_limits = AsyncMock()
+    ctrl._write_normal = AsyncMock()
+    ctrl._write_charge = AsyncMock(return_value=True)
+    ctrl._write_discharge = AsyncMock(return_value=True)
+    ctrl._read_temp = AsyncMock(return_value=25.0)
+    ctrl._read_inv_state = AsyncMock(return_value=2)
+
+    async def _read_soc():
+        return 50.0
+    ctrl._read_soc = _read_soc
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await ctrl._run_loop()
+
+    ctrl._write_charge.assert_not_called()
+    ctrl._write_discharge.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_audit_soc_controller_stops_after_discharge_undershoot(
+    hass: HomeAssistant,
+) -> None:
+    """After discharging from 51%→49% (overshoot below 50%), the
+    was_charging=False overshoot branch should still stop us — the fix
+    must preserve that behaviour, not break it."""
+    from kostal_plenticore.battery_soc_controller import BatterySocController
+
+    coord = MagicMock()
+    coord.client = MagicMock()
+    ctrl = BatterySocController.__new__(BatterySocController)
+    ctrl._coordinator = coord
+    ctrl.hass = hass
+    ctrl._entry_id = "test"
+    ctrl._target_soc = 50.0
+    ctrl._max_charge_w = 3000.0
+    ctrl._max_discharge_w = 3000.0
+    ctrl._task = None
+    ctrl._status = ""
+    ctrl._last_write = 0.0
+    ctrl._notify = AsyncMock()
+    ctrl._snapshot_limits = AsyncMock()
+    ctrl._write_normal = AsyncMock()
+    ctrl._write_charge = AsyncMock(return_value=True)
+    ctrl._write_discharge = AsyncMock(return_value=True)
+    ctrl._read_temp = AsyncMock(return_value=25.0)
+    ctrl._read_inv_state = AsyncMock(return_value=2)
+
+    # Iter1: 51% → discharge (sets was_charging=False).
+    # Iter2: 49% → overshoot below target → stop.
+    soc_values = [51.0, 49.0]
+    async def _read_soc():
+        return soc_values.pop(0) if soc_values else 49.0
+    ctrl._read_soc = _read_soc
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await ctrl._run_loop()
+
+    # First write was discharge, then stop on second iter — no charge.
+    assert ctrl._write_discharge.await_count == 1
+    ctrl._write_charge.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Audit-Bug8 — Grid Feed-In Optimizer must restore the inverter charge
+#             limit on ANY exit (exception, cancellation, normal). The
+#             `if not self._is_on:` guard previously skipped restore when
+#             an exception was raised while _is_on=True — leaving the
+#             register stuck at the last (often 0 W) value.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_audit_grid_optimizer_restores_limit_on_exception(
+    hass: HomeAssistant,
+) -> None:
+    """An exception during the loop while _is_on=True must still restore."""
+    from kostal_plenticore.grid_charge_limiter import GridFeedInLimiterSwitch
+
+    sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
+    sw._is_on = True
+    sw._coordinator = MagicMock()
+    sw._device_power_limit_w = 5000.0
+    sw._feed_in_limit_w = 1000.0
+    sw._current_charge_limit = 0.0
+    sw._snapshot_limit_w = 5000.0
+    sw._write_charge_limit = AsyncMock()
+    sw._restore_limit = MagicMock(return_value=5000.0)
+    sw.async_write_ha_state = MagicMock()
+
+    # Force a read error inside the loop on the very first poll.
+    sw._read_float = AsyncMock(side_effect=RuntimeError("inverter offline"))
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await sw._control_loop()
+
+    # Restore must have been written at least once on exit.
+    assert any(
+        call.args and call.args[0] == 5000.0
+        for call in sw._write_charge_limit.await_args_list
+    ), "Charge limit must be restored to snapshot on exception exit"
+    assert sw._is_on is False, "Optimizer must mark itself OFF after restore"
