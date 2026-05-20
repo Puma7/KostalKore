@@ -933,9 +933,23 @@ class ProcessDataUpdateCoordinator(
                         len(still_missing), module_id, ", ".join(still_missing),
                     )
 
-        if fresh_result:  # GEÄNDERT: cache only fresh data, preventing stale cascade
-            self._last_result = fresh_result
-            self._last_success_ts = time.monotonic()  # NEU: für Stale-TTL-Check
+        # Per-module merge — NOT wholesale replace. Otherwise:
+        #   * a module that hit `continue` (unsupported type / inspect error)
+        #     drops out of the cache entirely on the next successful poll,
+        #     killing backfill for it forever after.
+        #   * a module where every field failed parsing would replace its
+        #     last-known-good values with {} ("fresh" but empty), again
+        #     destroying the backfill anchor.
+        # We only merge entries that actually delivered at least one fresh
+        # field, so empty-fresh modules preserve their previous cache while
+        # genuinely successful ones overwrite their stale fields.
+        any_fresh_data = False
+        for module_id, fresh_fields in fresh_result.items():
+            if fresh_fields:
+                self._last_result.setdefault(module_id, {}).update(fresh_fields)
+                any_fresh_data = True
+        if any_fresh_data:
+            self._last_success_ts = time.monotonic()  # für Stale-TTL-Check
         return result
 
 

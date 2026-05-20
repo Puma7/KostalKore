@@ -247,8 +247,27 @@ def test_ensure_installer_access() -> None:
     entry = SimpleNamespace(data={})
     assert ensure_installer_access(entry, False, "devices:local", "Battery:MinSocRel", "setting") is True
     assert ensure_installer_access(entry, True, "devices:local", "Battery:MinSocRel", "setting") is False
-    entry_with_code = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"})
-    assert ensure_installer_access(entry_with_code, True, "devices:local", "Battery:MinSocRel", "setting") is True
+    # A bare CONF_SERVICE_CODE without an explicit installer-access flag must
+    # NOT unlock writes — the wizard already vetted role + service code via
+    # _installer_access_from_role and persisted the authoritative boolean.
+    entry_with_code_only = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"})
+    assert (
+        ensure_installer_access(
+            entry_with_code_only, True, "devices:local", "Battery:MinSocRel", "setting"
+        )
+        is False
+    )
+    # Explicit grant via the vetted flag unlocks writes.
+    entry_with_grant = SimpleNamespace(
+        data={CONF_SERVICE_CODE: "1234", CONF_INSTALLER_ACCESS: True}
+    )
+    assert (
+        ensure_installer_access(
+            entry_with_grant, True, "devices:local", "Battery:MinSocRel", "setting"
+        )
+        is True
+    )
+    # USER role + service code persisted as False (HIGH-08) → still denied.
     entry_with_service_but_user = SimpleNamespace(
         data={CONF_SERVICE_CODE: "1234", CONF_INSTALLER_ACCESS: False}
     )
@@ -274,8 +293,13 @@ def test_ensure_installer_access_with_hass(hass: HomeAssistant) -> None:
         ) is False
         mock_create.assert_called_once_with(hass, entry_id="test_entry")
 
-    # Access granted with hass → clears installer_required issue
-    entry_ok = SimpleNamespace(data={CONF_SERVICE_CODE: "1234"}, entry_id="test_entry")
+    # Access granted with hass → clears installer_required issue. Grant
+    # is expressed via the persisted CONF_INSTALLER_ACCESS flag (the wizard's
+    # role-vetted decision), not via a bare service code.
+    entry_ok = SimpleNamespace(
+        data={CONF_SERVICE_CODE: "1234", CONF_INSTALLER_ACCESS: True},
+        entry_id="test_entry",
+    )
     with patch("custom_components.kostal_kore.helper.clear_issue") as mock_clear:
         assert ensure_installer_access(
             entry_ok, True, "devices:local", "Battery:MinSocRel", "setting", hass=hass,

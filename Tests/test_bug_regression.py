@@ -1336,3 +1336,161 @@ def test_audit_legacy_merge_default_false_when_target_lacks_flag() -> None:
 
     merged = _merge_entry_data(target, source)
     assert merged[CONF_INSTALLER_ACCESS] is False
+
+
+# ---------------------------------------------------------------------------
+# Audit-Bug2 — ProcessDataUpdateCoordinator must MERGE _last_result
+#             per module, not REPLACE the whole dict. Replacing meant any
+#             module that hit a `continue` path or that had every field fail
+#             parsing would silently drop out of the cache on the next poll
+#             and lose its backfill anchor.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_audit_process_last_result_merges_across_modules(
+    hass: HomeAssistant,
+) -> None:
+    """Cycle 1 caches modules A+B; cycle 2 only delivers A — B must remain cached."""
+
+    class GoodValue:
+        def __init__(self, v):
+            self.value = v
+
+    proc = _make_process_coord(hass, {"modA": ["x"], "modB": ["y"]})
+    client = proc._plenticore._client
+
+    # Cycle 1 — both modules deliver fresh data.
+    client.get_process_data_values = AsyncMock(return_value={
+        "modA": {"x": GoodValue("1")},
+        "modB": {"y": GoodValue("2")},
+    })
+    await proc._async_update_data()
+    assert proc._last_result == {"modA": {"x": "1"}, "modB": {"y": "2"}}
+
+    # Cycle 2 — only modA returns. modB is absent from fetched_data entirely
+    # (loop doesn't iterate it). modB's cache must survive.
+    client.get_process_data_values = AsyncMock(return_value={
+        "modA": {"x": GoodValue("99")},
+    })
+    await proc._async_update_data()
+    assert proc._last_result["modA"] == {"x": "99"}, "modA must reflect fresh value"
+    assert proc._last_result["modB"] == {"y": "2"}, (
+        "modB cache must survive an absent-in-fetch cycle"
+    )
+
+
+@pytest.mark.asyncio
+async def test_audit_process_last_result_keeps_module_after_all_fields_fail(
+    hass: HomeAssistant,
+) -> None:
+    """When every field of a module fails to parse, that module's previous
+    cache entry must be preserved (so backfill still works next round)."""
+
+    class GoodValue:
+        def __init__(self, v):
+            self.value = v
+
+    class BadValue:
+        @property
+        def value(self):
+            raise AttributeError("boom")
+
+    proc = _make_process_coord(hass, {"mod": ["a", "b"]})
+    client = proc._plenticore._client
+
+    # Cycle 1 — both fields good → cached.
+    client.get_process_data_values = AsyncMock(return_value={
+        "mod": {"a": GoodValue("1"), "b": GoodValue("2")},
+    })
+    await proc._async_update_data()
+    assert proc._last_result["mod"] == {"a": "1", "b": "2"}
+
+    # Cycle 2 — every field fails to parse. The previous cache for "mod"
+    # must NOT be wiped to {} (which would kill the backfill anchor for
+    # future cycles).
+    client.get_process_data_values = AsyncMock(return_value={
+        "mod": {"a": BadValue(), "b": BadValue()},
+    })
+    await proc._async_update_data()
+    assert proc._last_result["mod"] == {"a": "1", "b": "2"}, (
+        "Module cache must be preserved when all fields failed parsing"
+    )
+
+
+@pytest.mark.asyncio
+async def test_audit_process_last_result_keeps_module_on_inspect_continue(
+    hass: HomeAssistant,
+) -> None:
+    """When inspect-keys raises and we `continue`, the module is skipped for
+    this cycle — its previously cached values must survive."""
+
+    class GoodValue:
+        def __init__(self, v):
+            self.value = v
+
+    class WeirdModuleData:
+        # Neither .items() nor __iter__ + __getitem__ — triggers `continue`.
+        pass
+
+    proc = _make_process_coord(hass, {"mod": ["a"]})
+    client = proc._plenticore._client
+
+    # Seed cache.
+    client.get_process_data_values = AsyncMock(return_value={
+        "mod": {"a": GoodValue("5")},
+    })
+    await proc._async_update_data()
+    assert proc._last_result["mod"] == {"a": "5"}
+
+    # Next cycle returns unsupported type for `mod` → `continue` taken.
+    # Other modules in the same poll must not wipe `mod`'s cache.
+    proc._fetch = {"mod": ["a"], "mod2": ["x"]}
+    client.get_process_data_values = AsyncMock(return_value={
+        "mod": WeirdModuleData(),
+        "mod2": {"x": GoodValue("9")},
+    })
+    await proc._async_update_data()
+    assert proc._last_result["mod"] == {"a": "5"}, (
+        "Cache for a module hitting `continue` must survive"
+    )
+    assert proc._last_result["mod2"] == {"x": "9"}
+
+
+@pytest.mark.asyncio
+async def test_audit_process_partial_field_failure_merges_only_good_fields(
+    hass: HomeAssistant,
+) -> None:
+    """When one field fails but the other parses, only the good one is merged
+    into _last_result (regression test for stale-cascade prevention combined
+    with the new merge semantics)."""
+
+    class GoodValue:
+        def __init__(self, v):
+            self.value = v
+
+    class BadValue:
+        @property
+        def value(self):
+            raise AttributeError("boom")
+
+    proc = _make_process_coord(hass, {"mod": ["good", "bad"]})
+    client = proc._plenticore._client
+
+    # Cycle 1 — both fields succeed.
+    client.get_process_data_values = AsyncMock(return_value={
+        "mod": {"good": GoodValue("1"), "bad": GoodValue("2")},
+    })
+    await proc._async_update_data()
+    assert proc._last_result["mod"] == {"good": "1", "bad": "2"}
+
+    # Cycle 2 — good parses, bad fails.
+    client.get_process_data_values = AsyncMock(return_value={
+        "mod": {"good": GoodValue("3"), "bad": BadValue()},
+    })
+    await proc._async_update_data()
+    # "good" refreshed to 3, "bad" keeps its previous cached value 2 (NOT 3,
+    # not removed — the backfill anchor must persist).
+    assert proc._last_result["mod"]["good"] == "3"
+    assert proc._last_result["mod"]["bad"] == "2", (
+        "bad-field cache value must persist when fresh parse fails"
+    )
