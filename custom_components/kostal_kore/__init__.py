@@ -569,6 +569,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step(
             "KSEM coordinator shutdown", ksem_coordinator.async_shutdown()
         )
+    # Mirror _rollback_setup: explicitly stop the event coordinator's polling
+    # so a reload race cannot leave a zombie task talking to the inverter
+    # while platform entities are torn down.
+    event_coordinator = entry_data.get("event_coordinator")
+    if event_coordinator is not None:
+        await _await_cleanup_step(
+            "Event coordinator shutdown", event_coordinator.async_shutdown()
+        )
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

@@ -886,3 +886,340 @@ def test_high08_installer_access_rejects_unrecognised_role() -> None:
     assert cf._installer_access_from_role("INSTALLER_TRIAL", "1234") is False
     assert cf._installer_access_from_role("GUEST_EXT", "1234") is False
     assert cf._installer_access_from_role("mystery", "1234") is False
+
+
+# ---------------------------------------------------------------------------
+# Audit — Modbus proxy must mirror modbus_client's vendor-register
+#         endianness rule (UINT32/SINT32 at address >= 500 are big-endian
+#         regardless of byte_order). Without this, external clients reading
+#         vendor registers via the proxy would receive word-swapped values
+#         while reading via the integrated client returns the correct ones.
+# ---------------------------------------------------------------------------
+
+def test_audit_proxy_vendor_uint32_always_big_endian_on_encode() -> None:
+    """Vendor UINT32 (address >= 500) must encode big-endian even when
+    endianness='little' (Kostal default). SunSpec UINT32 (address < 500)
+    must still word-swap under endianness='little'."""
+    from kostal_plenticore.modbus_proxy import _encode_value
+    from kostal_plenticore.modbus_registers import (
+        ModbusRegister, DataType, Access, RegisterGroup,
+    )
+    import struct as _struct
+
+    sunspec_u32 = ModbusRegister(
+        100, "ss_u32", "ss_u32", DataType.UINT32, 2, Access.RO, RegisterGroup.POWER
+    )
+    vendor_u32 = ModbusRegister(
+        525, "vendor_u32", "vendor_u32", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY
+    )
+    val = 0x12345678
+
+    # SunSpec area + little → word-swap.
+    assert _encode_value(val, sunspec_u32, "little") == _struct.pack(">HH", 0x5678, 0x1234)
+    # Vendor area + little → BIG-ENDIAN (no swap), mirroring client._encode.
+    assert _encode_value(val, vendor_u32, "little") == _struct.pack(">I", val)
+    # Vendor area + big → big-endian (unchanged).
+    assert _encode_value(val, vendor_u32, "big") == _struct.pack(">I", val)
+    # SunSpec area + big → big-endian.
+    assert _encode_value(val, sunspec_u32, "big") == _struct.pack(">I", val)
+
+
+def test_audit_proxy_vendor_sint32_always_big_endian_on_encode() -> None:
+    """Vendor SINT32 must encode big-endian; SunSpec SINT32 word-swaps under little."""
+    from kostal_plenticore.modbus_proxy import _encode_value
+    from kostal_plenticore.modbus_registers import (
+        ModbusRegister, DataType, Access, RegisterGroup,
+    )
+    import struct as _struct
+
+    sunspec_s32 = ModbusRegister(
+        110, "ss_s32", "ss_s32", DataType.SINT32, 2, Access.RW, RegisterGroup.CONTROL
+    )
+    vendor_s32 = ModbusRegister(
+        700, "vendor_s32", "vendor_s32", DataType.SINT32, 2, Access.RW, RegisterGroup.CONTROL
+    )
+
+    # Negative value SunSpec / little → two's-complement words swapped.
+    assert _encode_value(-2, sunspec_s32, "little") == _struct.pack(">HH", 0xFFFE, 0xFFFF)
+    # Negative value vendor / little → straight big-endian signed.
+    assert _encode_value(-2, vendor_s32, "little") == _struct.pack(">i", -2)
+    # Vendor + big = vendor + little for this value (both big-endian).
+    assert _encode_value(-2, vendor_s32, "big") == _struct.pack(">i", -2)
+
+
+def test_audit_proxy_vendor_uint32_always_big_endian_on_decode_write() -> None:
+    """Round-trip: proxy receives a write for a vendor UINT32, then must
+    decode it the same way the inverter would. Vendor → big-endian."""
+    from kostal_plenticore.modbus_proxy import ModbusTcpProxyServer
+    from kostal_plenticore.modbus_registers import (
+        ModbusRegister, DataType, Access, RegisterGroup,
+    )
+    import struct as _struct
+
+    coord = MagicMock()
+    proxy = ModbusTcpProxyServer(
+        coord, port=5502, bind_host="127.0.0.1",
+        unit_id=71, endianness="little",
+    )
+
+    sunspec_u32 = ModbusRegister(
+        100, "ss_u32", "ss_u32", DataType.UINT32, 2, Access.RW, RegisterGroup.CONTROL
+    )
+    vendor_u32 = ModbusRegister(
+        1288, "g3_fallback_time", "vendor", DataType.UINT32, 2, Access.RW, RegisterGroup.CONTROL
+    )
+    val = 0x12345678
+
+    # SunSpec area: wire is word-swapped under endianness="little".
+    sunspec_wire = _struct.pack(">HH", 0x5678, 0x1234)
+    assert proxy._decode_for_write(sunspec_u32, sunspec_wire) == val
+
+    # Vendor area: wire is straight big-endian regardless of endianness.
+    vendor_wire = _struct.pack(">I", val)
+    assert proxy._decode_for_write(vendor_u32, vendor_wire) == val
+
+
+def test_audit_proxy_float32_unaffected_by_vendor_base() -> None:
+    """FLOAT32 must always follow byte_order — vendor-base check must NOT
+    leak into the FLOAT32 branch (modbus_client._decode treats FLOAT32 this
+    way; proxy must match)."""
+    from kostal_plenticore.modbus_proxy import _encode_value, ModbusTcpProxyServer
+    from kostal_plenticore.modbus_registers import (
+        ModbusRegister, DataType, Access, RegisterGroup,
+    )
+    import struct as _struct
+
+    vendor_f32 = ModbusRegister(
+        1034, "bat_charge_dc", "bat_charge_dc", DataType.FLOAT32, 2, Access.RW, RegisterGroup.BATTERY_MGMT
+    )
+
+    # Vendor FLOAT32 + little → word-swapped, NOT a vendor-style big-endian.
+    encoded = _encode_value(1.5, vendor_f32, "little")
+    expected_be = _struct.pack(">f", 1.5)
+    hi, lo = _struct.unpack(">HH", expected_be)
+    assert encoded == _struct.pack(">HH", lo, hi)
+
+    # Write-decode mirrors the same word-swap.
+    coord = MagicMock()
+    proxy = ModbusTcpProxyServer(
+        coord, port=5502, bind_host="127.0.0.1",
+        unit_id=71, endianness="little",
+    )
+    swapped = _struct.pack(">HH", lo, hi)
+    assert proxy._decode_for_write(vendor_f32, swapped) == 1.5
+
+
+# ---------------------------------------------------------------------------
+# Audit — SelectDataUpdateCoordinator must fall back to last-known-good
+#         options on transient 503 bursts (per-module stale-TTL cache),
+#         so UI selects do not flicker to "None" when the inverter is busy.
+# ---------------------------------------------------------------------------
+
+async def test_audit_select_503_serves_stale_cache_within_ttl(hass: HomeAssistant) -> None:
+    """503 burst on select fetch → previous module result is reused (within short TTL)."""
+    from kostal_plenticore.coordinator import (
+        SelectDataUpdateCoordinator,
+        SELECT_STALE_DATA_MAX_AGE_SECONDS,
+        Plenticore,
+    )
+
+    entry = _mock_entry()
+    p = Plenticore.__new__(Plenticore)
+    p.hass = hass
+    p.config_entry = entry
+    p._client = MagicMock()
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = SelectDataUpdateCoordinator.__new__(SelectDataUpdateCoordinator)
+        coord.hass = hass
+        coord.logger = logging.getLogger(__name__)
+        coord.name = "select-stale"
+        coord._fetch = {
+            "devices:local": {"Battery:Mode": ["A", "B", "None"]}
+        }
+        coord._plenticore = p
+        coord._module_last_result = {}
+        coord._module_last_success_ts = {}
+        coord.update_interval = timedelta(seconds=30)
+
+    coord.async_contexts = lambda: iter([])
+
+    # Pre-seed cache as if a recent successful round had returned Mode=A.
+    import time as _time
+    coord._module_last_result["devices:local"] = {"Battery:Mode": "A"}
+    coord._module_last_success_ts["devices:local"] = _time.monotonic()
+
+    # 503 on next batch.
+    p._client.get_setting_values = AsyncMock(
+        side_effect=ApiException("[503] internal communication error")
+    )
+    result = await coord._async_update_data()
+
+    # Stale cache served instead of "None" defaults.
+    assert result == {"devices:local": {"Battery:Mode": "A"}}
+
+
+async def test_audit_select_503_after_ttl_returns_none_defaults(hass: HomeAssistant) -> None:
+    """503 after the short select-TTL expiry must NOT serve ghost mode state."""
+    from kostal_plenticore.coordinator import (
+        SelectDataUpdateCoordinator,
+        SELECT_STALE_DATA_MAX_AGE_SECONDS,
+        Plenticore,
+    )
+
+    entry = _mock_entry()
+    p = Plenticore.__new__(Plenticore)
+    p.hass = hass
+    p.config_entry = entry
+    p._client = MagicMock()
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = SelectDataUpdateCoordinator.__new__(SelectDataUpdateCoordinator)
+        coord.hass = hass
+        coord.logger = logging.getLogger(__name__)
+        coord.name = "select-stale-expired"
+        coord._fetch = {
+            "devices:local": {"Battery:Mode": ["A", "B", "None"]}
+        }
+        coord._plenticore = p
+        coord._module_last_result = {"devices:local": {"Battery:Mode": "A"}}
+        import time as _time
+        coord._module_last_success_ts = {
+            "devices:local": _time.monotonic() - SELECT_STALE_DATA_MAX_AGE_SECONDS - 1
+        }
+        coord.update_interval = timedelta(seconds=30)
+
+    coord.async_contexts = lambda: iter([])
+
+    p._client.get_setting_values = AsyncMock(
+        side_effect=ApiException("[503] internal communication error")
+    )
+    result = await coord._async_update_data()
+
+    # Cache too old → "None" defaults rather than stale data.
+    assert result == {"devices:local": {"Battery:Mode": "None"}}
+
+
+async def test_audit_select_404_does_not_poison_stale_cache(hass: HomeAssistant) -> None:
+    """A 404 must NOT promote 'None' defaults into the stale-cache: doing so
+    would mask a subsequent recovery (next success would still serve None)."""
+    from kostal_plenticore.coordinator import (
+        SelectDataUpdateCoordinator,
+        Plenticore,
+    )
+
+    entry = _mock_entry()
+    p = Plenticore.__new__(Plenticore)
+    p.hass = hass
+    p.config_entry = entry
+    p._client = MagicMock()
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = SelectDataUpdateCoordinator.__new__(SelectDataUpdateCoordinator)
+        coord.hass = hass
+        coord.logger = logging.getLogger(__name__)
+        coord.name = "select-404"
+        coord._fetch = {
+            "devices:local": {"Battery:Mode": ["A", "B", "None"]}
+        }
+        coord._plenticore = p
+        coord._module_last_result = {}
+        coord._module_last_success_ts = {}
+        coord.update_interval = timedelta(seconds=30)
+
+    coord.async_contexts = lambda: iter([])
+
+    p._client.get_setting_values = AsyncMock(
+        side_effect=ApiException("[404] not found")
+    )
+    await coord._async_update_data()
+
+    # 404 → no cache entry promoted.
+    assert "devices:local" not in coord._module_last_result
+    assert "devices:local" not in coord._module_last_success_ts
+
+
+async def test_audit_select_success_refreshes_per_module_cache(hass: HomeAssistant) -> None:
+    """Successful batch must refresh both _module_last_result and timestamp."""
+    from kostal_plenticore.coordinator import (
+        SelectDataUpdateCoordinator,
+        Plenticore,
+    )
+
+    entry = _mock_entry()
+    p = Plenticore.__new__(Plenticore)
+    p.hass = hass
+    p.config_entry = entry
+    p._client = MagicMock()
+    p._client.get_setting_values = AsyncMock(return_value={
+        "devices:local": {"A": "0", "B": "1"}
+    })
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = SelectDataUpdateCoordinator.__new__(SelectDataUpdateCoordinator)
+        coord.hass = hass
+        coord.logger = logging.getLogger(__name__)
+        coord.name = "select-ok"
+        coord._fetch = {
+            "devices:local": {"Battery:Mode": ["A", "B", "None"]}
+        }
+        coord._plenticore = p
+        coord._module_last_result = {}
+        coord._module_last_success_ts = {}
+        coord.update_interval = timedelta(seconds=30)
+
+    coord.async_contexts = lambda: iter([])
+
+    result = await coord._async_update_data()
+    assert result == {"devices:local": {"Battery:Mode": "B"}}
+    assert coord._module_last_result["devices:local"] == {"Battery:Mode": "B"}
+    assert coord._module_last_success_ts["devices:local"] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Audit — async_unload_entry must shut down the event coordinator
+#         (mirrors _rollback_setup). A reload race could otherwise leave a
+#         zombie event-poll task running against the inverter.
+# ---------------------------------------------------------------------------
+
+async def test_audit_unload_entry_shuts_down_event_coordinator(
+    hass: HomeAssistant,
+) -> None:
+    """async_unload_entry must call event_coordinator.async_shutdown()."""
+    import kostal_plenticore as kp_init
+    from kostal_plenticore.const import DOMAIN
+
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+
+    mock_event_coord = MagicMock()
+    mock_event_coord.async_shutdown = AsyncMock()
+
+    fake_runtime = MagicMock()
+    fake_runtime.async_unload = AsyncMock()
+    entry.runtime_data = fake_runtime  # type: ignore[attr-defined]
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "event_coordinator": mock_event_coord,
+        # No modbus / ksem so we exercise the event-only path.
+    }
+
+    with patch.object(
+        hass.config_entries, "async_unload_platforms",
+        AsyncMock(return_value=True),
+    ):
+        await kp_init.async_unload_entry(hass, entry)
+
+    mock_event_coord.async_shutdown.assert_awaited_once()

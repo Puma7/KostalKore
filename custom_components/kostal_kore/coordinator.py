@@ -63,6 +63,12 @@ SETUP_PREWARM_TIMEOUT_SECONDS: float = 30.0
 # UpdateFailed, damit HA-Entities korrekt "Unavailable" werden statt veraltete
 # Werte als "available" anzuzeigen (z. B. bei stundenlangem Inverter-Ausfall).
 STALE_DATA_MAX_AGE_SECONDS: float = 300.0
+# Select entities represent ACTIVE controller state (battery mode, fallback
+# behaviour, …) which can change autonomously between polls. A long stale
+# window would silently show ghost state after a real mode switch, so the
+# cache only bridges short transient 503 bursts (≈ 2 poll cycles at the
+# default 30 s select interval) and otherwise lets entities go unavailable.
+SELECT_STALE_DATA_MAX_AGE_SECONDS: float = 60.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",
@@ -1245,6 +1251,29 @@ class SelectDataUpdateCoordinator(
 ):
     """Implementation of PlenticoreUpdateCoordinator for select data."""
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize with per-module last-result fallback for 503 bursts."""
+        super().__init__(*args, **kwargs)
+        # Per-module last-known-good cache. Stale-TTL is checked per module
+        # so a 503 burst on one module cannot resurrect month-old options for
+        # another module. We deliberately do NOT mirror the whole result —
+        # only modules that actually saw a fresh batch get a timestamp.
+        self._module_last_result: dict[str, dict[str, str]] = {}
+        self._module_last_success_ts: dict[str, float] = {}
+
+    def _module_stale_cache_usable(self, module_id: str) -> bool:
+        """Return True if cached options for module_id are within stale-TTL.
+
+        Uses a short SELECT-specific TTL (not the 300 s shared by other
+        coordinators) because select values reflect active controller state,
+        not measured quantities — silently serving multi-minute-old mode
+        labels would mask real autonomous changes.
+        """
+        ts = self._module_last_success_ts.get(module_id, 0.0)
+        if ts <= 0.0 or module_id not in self._module_last_result:
+            return False
+        return (time.monotonic() - ts) < SELECT_STALE_DATA_MAX_AGE_SECONDS
+
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         if self._plenticore.client is None:
             return {}
@@ -1288,6 +1317,7 @@ class SelectDataUpdateCoordinator(
             })
 
             module_values: Mapping[str, str] = {}
+            batch_failed = False
             if options_to_query:
                 try:
                     batch = await client.get_setting_values({mid: options_to_query})
@@ -1306,9 +1336,19 @@ class SelectDataUpdateCoordinator(
                             "Inverter busy (503) batch-reading select options for %s – retrying later",
                             mid,
                         )
+                        batch_failed = True
                     else:
                         _LOGGER.error("Batch select read failed for %s: %s", mid, err)
+                        batch_failed = True
                     module_values = {}
+
+            # Transient batch failures (503 / network) should not flap the UI:
+            # serve the previous freshly-read options for THIS module if they
+            # are within stale-TTL. 404 / "options not available" is treated
+            # as a permanent state and falls through to "None" defaults.
+            if batch_failed and self._module_stale_cache_usable(mid):
+                result[mid] = dict(self._module_last_result[mid])
+                continue
 
             for data_id, all_options in list(data_map.items()):
                 selected_option = "None"
@@ -1322,4 +1362,10 @@ class SelectDataUpdateCoordinator(
 
             if module_result:
                 result[mid] = module_result
+                # Only refresh the per-module cache on a real batch success;
+                # 404 yields module_result full of "None" which we must NOT
+                # cache (would mask a subsequent recovery).
+                if not batch_failed and options_to_query and module_values:
+                    self._module_last_result[mid] = dict(module_result)
+                    self._module_last_success_ts[mid] = time.monotonic()
         return result

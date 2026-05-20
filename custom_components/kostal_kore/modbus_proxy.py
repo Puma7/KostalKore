@@ -46,6 +46,15 @@ FC_READ_INPUT: Final[int] = 0x04
 FC_WRITE_SINGLE: Final[int] = 0x06
 FC_WRITE_MULTIPLE: Final[int] = 0x10
 
+# Mirrors modbus_client._VENDOR_REGISTER_BASE: UINT32/SINT32 registers at
+# address >= 500 always use big-endian word order on the wire, regardless of
+# the byte_order register. The proxy must encode the same way so external
+# clients (evcc, iobroker) read the same bytes the inverter itself would
+# return. FLOAT32 word order is NOT inverted in the vendor area — it follows
+# byte_order everywhere — so this constant only gates the 32-bit integer
+# branches below.
+_VENDOR_REGISTER_BASE: Final[int] = 500
+
 # Build a sorted list of (start_address, register) for range lookups
 _SORTED_REGISTERS: Final[list[tuple[int, ModbusRegister]]] = sorted(
     ((r.address, r) for r in ALL_REGISTERS),
@@ -67,7 +76,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
 
     if dt == DataType.UINT32:
         v = int(value) if value is not None else 0
-        if endianness == "big":
+        if register.address >= _VENDOR_REGISTER_BASE or endianness == "big":
             return struct.pack(">I", v)
         lo = v & 0xFFFF
         hi = (v >> 16) & 0xFFFF
@@ -75,7 +84,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
 
     if dt == DataType.SINT32:
         v = int(value) if value is not None else 0
-        if endianness == "big":
+        if register.address >= _VENDOR_REGISTER_BASE or endianness == "big":
             return struct.pack(">i", v)
         if v < 0:
             v += 0x100000000
@@ -546,7 +555,7 @@ class ModbusTcpProxyServer:
             hi, lo = struct.unpack(">HH", raw[:4])
             return struct.unpack(">f", struct.pack(">HH", lo, hi))[0]
         if dt == DataType.UINT32:
-            if self._endianness == "big":
+            if reg.address >= _VENDOR_REGISTER_BASE or self._endianness == "big":
                 return struct.unpack(">I", raw[:4])[0]
             hi, lo = struct.unpack(">HH", raw[:4])
             return (lo << 16) | hi
