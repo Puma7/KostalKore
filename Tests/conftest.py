@@ -347,7 +347,13 @@ def mock_config_entry() -> MockConfigEntry:
 
 @pytest.fixture
 def mock_installer_config_entry() -> MockConfigEntry:
-    """Return a mocked ConfigEntry for testing with installer login."""
+    """Return a mocked ConfigEntry for testing with installer login.
+
+    Mirrors what config_flow._build_entry_data() writes for an authenticated
+    INSTALLER role: the persisted CONF_INSTALLER_ACCESS=True flag is what
+    gates runtime writes — a bare CONF_SERVICE_CODE alone no longer unlocks
+    them (Audit-Bug3 / HIGH-08 defense-in-depth).
+    """
     return MockConfigEntry(
         entry_id="2ab8dd92a62787ddfe213a67e09406bd",
         title="scb",
@@ -356,6 +362,8 @@ def mock_installer_config_entry() -> MockConfigEntry:
             "host": "192.168.1.2",
             "password": "secret_password",
             "service_code": "12345",
+            "installer_access": True,
+            "access_role": "INSTALLER",
         },
     )
 
