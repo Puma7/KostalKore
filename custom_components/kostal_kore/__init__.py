@@ -44,7 +44,6 @@ from .const import (
     CONF_MODBUS_PROXY_PORT,
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
-    CONF_SERVICE_CODE,
     DEFAULT_KSEM_PORT,
     DEFAULT_KSEM_UNIT_ID,
     DEFAULT_MODBUS_PORT,
@@ -211,12 +210,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     mqtt_bridge = None
     modbus_proxy = None
     soc_controller = None
-    installer_access = bool(
-        entry.data.get(
-            CONF_INSTALLER_ACCESS,
-            bool(entry.data.get(CONF_SERVICE_CODE)),
-        )
-    )
+    # Default to False when the persisted flag is missing. The config flow
+    # already evaluates _installer_access_from_role() and stores the result;
+    # the legacy "service code present ⇒ installer access" fallback would
+    # bypass that role check (e.g. USER + service code, which the wizard
+    # explicitly denies). Safer to be locked out than to silently unlock
+    # writes for an unknown role.
+    installer_access = bool(entry.data.get(CONF_INSTALLER_ACCESS, False))
     access_role = str(entry.data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
     _LOGGER.info(
         "Authenticated inverter access role: %s (installer writes: %s)",
@@ -628,14 +628,23 @@ async def async_remove_config_entry_device(
         # Entry unloaded or never set up — let HA clean up.
         return True
 
-    primary_id = None
+    primary_id: str | None = None
     try:
         primary_id = plenticore._get_persistent_device_id()  # noqa: SLF001
     except Exception:  # noqa: BLE001 – defensive; do not block UI on lookup
         primary_id = None
 
     if primary_id is None:
-        return True
+        # The entry is loaded (runtime_data is set) but we cannot identify
+        # the primary device. Refuse the deletion: allowing it here would
+        # let a transient registry / lookup hiccup wipe the user's main
+        # inverter tile and leave orphan entities behind. The user can
+        # still remove the integration via "Delete config entry".
+        _LOGGER.warning(
+            "Refusing device removal for active entry %s: primary device id lookup failed",
+            config_entry.entry_id,
+        )
+        return False
 
     for domain, identifier in device_entry.identifiers:
         if domain == DOMAIN and identifier == primary_id:

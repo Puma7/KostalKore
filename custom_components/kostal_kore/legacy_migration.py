@@ -21,7 +21,6 @@ from .const import (
     CONF_HOST,
     CONF_INSTALLER_ACCESS,
     CONF_PASSWORD,
-    CONF_SERVICE_CODE,
     DOMAIN,
 )
 
@@ -144,11 +143,12 @@ def _merge_entry_data(target_entry: ConfigEntry, source_entry: ConfigEntry) -> d
             merged_data.get(CONF_ACCESS_ROLE, "UNKNOWN"),
         )
     )
+    # The target entry has already been authenticated by the new wizard
+    # (which writes CONF_INSTALLER_ACCESS via _installer_access_from_role).
+    # Do NOT fall back to the legacy "service code present ⇒ installer
+    # access" rule here — that bypasses the role check.
     merged_data[CONF_INSTALLER_ACCESS] = bool(
-        target_data.get(
-            CONF_INSTALLER_ACCESS,
-            bool(merged_data.get(CONF_SERVICE_CODE)),
-        )
+        target_data.get(CONF_INSTALLER_ACCESS, False)
     )
 
     # Guard rails when source entry has incomplete credentials.

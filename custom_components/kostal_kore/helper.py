@@ -11,7 +11,7 @@ from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE, DOMAIN
+from .const import CONF_INSTALLER_ACCESS, DOMAIN
 from .const_ids import ModuleId, SettingId
 from .repairs import clear_issue, create_installer_required_issue
 
@@ -648,12 +648,10 @@ def ensure_installer_access(
     if not requires_installer:
         return True
 
-    installer_access = bool(
-        entry.data.get(
-            CONF_INSTALLER_ACCESS,
-            bool(entry.data.get(CONF_SERVICE_CODE)),
-        )
-    )
+    # Mirror __init__.async_setup_entry: only the persisted flag counts.
+    # A bare service code without an installer-grade role must NOT grant
+    # writes — the config flow already vetted that combination.
+    installer_access = bool(entry.data.get(CONF_INSTALLER_ACCESS, False))
     if not installer_access:
         log_fn = getattr(_LOGGER, log_level, _LOGGER.warning)
         log_fn(

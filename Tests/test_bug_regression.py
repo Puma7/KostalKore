@@ -1223,3 +1223,116 @@ async def test_audit_unload_entry_shuts_down_event_coordinator(
         await kp_init.async_unload_entry(hass, entry)
 
     mock_event_coord.async_shutdown.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Audit-2 — Service-code fallback must not bypass HIGH-08 role logic at
+#           runtime. Three runtime sites used to grant installer access for
+#           any persisted entry with CONF_SERVICE_CODE even if the config
+#           flow had explicitly stored CONF_INSTALLER_ACCESS=False (e.g.
+#           USER role + service code typed in during setup). They now
+#           consult the persisted flag only.
+# ---------------------------------------------------------------------------
+
+def test_audit_runtime_installer_access_ignores_service_code_when_flag_false() -> None:
+    """ensure_installer_access must NOT grant access when the persisted flag
+    is False, even if a CONF_SERVICE_CODE happens to also be persisted."""
+    from kostal_plenticore.helper import ensure_installer_access
+    from kostal_plenticore.const import (
+        CONF_INSTALLER_ACCESS,
+        CONF_SERVICE_CODE,
+    )
+
+    fake_entry = SimpleNamespace(
+        entry_id="e1",
+        data={
+            CONF_INSTALLER_ACCESS: False,  # wizard wrote False (USER + service code)
+            CONF_SERVICE_CODE: "1234",      # legacy field still present
+        },
+    )
+    # Even though a service code is present, the role-vetted flag wins.
+    assert ensure_installer_access(
+        fake_entry, requires_installer=True,
+        module_id="m", data_id="d", operation="op",
+    ) is False
+
+
+def test_audit_runtime_installer_access_default_false_when_flag_missing() -> None:
+    """If CONF_INSTALLER_ACCESS is somehow absent, the safe default is False —
+    NOT a service-code-based fallback that could silently unlock writes."""
+    from kostal_plenticore.helper import ensure_installer_access
+    from kostal_plenticore.const import CONF_SERVICE_CODE
+
+    fake_entry = SimpleNamespace(
+        entry_id="e2",
+        data={CONF_SERVICE_CODE: "1234"},  # no installer_access flag at all
+    )
+    assert ensure_installer_access(
+        fake_entry, requires_installer=True,
+        module_id="m", data_id="d", operation="op",
+    ) is False
+
+
+def test_audit_legacy_merge_respects_target_false_over_service_code() -> None:
+    """_merge_entry_data must keep CONF_INSTALLER_ACCESS=False from the
+    target entry, not regrant it because source has CONF_SERVICE_CODE."""
+    from kostal_plenticore.legacy_migration import _merge_entry_data
+    from kostal_plenticore.const import (
+        CONF_ACCESS_ROLE,
+        CONF_HOST,
+        CONF_INSTALLER_ACCESS,
+        CONF_PASSWORD,
+    )
+
+    target = SimpleNamespace(
+        entry_id="t",
+        data={
+            CONF_HOST: "1.2.3.4",
+            CONF_PASSWORD: "pw",
+            CONF_ACCESS_ROLE: "USER",
+            CONF_INSTALLER_ACCESS: False,  # wizard decision: USER → no installer
+        },
+    )
+    # Source had a legacy service code but no installer_access metadata.
+    source = SimpleNamespace(
+        entry_id="s",
+        data={
+            CONF_HOST: "1.2.3.4",
+            CONF_PASSWORD: "pw",
+            "service_code": "1234",
+        },
+    )
+
+    merged = _merge_entry_data(target, source)
+    assert merged[CONF_INSTALLER_ACCESS] is False, (
+        "Target's False decision must survive migration, "
+        "service code in source must NOT regrant installer access"
+    )
+
+
+def test_audit_legacy_merge_default_false_when_target_lacks_flag() -> None:
+    """If even target_data has no CONF_INSTALLER_ACCESS, default to False —
+    never to bool(source_data.get(CONF_SERVICE_CODE)) which could open up
+    writes without the role having been vetted."""
+    from kostal_plenticore.legacy_migration import _merge_entry_data
+    from kostal_plenticore.const import (
+        CONF_HOST,
+        CONF_INSTALLER_ACCESS,
+        CONF_PASSWORD,
+    )
+
+    target = SimpleNamespace(
+        entry_id="t",
+        data={CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"},
+    )
+    source = SimpleNamespace(
+        entry_id="s",
+        data={
+            CONF_HOST: "1.2.3.4",
+            CONF_PASSWORD: "pw",
+            "service_code": "1234",
+        },
+    )
+
+    merged = _merge_entry_data(target, source)
+    assert merged[CONF_INSTALLER_ACCESS] is False

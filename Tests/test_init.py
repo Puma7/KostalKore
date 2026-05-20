@@ -154,7 +154,14 @@ async def test_async_remove_config_entry_device(
 async def test_async_remove_config_entry_device_primary_id_lookup_error(
     hass: HomeAssistant,
 ) -> None:
-    """_get_persistent_device_id raising is caught; function returns True (lines 626-627, 630)."""
+    """ID-lookup exception on a LOADED entry must REFUSE deletion (safe default).
+
+    Previous behaviour returned True, which let a transient registry hiccup
+    wipe the user's primary inverter device while the integration was still
+    running — orphan entities and confusing UI followed. The safe default
+    while the entry is loaded is to refuse and let the user remove the
+    config entry itself instead.
+    """
     from unittest.mock import MagicMock
 
     mock_plenticore = MagicMock()
@@ -162,6 +169,25 @@ async def test_async_remove_config_entry_device_primary_id_lookup_error(
 
     mock_entry = MagicMock()
     mock_entry.runtime_data = mock_plenticore
+    mock_entry.entry_id = "test-entry-id"
+
+    device_entry = MagicMock()
+
+    result = await kp_init.async_remove_config_entry_device(hass, mock_entry, device_entry)
+    assert result is False, "Active entry + failed primary-id lookup must block removal"
+
+
+async def test_async_remove_config_entry_device_unloaded_entry_allows_removal(
+    hass: HomeAssistant,
+) -> None:
+    """Once the entry is unloaded (runtime_data is None) removal must succeed.
+
+    Otherwise users could never clear stale devices after uninstalling.
+    """
+    from unittest.mock import MagicMock
+
+    mock_entry = MagicMock()
+    mock_entry.runtime_data = None
 
     device_entry = MagicMock()
 
