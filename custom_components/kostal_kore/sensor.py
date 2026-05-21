@@ -1855,33 +1855,6 @@ async def async_setup_entry(
                 len(obs_entities),
                 [getattr(e, "_attr_unique_id", "?") for e in obs_entities],
             )
-            # Schedule a deferred check so we can see if any entity ended up
-            # disabled or hidden in the entity registry after HA processes the
-            # async_add_entities tasks (which run in the next event-loop cycle).
-            from homeassistant.helpers import entity_registry as er
-
-            async def _check_obs_registry(_now: object = None) -> None:
-                registry = er.async_get(hass)
-                for obs_e in obs_entities:
-                    uid = getattr(obs_e, "_attr_unique_id", None)
-                    if not uid:
-                        continue
-                    entity_id = registry.async_get_entity_id("sensor", "kostal_kore", uid)
-                    if entity_id is None:
-                        _LOGGER.warning(
-                            "Observability sensor %s not found in entity registry!", uid
-                        )
-                        continue
-                    reg_entry = registry.async_get(entity_id)
-                    _LOGGER.info(
-                        "Observability sensor %s -> entity_id=%s disabled_by=%s hidden_by=%s",
-                        uid,
-                        entity_id,
-                        reg_entry.disabled_by if reg_entry else "??",
-                        reg_entry.hidden_by if reg_entry else "??",
-                    )
-
-            hass.async_call_later(3.0, _check_obs_registry)
 
 
 class PlenticoreCalculatedSensor(
