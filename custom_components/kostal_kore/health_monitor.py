@@ -335,6 +335,14 @@ class InverterHealthMonitor:
                         iso_meas_active = inverter_state == 2
                         if not pv_active and not iso_meas_active:
                             continue
+                        # Modbus sentinel: 65535000 Ω = 0xFFFFFF (max-value
+                        # marker the inverter writes when no measurement is
+                        # available, typically at night or before isolation
+                        # has been measured for the cycle). Recording it
+                        # produces a flat sentinel line in the recorder
+                        # history that hides real degradation.
+                        if fval == 65535000.0:
+                            continue
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
                             pv_active=pv_active,

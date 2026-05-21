@@ -334,13 +334,19 @@ class DegradationTracker:
         iso = data.get("isolation_resistance")
         if iso is not None and pv_active:
             try:
-                normalized_ohm = normalize_isolation_resistance_ohm(
-                    iso,
-                    pv_active=pv_active,
-                    inverter_state=inverter_state,
-                )
-                if normalized_ohm is not None:
-                    self.isolation.record(normalized_ohm / 1000.0, now)
+                # Skip Modbus sentinel 65535000 Ω (= 0xFFFFFF), the inverter's
+                # "no measurement available" marker. Recording it would
+                # produce a flat line that masks real isolation trends.
+                if float(iso) == 65535000.0:
+                    pass
+                else:
+                    normalized_ohm = normalize_isolation_resistance_ohm(
+                        iso,
+                        pv_active=pv_active,
+                        inverter_state=inverter_state,
+                    )
+                    if normalized_ohm is not None:
+                        self.isolation.record(normalized_ohm / 1000.0, now)
             except (TypeError, ValueError):
                 pass
 

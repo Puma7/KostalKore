@@ -175,6 +175,32 @@ def test_scan_orphans_sync_ignores_registered_legacy_ids() -> None:
     assert report.total_orphans == 0
 
 
+def test_scan_orphans_sync_recognizes_wr_prefix() -> None:
+    """Entries from a user-renamed device named "WR"/"WR2" must be matchable.
+
+    Without the wr_ / wr2_ patterns these legacy entities (e.g. from a user
+    who manually renamed the kostal_plenticore device "WR") would never get
+    suggested as orphans and their history would be unreachable.
+    """
+    recorder, _ = _make_recorder_with_states(
+        states_entity_ids=[
+            "sensor.wr_battery_soc",
+            "sensor.wr2_pv_power",
+        ],
+        statistics_ids=["sensor.wr_battery_soc"],
+    )
+    report = _scan_orphans_sync(
+        recorder,
+        registry_entity_ids=set(),
+        kore_entity_ids=["sensor.kore_battery_soc", "sensor.kore_pv_power"],
+    )
+    assert report.total_orphans == 2
+
+    by_id = {c.old_entity_id: c for c in report.candidates}
+    assert by_id["sensor.wr_battery_soc"].suggested_target == "sensor.kore_battery_soc"
+    assert by_id["sensor.wr2_pv_power"].suggested_target == "sensor.kore_pv_power"
+
+
 # ---------------------------------------------------------------------------
 # scan_orphan_history — wires registry + recorder
 # ---------------------------------------------------------------------------

@@ -46,10 +46,15 @@ _LOGGER: Final = logging.getLogger(__name__)
 # Legacy entity_id substrings that mark a row as Plenticore-derived. The
 # kostal_plenticore prefix covers the vast majority; the additional tokens
 # catch entries the user manually renamed (e.g. "pv_power") that still belong
-# to the Plenticore device family. Empty fragments are ignored.
+# to the Plenticore device family. Empty fragments are ignored. `.wr_` is
+# anchored to the slug start to cover entries the user renamed via a device
+# named "WR" / "WR2" (common shorthand for Wechselrichter) — without the
+# leading dot it would over-match generic substrings like "warning".
 _LEGACY_ENTITY_ID_FRAGMENTS: Final[tuple[str, ...]] = (
     "kostal_plenticore",
     "plenticore",
+    ".wr_",
+    ".wr2_",
 )
 
 _CONF_MAPPING: Final[str] = "mapping"
@@ -113,7 +118,10 @@ def _entity_id_suffix(entity_id: str) -> str:
     domain, sep, local = entity_id.partition(".")
     if not sep:
         local = domain
-    for token in ("kostal_plenticore_", "kostal_kore_", "kore_", "plenticore_"):
+    for token in (
+        "kostal_plenticore_", "kostal_kore_", "kore_", "plenticore_",
+        "wr2_", "wr_",
+    ):
         if local.startswith(token):
             local = local[len(token):]
             break

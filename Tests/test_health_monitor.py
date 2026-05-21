@@ -311,6 +311,14 @@ class TestInverterHealthMonitor:
         m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
         assert m.isolation.current is None
 
+    def test_isolation_sentinel_65535000_skipped(self) -> None:
+        """The Modbus sentinel marker must not contaminate the isolation trend."""
+        m = InverterHealthMonitor()
+        m.update_from_modbus(
+            {"isolation_resistance": 65535000.0, "total_dc_power": 5000.0}
+        )
+        assert m.isolation.current is None
+
 
 class TestHealthMonitorCoverageGaps:
 
