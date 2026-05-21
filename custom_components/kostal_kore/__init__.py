@@ -26,6 +26,7 @@ from pykoplenti import ApiException
 
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -43,7 +44,6 @@ from .const import (
     CONF_MODBUS_PROXY_PORT,
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
-    CONF_SERVICE_CODE,
     DEFAULT_KSEM_PORT,
     DEFAULT_KSEM_UNIT_ID,
     DEFAULT_MODBUS_PORT,
@@ -66,8 +66,13 @@ from .migration_services import (
     async_register_migration_services,
     async_unregister_migration_services_if_unused,
 )
+from .orphan_history import (
+    async_register_orphan_history_services,
+    async_unregister_orphan_history_services_if_unused,
+)
 from .mqtt_bridge import KostalMqttBridge
-from .repairs import clear_issue
+from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
+from .write_audit import WriteAuditLog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,7 +93,6 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 # Performance constants
 SETUP_TIMEOUT_SECONDS: Final[float] = 90.0
 UNLOAD_TIMEOUT_SECONDS: Final[float] = 5.0
-PLATFORM_SETUP_TIMEOUT_SECONDS: Final[float] = 60.0
 EVENT_POLL_INTERVAL_SECONDS: Final[int] = 30
 
 # Performance metrics constants
@@ -164,6 +168,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         clear_issue(hass, _suffix)  # legacy unscoped ID
         clear_issue(hass, _suffix, entry_id=entry.entry_id)  # new scoped ID
 
+    # One-shot migration notice for Battery Work Capacity unit (Ah -> Wh).
+    # Triggered only when the entity registry still records the old "Ah" unit.
+    from homeassistant.helpers import entity_registry as er
+    _ent_reg = er.async_get(hass)
+    _existing_id = _ent_reg.async_get_entity_id(
+        "sensor",
+        DOMAIN,
+        f"{entry.entry_id}_devices:local:battery_WorkCapacity",
+    )
+    if _existing_id is not None:
+        _entry_reg = _ent_reg.async_get(_existing_id)
+        _effective_unit = (
+            _entry_reg.unit_of_measurement if _entry_reg is not None else None
+        )
+        if _effective_unit == "Ah":
+            create_battery_capacity_unit_migration_issue(hass, entry_id=entry.entry_id)
+        else:
+            clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
+    else:
+        clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
+
     entry.runtime_data = plenticore
 
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
@@ -190,12 +215,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     mqtt_bridge = None
     modbus_proxy = None
     soc_controller = None
-    installer_access = bool(
-        entry.data.get(
-            CONF_INSTALLER_ACCESS,
-            bool(entry.data.get(CONF_SERVICE_CODE)),
-        )
-    )
+    # Default to False when the persisted flag is missing. The config flow
+    # already evaluates _installer_access_from_role() and stores the result;
+    # the legacy "service code present ⇒ installer access" fallback would
+    # bypass that role check (e.g. USER + service code, which the wizard
+    # explicitly denies). Safer to be locked out than to silently unlock
+    # writes for an unknown role.
+    installer_access = bool(entry.data.get(CONF_INSTALLER_ACCESS, False))
     access_role = str(entry.data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
     _LOGGER.info(
         "Authenticated inverter access role: %s (installer writes: %s)",
@@ -235,9 +261,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         if modbus_coordinator and entry.options.get(
             CONF_MQTT_BRIDGE_ENABLED, False
         ):
-            device_id = plenticore.device_info.get("serial_number", entry.entry_id)
-            if isinstance(device_id, tuple):
-                device_id = str(entry.entry_id)
+            # Extract device identifier from DeviceInfo identifiers set.
+            device_id: str = str(entry.entry_id)
+            for _domain, _ident in plenticore.device_info.get("identifiers", set()):
+                if _domain == DOMAIN and _ident != "unknown":
+                    device_id = str(_ident)
+                    break
             mqtt_bridge = KostalMqttBridge(
                 hass, modbus_coordinator, str(device_id),
                 soc_controller=soc_controller,
@@ -333,12 +362,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         degradation_tracker = DegradationTracker()
         _clear_sent: dict[str, bool] = {"value": False}
 
+        modbus_coordinator._health_monitor = health_monitor
+        # Await restore synchronously so the listener registered below cannot
+        # observe a partially-restored isolation deque. The task-based form
+        # had a race where the first coordinator update arrived before the
+        # restore coroutine ran.
+        await modbus_coordinator._restore_isolation_sample()
+
         @callback
         def _feed_health_data() -> None:  # pragma: no cover
             data = modbus_coordinator.data
             if data:
                 health_monitor.update_from_modbus(data)
                 degradation_tracker.update_from_modbus(data)
+                iso_current = health_monitor.isolation.current
+                if iso_current is not None:
+                    hass.async_create_task(
+                        modbus_coordinator._save_isolation_sample(iso_current)
+                    )
                 new_alerts = fire_safety.analyze(data)
                 if new_alerts:
                     _clear_sent["value"] = False
@@ -376,7 +417,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         longevity_advisor = LongevityAdvisor(health_monitor, bat_thresholds)
         _LOGGER.info("Battery chemistry: %s (%s)", bat_thresholds.chemistry, bat_thresholds.chemistry_full)
 
+    write_audit = WriteAuditLog()
+    if modbus_coordinator is not None:
+        modbus_coordinator._write_audit = write_audit
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "_setup_options": dict(entry.options),
         "modbus_coordinator": modbus_coordinator,
         "ksem_coordinator": ksem_coordinator,
         "event_coordinator": event_coordinator,
@@ -390,15 +436,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "request_scheduler": request_scheduler,
         "soc_controller": soc_controller,
         "num_bidirectional": num_bi if modbus_coordinator is not None else 0,
+        "write_audit": write_audit,
     }
 
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         if modbus_coordinator is not None:
+            # Modbus platforms expose fire-safety and health binary sensors,
+            # so a silent skip would hide critical safety entities. Surface
+            # the failure as ConfigEntryNotReady so HA can retry, instead of
+            # returning True with the binary-sensor platform missing.
             try:
                 await hass.config_entries.async_forward_entry_setups(entry, MODBUS_PLATFORMS)
-            except Exception as modbus_err:  # pragma: no cover
-                _LOGGER.warning("Modbus platform setup incomplete: %s", modbus_err)
+            except Exception as modbus_err:
+                _LOGGER.error(
+                    "Modbus platform setup failed - safety binary sensors will be missing: %s",
+                    modbus_err,
+                )
+                raise ConfigEntryNotReady(
+                    f"Modbus platform setup failed: {modbus_err}"
+                ) from modbus_err
+    except ConfigEntryNotReady:
+        # Let HA retry; still roll back the runtime objects we started.
+        await _rollback_setup(hass, entry, plenticore)
+        _log_setup_metrics(start_time, False)
+        raise
     except Exception as err:
         _handle_init_error(err, "platform setup")
         # Rollback runtime objects that were started before platform forwarding
@@ -407,6 +469,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         return False
 
     async_register_migration_services(hass)
+    async_register_orphan_history_services(hass)
+    from .diagnostics import async_register_debug_bundle_service
+    async_register_debug_bundle_service(hass)
     _log_setup_metrics(start_time, True)
     return True
 
@@ -427,6 +492,25 @@ async def _rollback_setup(
     mqtt = entry_data.get("mqtt_bridge")
     if mqtt:
         await _await_cleanup_step("MQTT bridge stop", mqtt.async_stop())
+    # Coordinators that may have started background polling / TCP connections
+    # before the platform forward failed must be shut down too — leaving them
+    # running creates zombie tasks that keep talking to the inverter until
+    # HA is restarted.
+    modbus_coordinator = entry_data.get("modbus_coordinator")
+    if modbus_coordinator is not None:
+        await _await_cleanup_step(
+            "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
+        )
+    ksem_coordinator = entry_data.get("ksem_coordinator")
+    if ksem_coordinator is not None:
+        await _await_cleanup_step(
+            "KSEM coordinator shutdown", ksem_coordinator.async_shutdown()
+        )
+    event_coordinator = entry_data.get("event_coordinator")
+    if event_coordinator is not None:
+        await _await_cleanup_step(
+            "Event coordinator shutdown", event_coordinator.async_shutdown()
+        )
     await plenticore.async_unload()
     _LOGGER.warning("Rolled back partial setup for %s", entry.title)
 
@@ -434,7 +518,18 @@ async def _rollback_setup(
 async def _async_options_updated(
     hass: HomeAssistant, entry: PlenticoreConfigEntry
 ) -> None:
-    """Reload integration when options change."""
+    """Reload integration when options actually change."""
+    domain_data = hass.data.get(DOMAIN, {})
+    entry_data = domain_data.get(entry.entry_id)
+    if entry_data is not None:
+        prev = entry_data.get("_setup_options")
+        if prev is not None and dict(entry.options) == prev:
+            _LOGGER.debug(
+                "Config entry %s updated but options unchanged – skipping reload",
+                entry.entry_id,
+            )
+            return
+    _LOGGER.info("Options changed for %s, reloading integration", entry.entry_id)
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -457,9 +552,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     """Unload the Kostal Plenticore integration with graceful cleanup."""
     start_time = time.time()
 
-    # Clean up SoC Controller + Modbus proxy + MQTT bridge (sequentially
-    # to give the inverter time to release connections between stops)
-    entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    # Read entry_data WITHOUT popping. The platform unload below uses these
+    # references (entities call coordinator.async_remove_listener etc.), and
+    # if platform unload fails HA will retry — leaving the store intact lets
+    # the retry find the same coordinator instances instead of building new
+    # zombies on top of half-stopped ones.
+    domain_store = hass.data.get(DOMAIN, {})
+    entry_data = domain_store.get(entry.entry_id, {})
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
         await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
@@ -483,10 +582,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step(
             "KSEM coordinator shutdown", ksem_coordinator.async_shutdown()
         )
+    # Mirror _rollback_setup: explicitly stop the event coordinator's polling
+    # so a reload race cannot leave a zombie task talking to the inverter
+    # while platform entities are torn down.
+    event_coordinator = entry_data.get("event_coordinator")
+    if event_coordinator is not None:
+        await _await_cleanup_step(
+            "Event coordinator shutdown", event_coordinator.async_shutdown()
+        )
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
+        # Only drop the entry store once every platform has unloaded; on
+        # failure HA can retry and find the same in-flight objects.
+        domain_store.pop(entry.entry_id, None)
         try:
             await asyncio.wait_for(
                 entry.runtime_data.async_unload(), timeout=UNLOAD_TIMEOUT_SECONDS
@@ -510,6 +620,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         hass,
         unloading_entry_id=entry.entry_id,
     )
+    async_unregister_orphan_history_services_if_unused(
+        hass,
+        unloading_entry_id=entry.entry_id,
+    )
+    from .diagnostics import async_unregister_debug_bundle_service_if_unused
+    async_unregister_debug_bundle_service_if_unused(hass)
     return unload_ok
 
 
@@ -518,9 +634,38 @@ async def async_remove_config_entry_device(
     config_entry: PlenticoreConfigEntry,
     device_entry: dr.DeviceEntry,
 ) -> bool:
-    """Allow removal of stale devices from the device registry.
+    """Refuse to remove the primary inverter device while the entry is active.
 
-    This integration creates one device per inverter (config entry).
-    If the device no longer exists, allow HA to remove it.
+    HA exposes a "Delete device" button on every device tile. For this
+    integration, the primary device IS the config entry's representation —
+    removing it while the entry is loaded leaves orphan entities and a
+    confusing UI. Stale auxiliary devices (e.g. legacy duplicates from older
+    versions) remain removable.
     """
+    plenticore = getattr(config_entry, "runtime_data", None)
+    if plenticore is None:
+        # Entry unloaded or never set up — let HA clean up.
+        return True
+
+    primary_id: str | None = None
+    try:
+        primary_id = plenticore._get_persistent_device_id()  # noqa: SLF001
+    except Exception:  # noqa: BLE001 – defensive; do not block UI on lookup
+        primary_id = None
+
+    if primary_id is None:
+        # The entry is loaded (runtime_data is set) but we cannot identify
+        # the primary device. Refuse the deletion: allowing it here would
+        # let a transient registry / lookup hiccup wipe the user's main
+        # inverter tile and leave orphan entities behind. The user can
+        # still remove the integration via "Delete config entry".
+        _LOGGER.warning(
+            "Refusing device removal for active entry %s: primary device id lookup failed",
+            config_entry.entry_id,
+        )
+        return False
+
+    for domain, identifier in device_entry.identifiers:
+        if domain == DOMAIN and identifier == primary_id:
+            return False
     return True

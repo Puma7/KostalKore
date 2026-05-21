@@ -63,6 +63,20 @@ def create_installer_required_issue(hass: HomeAssistant, *, entry_id: str = "") 
     )
 
 
+def create_battery_capacity_unit_migration_issue(   # NEU
+    hass: HomeAssistant, *, entry_id: str
+) -> None:
+    """Inform user that Battery Work Capacity unit changed from Ah to Wh."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _issue_id("battery_capacity_unit_migration", entry_id=entry_id),
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="battery_capacity_unit_migration",
+    )
+
+
 def clear_issue(hass: HomeAssistant, suffix: str, *, entry_id: str = "") -> None:
     """Clear a repair issue if present."""
     ir.async_delete_issue(hass, DOMAIN, _issue_id(suffix, entry_id=entry_id))

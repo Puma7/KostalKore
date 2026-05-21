@@ -116,6 +116,8 @@ async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):
     migrated_device = device_registry.async_get(old_device.id)
     assert migrated_device is not None
     assert target_entry.entry_id in migrated_device.config_entries
+    assert (DOMAIN, "SER-12345") in migrated_device.identifiers
+    assert result.unloaded_source_entry is True
 
 
 def test_legacy_helper_functions_cover_rewrite_merge_and_selection(hass):
@@ -251,6 +253,7 @@ async def test_migration_and_cleanup_cover_remaining_runtime_branches(hass):
         )
 
     assert result.removed_source_entry is True
+    assert result.unloaded_source_entry is False
     assert mock_update_device.call_args.kwargs["remove_config_entry_id"] == source_entry.entry_id
     migrated = entity_registry.async_get(old_entity.entity_id)
     assert migrated is not None
@@ -615,6 +618,8 @@ async def test_discover_duplicate_pairs_and_adopt_entity_ids(hass):
     migrated_device = device_registry.async_get(old_device.id)
     assert migrated_device is not None
     assert target_entry.entry_id in migrated_device.config_entries
+    assert (DOMAIN, "SER-ADOPT-1") in migrated_device.identifiers
+    assert applied.unloaded_source_entry is True
 
 
 async def test_adopt_entity_ids_keeps_truthy_unique_id_without_duplicate_target(hass):
@@ -700,7 +705,7 @@ async def test_migration_and_cleanup_cover_remaining_no_unique_and_device_none_p
     source_entry.add_to_hass(hass)
 
     fake_source_entity = SimpleNamespace(unique_id=None, entity_id="sensor.legacy_no_uid")
-    fake_source_device = SimpleNamespace(id="device-1")
+    fake_source_device = SimpleNamespace(id="device-1", identifiers=frozenset())
     entity_registry = MagicMock()
     device_registry = MagicMock()
     device_registry.async_update_device.return_value = None
@@ -749,7 +754,7 @@ async def test_finalize_cleanup_counts_detached_devices_when_registry_updates(ha
 
     entity_registry = MagicMock()
     device_registry = MagicMock()
-    fake_device = SimpleNamespace(id="device-detach-1")
+    fake_device = SimpleNamespace(id="device-detach-1", identifiers=frozenset())
     device_registry.async_update_device.return_value = object()
 
     with (
@@ -776,3 +781,157 @@ async def test_finalize_cleanup_counts_detached_devices_when_registry_updates(ha
         )
 
     assert cleanup_result.detached_legacy_devices == 1
+
+
+async def test_migrate_legacy_entry_rewrites_device_identifier_to_kore_domain(hass):
+    """Migration adds (DOMAIN, serial) identifier so KORE can find the device without creating a duplicate."""
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="kore",
+        data={CONF_HOST: "10.0.0.1", CONF_PASSWORD: "pw"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        title="legacy",
+        data={CONF_HOST: "10.0.0.1", CONF_PASSWORD: "pw"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    device_registry = dr.async_get(hass)
+    old_device = device_registry.async_get_or_create(
+        config_entry_id=source_entry.entry_id,
+        identifiers={(LEGACY_DOMAIN, "SER-IDENT-1")},
+        manufacturer="Kostal",
+        name="Legacy",
+    )
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
+        result = await migrate_legacy_plenticore_entry(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            remove_source_entry=False,
+        )
+
+    updated = device_registry.async_get(old_device.id)
+    assert updated is not None
+    assert (DOMAIN, "SER-IDENT-1") in updated.identifiers
+    assert (LEGACY_DOMAIN, "SER-IDENT-1") in updated.identifiers
+    assert result.unloaded_source_entry is True
+
+
+async def test_migrate_legacy_entry_unloads_source_when_not_removing(hass):
+    """Migration calls async_unload on the source entry when remove_source_entry=False."""
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "10.0.0.1", CONF_PASSWORD: "pw"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        data={CONF_HOST: "10.0.0.1", CONF_PASSWORD: "pw"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
+        patch.object(hass.config_entries, "async_unload", AsyncMock(return_value=True)) as mock_unload,
+    ):
+        result = await migrate_legacy_plenticore_entry(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            remove_source_entry=False,
+        )
+
+    mock_unload.assert_awaited_once_with(source_entry.entry_id)
+    assert result.unloaded_source_entry is True
+
+
+async def test_adopt_entity_ids_unloads_source_entry(hass):
+    """adopt_legacy_entity_ids unloads the source entry after live rebind."""
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "10.0.0.2", CONF_PASSWORD: "pw"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        data={CONF_HOST: "10.0.0.2", CONF_PASSWORD: "pw"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    with (
+        patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
+        patch.object(hass.config_entries, "async_unload", AsyncMock(return_value=True)) as mock_unload,
+    ):
+        result = await adopt_legacy_entity_ids(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+            dry_run=False,
+        )
+
+    mock_unload.assert_awaited_once_with(source_entry.entry_id)
+    assert result.unloaded_source_entry is True
+
+
+async def test_adopt_entity_ids_dry_run_does_not_unload_source(hass):
+    """dry_run=True must never touch the source entry state."""
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "10.0.0.3", CONF_PASSWORD: "pw"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        data={CONF_HOST: "10.0.0.3", CONF_PASSWORD: "pw"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    with patch.object(
+        hass.config_entries, "async_unload", AsyncMock(return_value=True)
+    ) as mock_unload:
+        result = await adopt_legacy_entity_ids(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+            dry_run=True,
+        )
+
+    mock_unload.assert_not_awaited()
+    assert result.unloaded_source_entry is False
+
+
+async def test_finalize_cleanup_strips_legacy_domain_from_device_identifiers(hass):
+    """finalize_legacy_cleanup replaces (LEGACY_DOMAIN, serial) with (DOMAIN, serial)."""
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "10.0.0.4", CONF_PASSWORD: "pw"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        data={CONF_HOST: "10.0.0.4", CONF_PASSWORD: "pw"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    device_registry = dr.async_get(hass)
+    old_device = device_registry.async_get_or_create(
+        config_entry_id=source_entry.entry_id,
+        identifiers={(LEGACY_DOMAIN, "SER-CLEAN-99"), (DOMAIN, "SER-CLEAN-99")},
+        manufacturer="Kostal",
+        name="Legacy",
+    )
+    device_registry.async_update_device(old_device.id, add_config_entry_id=target_entry.entry_id)
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
+        await finalize_legacy_cleanup(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+        )
+
+    updated = device_registry.async_get(old_device.id)
+    assert updated is not None
+    assert (LEGACY_DOMAIN, "SER-CLEAN-99") not in updated.identifiers
+    assert (DOMAIN, "SER-CLEAN-99") in updated.identifiers

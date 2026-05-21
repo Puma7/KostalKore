@@ -51,6 +51,5 @@ exclude_lines =
     if TYPE_CHECKING
     except ImportError
     WARNUNG: Externe Batteriesteuerung
-    Modbus platform setup incomplete
     Modbus platform unload incomplete
     _feed_health_data

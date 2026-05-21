@@ -11,7 +11,7 @@ from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE, DOMAIN
+from .const import CONF_INSTALLER_ACCESS, DOMAIN
 from .const_ids import ModuleId, SettingId
 from .repairs import clear_issue, create_installer_required_issue
 
@@ -86,7 +86,10 @@ def normalize_isolation_resistance_ohm(
         return numeric
     if inverter_state in (0, 1, 10, 15):
         return numeric
-    if 0 < abs(numeric) < ISOLATION_KOHM_HEURISTIC_MAX:
+    if 0 < abs(numeric) <= ISOLATION_KOHM_HEURISTIC_MAX:
+        # Bug #10: boundary is INCLUSIVE. A reading of exactly 1000 kΩ (= 1 MΩ)
+        # is a healthy isolation value and must be converted to 1_000_000 Ω.
+        # The strict `<` form would leave 1000 as raw Ω → false critical alarm.
         return numeric * 1000.0
     return numeric
 
@@ -274,7 +277,10 @@ class PlenticoreDataFormatter:
             if math.isnan(value) or math.isinf(value):
                 return None
             if value < 0:
-                return 0.0
+                # Return None instead of 0.0 to avoid a counter-reset on
+                # TOTAL_INCREASING sensors. None makes the sensor unavailable
+                # for one tick without touching the running total.
+                return None
             return value
         except (TypeError, ValueError):
             _handle_format_error(state, "energy")
@@ -642,12 +648,10 @@ def ensure_installer_access(
     if not requires_installer:
         return True
 
-    installer_access = bool(
-        entry.data.get(
-            CONF_INSTALLER_ACCESS,
-            bool(entry.data.get(CONF_SERVICE_CODE)),
-        )
-    )
+    # Mirror __init__.async_setup_entry: only the persisted flag counts.
+    # A bare service code without an installer-grade role must NOT grant
+    # writes — the config flow already vetted that combination.
+    installer_access = bool(entry.data.get(CONF_INSTALLER_ACCESS, False))
     if not installer_access:
         log_fn = getattr(_LOGGER, log_level, _LOGGER.warning)
         log_fn(

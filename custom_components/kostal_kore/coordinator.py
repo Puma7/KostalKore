@@ -59,6 +59,16 @@ EVENT_DEDUP_COOLDOWN_SECONDS: int = 300
 EVENT_UPDATE_INTERVAL_SECONDS: int = 30
 SETUP_FETCH_TIMEOUT_SECONDS: float = 45.0
 SETUP_PREWARM_TIMEOUT_SECONDS: float = 30.0
+# NEU: Obergrenze für gecachte Stale-Daten. Nach Ablauf werfen Koordinatoren
+# UpdateFailed, damit HA-Entities korrekt "Unavailable" werden statt veraltete
+# Werte als "available" anzuzeigen (z. B. bei stundenlangem Inverter-Ausfall).
+STALE_DATA_MAX_AGE_SECONDS: float = 300.0
+# Select entities represent ACTIVE controller state (battery mode, fallback
+# behaviour, …) which can change autonomously between polls. A long stale
+# window would silently show ghost state after a real mode switch, so the
+# cache only bridges short transient 503 bursts (≈ 2 poll cycles at the
+# default 30 s select interval) and otherwise lets entities go unavailable.
+SELECT_STALE_DATA_MAX_AGE_SECONDS: float = 60.0
 DEFAULT_AVAILABLE_MODULES: Final[list[str]] = [
     "devices:local",
     "scb:statistic:EnergyFlow",
@@ -182,10 +192,17 @@ class Plenticore:
         self._client = ExtendedApiClient(session, host=self.host)  # pyright: ignore[reportArgumentType]
         
         try:
-            await self._client.login(
-                self.config_entry.data[CONF_PASSWORD],
-                service_code=self.config_entry.data.get(CONF_SERVICE_CODE),
+            await asyncio.wait_for(
+                self._client.login(
+                    self.config_entry.data[CONF_PASSWORD],
+                    service_code=self.config_entry.data.get(CONF_SERVICE_CODE),
+                ),
+                timeout=15.0,
             )
+        except asyncio.TimeoutError as timeout_err:  # GEÄNDERT: named for chain
+            _LOGGER.error("Login to %s timed out after 15s", self.host)
+            create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
+            raise ConfigEntryNotReady("Login timed out") from timeout_err  # GEÄNDERT
         except AuthenticationException as err:
             _LOGGER.error(
                 "Authentication exception connecting to %s: %s", self.host, err
@@ -758,12 +775,20 @@ class ProcessDataUpdateCoordinator(
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_result: dict[str, dict[str, str]] = {}
+        # NEU: Zeitstempel des letzten erfolgreichen Fetches für Stale-TTL.
+        self._last_success_ts: float = 0.0
         self._init_adaptive_polling(
             default_base_seconds=10,
             max_interval_floor_seconds=120,
             max_interval_multiplier=6,
             failure_multiplier_cap=3,
         )
+
+    def _stale_cache_usable(self) -> bool:
+        """Return True if the cached _last_result is still within the stale TTL."""
+        if not self._last_result or self._last_success_ts <= 0.0:
+            return False
+        return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
@@ -783,21 +808,22 @@ class ProcessDataUpdateCoordinator(
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
                 clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
             self._record_success()
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as timeout_err:
             _LOGGER.error("Timeout fetching process data for %s", self.name)
-            if self._last_result:
+            # GEÄNDERT: Stale-Cache nur innerhalb STALE_DATA_MAX_AGE_SECONDS nutzen.
+            if self._stale_cache_usable():
                 _LOGGER.warning(
                     "Timeout fetching process data for %s - using last known values",
                     self.name,
                 )
-                # Soft backoff while keeping entities responsive.
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
             self._record_failure()
-            raise UpdateFailed("Timeout fetching process data") from None
+            raise UpdateFailed("Timeout fetching process data") from timeout_err
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
-            if self._last_result:
+            # GEÄNDERT: Stale-Cache TTL-gebunden statt unbegrenzt.
+            if self._stale_cache_usable():
                 if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                     _LOGGER.warning(
                         "Inverter internal communication error (503) fetching process data - "
@@ -809,48 +835,121 @@ class ProcessDataUpdateCoordinator(
                         self.name,
                         error_msg,
                     )
-                # Soft backoff while keeping entities responsive.
                 self._apply_adaptive_interval(1.5)
                 return self._last_result
-            self._record_failure()
-
-            # Handle 503 errors (internal communication error)
+            # Bug #8 / QA-6: 503 on first fetch (empty _last_result) → retry once
+            # before giving up. The inverter often returns 503 during warm-up;
+            # a single 3-second pause is usually enough to recover.
+            # _record_failure() is intentionally deferred to the retry-failure
+            # branch so a successful retry leaves the adaptive interval untouched.
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
-                _LOGGER.warning("Inverter internal communication error (503) fetching process data - retrying later")
-                raise UpdateFailed(f"Inverter busy/internal error: {error_msg}") from err
-
-            if isinstance(err, ApiException):
-                modbus_err = parse_modbus_exception(err)
-                _LOGGER.error("Error fetching process data for %s: %s", self.name, modbus_err.message)
-            elif "Unknown API response [500]" in error_msg:
-                _LOGGER.warning("Inverter API returned 500 error fetching process data for %s - feature likely not supported", self.name)
+                _LOGGER.warning(
+                    "Inverter busy (503) on first fetch for %s – retrying once after 3s",
+                    self.name,
+                )
+                await asyncio.sleep(3.0)
+                try:
+                    fetched_data = await asyncio.wait_for(
+                        client.get_process_data_values(self._fetch),
+                        timeout=15.0,
+                    )
+                    self._record_success()  # GEÄNDERT: only record success, not prior failure
+                    if (hass := getattr(self._plenticore, "hass", None)) is not None:
+                        clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)  # NEU
+                    _LOGGER.info("Retry after 503 succeeded for %s", self.name)
+                except Exception as retry_err:
+                    self._record_failure()  # GEÄNDERT: only record failure if retry also fails
+                    raise UpdateFailed(
+                        f"Inverter busy/internal error: {error_msg}"
+                    ) from retry_err
+                # Retry succeeded – fall through to result processing below.
             else:
-                _LOGGER.error("Error fetching process data for %s: %s", self.name, err)
-            raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
+                self._record_failure()  # GEÄNDERT: moved here for non-503 errors
+                if isinstance(err, ApiException):
+                    modbus_err = parse_modbus_exception(err)
+                    _LOGGER.error("Error fetching process data for %s: %s", self.name, modbus_err.message)
+                elif "Unknown API response [500]" in error_msg:
+                    _LOGGER.warning("Inverter API returned 500 error fetching process data for %s - feature likely not supported", self.name)
+                else:
+                    _LOGGER.error("Error fetching process data for %s: %s", self.name, err)
+                raise UpdateFailed(f"Error communicating with API: {error_msg}") from err
 
+        # QA-5: two separate dicts.
+        #   `result`  → what we return to HA (may contain backfilled values).
+        #   `fresh_result` → what we cache in `_last_result` (only freshly parsed
+        #   values, never backfilled). Keeping these separate prevents a stale
+        #   cascade where backfilled values are re-cached and perpetuated forever.
         result: dict[str, dict[str, str]] = {}
+        fresh_result: dict[str, dict[str, str]] = {}
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
                 if hasattr(module_data, 'items') and callable(getattr(module_data, 'items')):
-                    result[module_id] = {
-                        process_data_id: str(module_data[process_data_id].value)
-                        for process_data_id in module_data.keys()
-                    }
+                    keys = list(module_data.keys())
                 elif hasattr(module_data, '__iter__') and hasattr(module_data, '__getitem__'):
-                    result[module_id] = {
-                        process_data_id: str(module_data[process_data_id].value)
-                        for process_data_id in module_data
-                    }
+                    keys = list(module_data)
                 else:
                     _LOGGER.warning("Unsupported data type for module %s: %s", module_id, type(module_data))
                     result[module_id] = {}
-            except (AttributeError, TypeError, KeyError, ValueError) as err:
-                _LOGGER.warning("Error processing module %s: %s", module_id, err)
+                    continue
+            except (AttributeError, TypeError) as err:
+                _LOGGER.warning("Error inspecting module %s: %s", module_id, err)
                 result[module_id] = {}
+                continue
 
-        if result:
-            self._last_result = result
+            # Bug #7: parse field-by-field instead of as one dict-comprehension.
+            # Previously, a single bad ProcessData.value access wiped the entire
+            # module's data and made every sensor on it "unavailable".
+            result[module_id] = {}
+            failed_fields: list[str] = []
+            for process_data_id in keys:
+                try:
+                    result[module_id][process_data_id] = str(module_data[process_data_id].value)
+                except (AttributeError, TypeError, KeyError, ValueError):
+                    failed_fields.append(process_data_id)
+
+            # Snapshot fresh fields BEFORE backfill so _last_result stays stale-free. // GEÄNDERT
+            fresh_result[module_id] = dict(result[module_id])
+
+            if failed_fields:
+                last_module = self._last_result.get(module_id, {})
+                restored: list[str] = []
+                still_missing: list[str] = []
+                for process_data_id in failed_fields:
+                    last_val = last_module.get(process_data_id)
+                    if last_val is not None:
+                        result[module_id][process_data_id] = last_val  # backfill into result only
+                        restored.append(process_data_id)
+                    else:
+                        still_missing.append(process_data_id)
+                if restored:
+                    _LOGGER.debug(
+                        "Restored %d cached field(s) in module %s after parse failure: %s",
+                        len(restored), module_id, ", ".join(restored),
+                    )
+                if still_missing:
+                    _LOGGER.warning(
+                        "Skipped %d field(s) in module %s (no cached value available): %s",
+                        len(still_missing), module_id, ", ".join(still_missing),
+                    )
+
+        # Per-module merge — NOT wholesale replace. Otherwise:
+        #   * a module that hit `continue` (unsupported type / inspect error)
+        #     drops out of the cache entirely on the next successful poll,
+        #     killing backfill for it forever after.
+        #   * a module where every field failed parsing would replace its
+        #     last-known-good values with {} ("fresh" but empty), again
+        #     destroying the backfill anchor.
+        # We only merge entries that actually delivered at least one fresh
+        # field, so empty-fresh modules preserve their previous cache while
+        # genuinely successful ones overwrite their stale fields.
+        any_fresh_data = False
+        for module_id, fresh_fields in fresh_result.items():
+            if fresh_fields:
+                self._last_result.setdefault(module_id, {}).update(fresh_fields)
+                any_fresh_data = True
+        if any_fresh_data:
+            self._last_success_ts = time.monotonic()  # für Stale-TTL-Check
         return result
 
 
@@ -865,12 +964,22 @@ class SettingDataUpdateCoordinator(
         """Initialize with last-result fallback for 503 errors."""
         super().__init__(*args, **kwargs)
         self._last_result: Mapping[str, Mapping[str, str]] = {}
+        # NEU: TTL-Stempel parallel zu _last_result, damit der 503-Fallback
+        # nicht beliebig alte Settings weiterserviert (Konsistenz mit
+        # ProcessDataUpdateCoordinator._stale_cache_usable).
+        self._last_success_ts: float = 0.0
         self._init_adaptive_polling(
             default_base_seconds=30,
             max_interval_floor_seconds=300,
             max_interval_multiplier=8,
             failure_multiplier_cap=8,
         )
+
+    def _stale_cache_usable(self) -> bool:
+        """Return True if cached settings are within STALE_DATA_MAX_AGE_SECONDS."""
+        if not self._last_result or self._last_success_ts <= 0.0:
+            return False
+        return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         if (client := self._plenticore.client) is None:
@@ -890,8 +999,12 @@ class SettingDataUpdateCoordinator(
         _LOGGER.debug("Fetching %s for %s", self.name, fetch)
 
         try:
-            result = await client.get_setting_values(fetch)
+            result = await asyncio.wait_for(
+                client.get_setting_values(fetch),
+                timeout=20.0,
+            )
             self._last_result = result
+            self._last_success_ts = time.monotonic()  # NEU: TTL-Stempel
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy once settings communication recovers.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
@@ -900,22 +1013,33 @@ class SettingDataUpdateCoordinator(
             return result
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
-            self._record_failure()
+            # GEÄNDERT: _record_failure() NICHT mehr unbedingt aufrufen. Bei
+            # erfolgreichem 503-Fallback (cached data returned) wurde der
+            # Koordinator vorher fälschlich gedrosselt, was nach längeren 503-Bursts
+            # zu 4+ Minuten Reaktionszeit führte, obwohl der Wechselrichter wieder
+            # antwortet. Failure wird jetzt nur registriert, wenn wir wirklich
+            # keine Daten liefern können.
 
             # Handle 503 errors (internal communication error)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
-                 # Fallback to last known data to avoid entity unavailability
-                 if self._last_result:
+                 # Fallback to last known data only while within stale-TTL,
+                 # otherwise the inverter could serve months-old switch states.
+                 if self._stale_cache_usable():
                      _LOGGER.warning(
                          "Inverter internal communication error (503) - using last known data for settings"
                      )
+                     self._apply_adaptive_interval(1.5)
                      return self._last_result
 
+                 self._record_failure()  # nur drosseln, wenn kein Cache greift
                  create_inverter_busy_issue(self._plenticore.hass, entry_id=self._plenticore.config_entry.entry_id)
                  _LOGGER.warning(
                      "Inverter internal communication error (503) fetching settings - retrying later"
                  )
                  return {}
+
+            # NEU: für alle anderen Fehler hier eine einzige record_failure-Stelle
+            self._record_failure()
 
             # Handle 404 errors (missing setting) - warn but continue
             if "[404]" in error_msg or "not found" in error_msg.lower():
@@ -964,6 +1088,16 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._history: deque[dict[str, Any]] = deque(maxlen=EVENT_HISTORY_MAX)
         self._last_signature_ts: dict[str, float] = {}
         self._last_result: dict[str, Any] = {}
+        # NEU: TTL-Stempel für Stale-Cache-Begrenzung im Fehlerpfad. Ohne TTL
+        # konnte ein altes Event-Snapshot beliebig lange "letztes Ereignis"
+        # melden, obwohl die Verbindung längst stand.
+        self._last_success_ts: float = 0.0
+
+    def _stale_cache_usable(self) -> bool:
+        """Return True if cached events are within STALE_DATA_MAX_AGE_SECONDS."""
+        if not self._last_result or self._last_success_ts <= 0.0:
+            return False
+        return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     @property
     def history(self) -> list[dict[str, Any]]:
@@ -995,6 +1129,14 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._last_signature_ts[signature] = now
         self._history.appendleft(self._event_to_payload(event))
+        # NEU: Stale-Signaturen prunen, sonst wächst _last_signature_ts über
+        # Monate unbegrenzt (eine Entry pro jemals gesehener (code,category,active)-
+        # Kombination). 10× Cooldown ist großzügig (jenseits davon ist der Eintrag
+        # ohnehin funktionslos für die Dedup-Entscheidung).
+        cutoff = now - EVENT_DEDUP_COOLDOWN_SECONDS * 10
+        stale_keys = [k for k, ts in self._last_signature_ts.items() if ts < cutoff]
+        for k in stale_keys:
+            del self._last_signature_ts[k]
 
     async def _async_update_data(self) -> dict[str, Any]:
         client = self._plenticore.client
@@ -1039,22 +1181,25 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
 
             self._last_result = result
+            self._last_success_ts = time.monotonic()  # NEU: TTL-Stempel
             return result
 
         except (ApiException, ClientError, TimeoutError) as err:
             error_msg = str(err)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                 _LOGGER.debug("Event fetch busy (503), using last event snapshot")
-                return self._last_result
+                # Only serve cached snapshot while within stale TTL; beyond
+                # that the data is too old to be a meaningful "last event".
+                return self._last_result if self._stale_cache_usable() else {}
             if isinstance(err, ApiException):
                 modbus_err = parse_modbus_exception(err)
                 _LOGGER.debug("Event fetch failed: %s", modbus_err.message)
             else:
                 _LOGGER.debug("Event fetch failed: %s", err)
-            return self._last_result
+            return self._last_result if self._stale_cache_usable() else {}
         except Exception as err:
             _LOGGER.debug("Event fetch failed unexpectedly: %s", err)
-            return self._last_result
+            return self._last_result if self._stale_cache_usable() else {}
 
 
 class PlenticoreSelectUpdateCoordinator(DataUpdateCoordinator[_DataT]):
@@ -1120,6 +1265,29 @@ class SelectDataUpdateCoordinator(
 ):
     """Implementation of PlenticoreUpdateCoordinator for select data."""
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize with per-module last-result fallback for 503 bursts."""
+        super().__init__(*args, **kwargs)
+        # Per-module last-known-good cache. Stale-TTL is checked per module
+        # so a 503 burst on one module cannot resurrect month-old options for
+        # another module. We deliberately do NOT mirror the whole result —
+        # only modules that actually saw a fresh batch get a timestamp.
+        self._module_last_result: dict[str, dict[str, str]] = {}
+        self._module_last_success_ts: dict[str, float] = {}
+
+    def _module_stale_cache_usable(self, module_id: str) -> bool:
+        """Return True if cached options for module_id are within stale-TTL.
+
+        Uses a short SELECT-specific TTL (not the 300 s shared by other
+        coordinators) because select values reflect active controller state,
+        not measured quantities — silently serving multi-minute-old mode
+        labels would mask real autonomous changes.
+        """
+        ts = self._module_last_success_ts.get(module_id, 0.0)
+        if ts <= 0.0 or module_id not in self._module_last_result:
+            return False
+        return (time.monotonic() - ts) < SELECT_STALE_DATA_MAX_AGE_SECONDS
+
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         if self._plenticore.client is None:
             return {}
@@ -1142,28 +1310,76 @@ class SelectDataUpdateCoordinator(
         module_id: dict[str, dict[str, list[str]]],
     ) -> dict[str, dict[str, str]]:
         """Get current option."""
-        # CHANGELOG (Codex, 2026-02-05):
-        # Fix review finding #1: evaluate all options for all tracked select
-        # entities instead of returning after the first entry.
+        # GEÄNDERT: Statt eines HTTP-Requests pro Option (N×1) genau ein
+        # Batch-Request pro Modul mit allen Options als data_ids – die
+        # pykoplenti get_setting_values({module: [ids]})-Form. Reduziert die
+        # API-Last von z. B. 3 Requests pro Select-Update auf 1 und vermeidet
+        # 503-Bursts.
         result: dict[str, dict[str, str]] = {}
+        client = self._plenticore.client
+        if client is None:
+            return result
+
         for mid, data_map in list(module_id.items()):
             module_result: dict[str, str] = {}
+            # Sammle alle data_ids dieses Moduls einmalig (Set → keine Duplikate).
+            options_to_query: list[str] = sorted({
+                opt
+                for all_options in data_map.values()
+                for opt in all_options
+                if opt != "None"
+            })
+
+            module_values: Mapping[str, str] = {}
+            batch_failed = False
+            if options_to_query:
+                try:
+                    batch = await client.get_setting_values({mid: options_to_query})
+                    module_values = dict(batch.get(mid, {}))
+                    if (hass := getattr(self._plenticore, "hass", None)) is not None:
+                        clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
+                except (ApiException, ClientError, TimeoutError) as err:
+                    error_msg = str(err)
+                    if "[404]" in error_msg or "not found" in error_msg.lower():
+                        _LOGGER.warning(
+                            "Select options not available on %s (404): %s",
+                            mid, options_to_query,
+                        )
+                    elif "[503]" in error_msg or "internal communication error" in error_msg.lower():
+                        _LOGGER.warning(
+                            "Inverter busy (503) batch-reading select options for %s – retrying later",
+                            mid,
+                        )
+                        batch_failed = True
+                    else:
+                        _LOGGER.error("Batch select read failed for %s: %s", mid, err)
+                        batch_failed = True
+                    module_values = {}
+
+            # Transient batch failures (503 / network) should not flap the UI:
+            # serve the previous freshly-read options for THIS module if they
+            # are within stale-TTL. 404 / "options not available" is treated
+            # as a permanent state and falls through to "None" defaults.
+            if batch_failed and self._module_stale_cache_usable(mid):
+                result[mid] = dict(self._module_last_result[mid])
+                continue
+
             for data_id, all_options in list(data_map.items()):
                 selected_option = "None"
-                for all_option in list(all_options):
+                for all_option in all_options:
                     if all_option == "None":
                         continue
-                    val = await self.async_read_data(mid, all_option)
-                    if not val:
-                        continue
-                    for option in val.values():
-                        # Safe dictionary access - use .get() to prevent KeyError
-                        if option.get(all_option) == "1":
-                            selected_option = all_option
-                            break
-                    if selected_option != "None":
+                    if module_values.get(all_option) == "1":
+                        selected_option = all_option
                         break
                 module_result[data_id] = selected_option
+
             if module_result:
                 result[mid] = module_result
+                # Only refresh the per-module cache on a real batch success;
+                # 404 yields module_result full of "None" which we must NOT
+                # cache (would mask a subsequent recovery).
+                if not batch_failed and options_to_query and module_values:
+                    self._module_last_result[mid] = dict(module_result)
+                    self._module_last_success_ts[mid] = time.monotonic()
         return result

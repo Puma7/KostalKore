@@ -21,7 +21,6 @@ from .const import (
     CONF_HOST,
     CONF_INSTALLER_ACCESS,
     CONF_PASSWORD,
-    CONF_SERVICE_CODE,
     DOMAIN,
 )
 
@@ -39,6 +38,7 @@ class LegacyMigrationResult:
     migrated_devices: int = 0
     removed_target_duplicates: int = 0
     removed_source_entry: bool = False
+    unloaded_source_entry: bool = False
 
 
 @dataclass(slots=True)
@@ -62,6 +62,7 @@ class LegacyAdoptResult:
     migrated_entities: int = 0
     migrated_devices: int = 0
     removed_target_duplicates: int = 0
+    unloaded_source_entry: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -142,11 +143,12 @@ def _merge_entry_data(target_entry: ConfigEntry, source_entry: ConfigEntry) -> d
             merged_data.get(CONF_ACCESS_ROLE, "UNKNOWN"),
         )
     )
+    # The target entry has already been authenticated by the new wizard
+    # (which writes CONF_INSTALLER_ACCESS via _installer_access_from_role).
+    # Do NOT fall back to the legacy "service code present ⇒ installer
+    # access" rule here — that bypasses the role check.
     merged_data[CONF_INSTALLER_ACCESS] = bool(
-        target_data.get(
-            CONF_INSTALLER_ACCESS,
-            bool(merged_data.get(CONF_SERVICE_CODE)),
-        )
+        target_data.get(CONF_INSTALLER_ACCESS, False)
     )
 
     # Guard rails when source entry has incomplete credentials.
@@ -306,12 +308,17 @@ async def adopt_legacy_entity_ids(
         result.migrated_devices += 1
         if dry_run:
             continue
+        kore_ids = {(DOMAIN, val) for d, val in source_device.identifiers if d == LEGACY_DOMAIN}
+        if kore_ids:
+            device_registry.async_update_device(source_device.id, merge_identifiers=kore_ids)
         device_registry.async_update_device(
             source_device.id,
             add_config_entry_id=target_entry.entry_id,
         )
 
     if not dry_run:
+        await hass.config_entries.async_unload(source_entry.entry_id)
+        result.unloaded_source_entry = True
         await hass.config_entries.async_reload(target_entry.entry_id)
 
     _LOGGER.info(
@@ -409,6 +416,9 @@ async def migrate_legacy_plenticore_entry(
         dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
     )
     for source_device in source_devices:
+        kore_ids = {(DOMAIN, val) for d, val in source_device.identifiers if d == LEGACY_DOMAIN}
+        if kore_ids:
+            device_registry.async_update_device(source_device.id, merge_identifiers=kore_ids)
         if remove_source_entry:
             updated = device_registry.async_update_device(
                 source_device.id,
@@ -428,16 +438,29 @@ async def migrate_legacy_plenticore_entry(
         result.removed_source_entry = (
             hass.config_entries.async_get_entry(source_entry.entry_id) is None
         )
+    else:
+        await hass.config_entries.async_unload(source_entry.entry_id)
+        result.unloaded_source_entry = True
     await hass.config_entries.async_reload(target_entry.entry_id)
 
+    if result.migrated_entities == 0:
+        _LOGGER.warning(
+            "Legacy migration found 0 entities to migrate from %s. "
+            "Verify the legacy integration is still installed and has entities registered. "
+            "If unique-id format differs from '{entry_id}_*', rebinding will silently skip entities.",
+            source_entry.entry_id,
+        )
+
     _LOGGER.info(
-        "Legacy migration complete: source=%s target=%s entities=%d devices=%d duplicates_removed=%d removed_source=%s",
+        "Legacy migration complete: source=%s target=%s entities=%d devices=%d "
+        "duplicates_removed=%d removed_source=%s unloaded_source=%s",
         result.source_entry_id,
         result.target_entry_id,
         result.migrated_entities,
         result.migrated_devices,
         result.removed_target_duplicates,
         result.removed_source_entry,
+        result.unloaded_source_entry,
     )
     return result
 
@@ -475,6 +498,12 @@ async def finalize_legacy_cleanup(
         dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
     )
     for source_device in source_devices:
+        cleaned_ids = {
+            (DOMAIN if d == LEGACY_DOMAIN else d, val)
+            for d, val in source_device.identifiers
+        }
+        if cleaned_ids:
+            device_registry.async_update_device(source_device.id, new_identifiers=cleaned_ids)
         updated = device_registry.async_update_device(
             source_device.id,
             remove_config_entry_id=source_entry.entry_id,

@@ -46,7 +46,7 @@ CONNECT_TIMEOUT: Final[float] = 10.0
 READ_TIMEOUT: Final[float] = 5.0
 RETRY_DELAY_BUSY: Final[float] = 2.0
 RETRY_DELAY_FAILURE: Final[float] = 1.0
-MAX_RETRIES: Final[int] = 5
+MAX_RETRIES: Final[int] = 2  # reduced from 5 – each reconnect takes ~10s; 2 retries = 20s max
 
 UNAVAILABLE_STRIKES_THRESHOLD: Final[int] = 3
 UNAVAILABLE_RESET_INTERVAL: Final[int] = 120
@@ -181,6 +181,7 @@ class KostalModbusClient:
         self._port = port
         self._unit_id = unit_id
         self._endianness = endianness
+        self._endianness_confirmed = False  # set True after first successful detect_endianness
         self._client: AsyncModbusTcpClient | None = None
         self._lock = asyncio.Lock()
         self._scheduler = request_scheduler
@@ -327,6 +328,7 @@ class KostalModbusClient:
         value = struct.unpack(">H", raw)[0]
         detected = "big" if value == 1 else "little"
         self._endianness = detected
+        self._endianness_confirmed = True
         _LOGGER.info("Detected endianness: %s", detected)
         return detected
 
@@ -343,6 +345,7 @@ class KostalModbusClient:
         - Suppression auto-expires so firmware updates are picked up
         - Manual reset via reset_unavailable() after inverter swap
         """
+        self._last_exc_code = None
         if self._is_suppressed(register.address):
             raise ModbusPermanentError(
                 f"Register {register.name} (addr {register.address}) "
@@ -386,7 +389,8 @@ class KostalModbusClient:
                     )
                     try:
                         await self.reconnect()
-                        await self.detect_endianness()
+                        if not self._endianness_confirmed:
+                            await self.detect_endianness()
                     except ModbusConnectionError:
                         pass
                 else:
@@ -523,6 +527,85 @@ class KostalModbusClient:
                 pass
             except ModbusReadError:
                 _LOGGER.debug("Skipping unavailable register %s", reg.name)
+        return result
+
+    async def read_registers_batch(
+        self, registers: list[ModbusRegister]
+    ) -> dict[str, Any]:
+        """Read a list of registers in minimal TCP roundtrips.
+
+        Consecutive registers (addr + count == next addr) are batched into a
+        single ``read_holding_registers`` call.  On batch failure the group
+        falls back to individual reads so suppression/retry logic still applies.
+        """
+        if not registers:
+            return {}
+
+        sorted_regs = sorted(registers, key=lambda r: r.address)
+        groups: list[list[ModbusRegister]] = []
+        current_group: list[ModbusRegister] = []
+
+        for reg in sorted_regs:
+            if self._is_suppressed(reg.address):
+                continue
+            if not current_group:
+                current_group.append(reg)
+            else:
+                last = current_group[-1]
+                if reg.address == last.address + last.count:
+                    current_group.append(reg)
+                else:
+                    groups.append(current_group)
+                    current_group = [reg]
+        if current_group:
+            groups.append(current_group)
+
+        result: dict[str, Any] = {}
+
+        for group in groups:
+            if len(group) == 1:
+                try:
+                    result[group[0].name] = await self.read_register(group[0])
+                except (ModbusPermanentError, ModbusReadError):
+                    pass
+                continue
+
+            start_addr = group[0].address
+            total_count = sum(r.count for r in group)
+
+            try:
+                raw_all = await self._raw_read(start_addr, total_count)
+                offset = 0
+                for reg in group:
+                    reg_bytes = raw_all[offset * 2 : (offset + reg.count) * 2]
+                    offset += reg.count
+                    try:
+                        decoded = self._decode(reg_bytes, reg)
+                        filtered = self._apply_quality_filter(reg, decoded)
+                        self._last_good_values[reg.address] = filtered
+                        if reg.address in self._unavailable_strikes:
+                            self._unavailable_strikes.pop(reg.address, None)
+                        result[reg.name] = filtered
+                    except (ModbusPermanentError, ModbusReadError) as decode_err:
+                        _LOGGER.debug(
+                            "Batch decode failed for %s: %s", reg.name, decode_err
+                        )
+            except ModbusClientError as err:
+                # Includes connection errors, transient, permanent (ILLEGAL_DATA_ADDRESS),
+                # and read errors.  Fall back to per-register reads so that suppression
+                # logic and per-register retries can handle the failure correctly.
+                _LOGGER.debug(
+                    "Batch read failed for group at addr %d (%d regs) – "
+                    "falling back to individual reads: %s",
+                    start_addr, len(group), err,
+                )
+                for reg in group:
+                    try:
+                        result[reg.name] = await self.read_register(reg)
+                    except (ModbusPermanentError, ModbusReadError):
+                        pass
+                    # ModbusConnectionError propagates – coordinator handles reconnect
+
         return result
 
     # ------------------------------------------------------------------
@@ -693,7 +776,7 @@ class KostalModbusClient:
             return struct.unpack(">f", struct.pack(">HH", lo, hi))[0]
 
         if dt == DataType.STRING:
-            return raw.decode("ascii", errors="replace").rstrip("\x00").strip()
+            return raw.decode("latin-1", errors="ignore").rstrip("\x00").strip()
 
         if dt == DataType.BOOL:
             return struct.unpack(">H", raw[:2])[0] != 0

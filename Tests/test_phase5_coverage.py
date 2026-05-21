@@ -568,11 +568,11 @@ def test_helper_format_float_nan_inf() -> None:
 
 
 def test_helper_format_energy_nan_inf_negative() -> None:
-    """Test format_energy returns None for NaN/Inf and 0.0 for negative (covers helper.py:269)."""
+    """Test format_energy returns None for NaN/Inf and negative values."""
     assert helper.PlenticoreDataFormatter.format_energy("nan") is None
     assert helper.PlenticoreDataFormatter.format_energy("inf") is None
     assert helper.PlenticoreDataFormatter.format_energy("-inf") is None
-    assert helper.PlenticoreDataFormatter.format_energy("-5000") == 0.0
+    assert helper.PlenticoreDataFormatter.format_energy("-5000") is None
 
 
 def test_helper_formatters_and_conversions() -> None:

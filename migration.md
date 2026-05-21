@@ -40,7 +40,8 @@ At this point, both old and new integration entries can coexist temporarily.
 What this does:
 - Imports legacy config/options into the KORE entry.
 - Rebinds legacy entities/devices to KORE.
-- Keeps the old legacy entry for safety.
+- Adds the KORE domain identifier to the legacy device so KORE sees it as the same device (prevents a second duplicate device card appearing in the UI).
+- Unloads (but does not delete) the old legacy entry so it cannot recreate empty entities alongside the rebound ones. The legacy entry stays in your config entry registry and can be re-enabled from the UI if needed.
 
 What to expect:
 - A persistent notification with migrated entity/device counts.
@@ -79,6 +80,25 @@ Recommended checklist:
 
 The service uses guarded apply mode with challenge code + final confirmation.
 It merges recorder metadata references instead of blind raw row copying.
+
+## "I've been on KORE for months and never migrated" — Orphan-History flow
+
+If you installed KORE long ago without ever running the legacy import, your
+Recorder still contains `sensor.kostal_plenticore_*` rows that are invisible
+to your dashboards (no Entity Registry binding). The legacy import path no
+longer helps because the legacy config entry is gone.
+
+For this case use the **orphan-history services** instead — they treat the
+Recorder as the source of truth and re-bind orphaned rows to your current
+KORE entities.
+
+1. `kostal_kore.scan_orphan_history` — read-only scan, posts a notification
+   with detected orphans and fuzzy-matched target suggestions.
+2. `kostal_kore.apply_orphan_history_mapping` with `dry_run: true` — preview
+   how many rows would move per mapping.
+3. Re-run with `dry_run: false` to apply.
+
+Full walkthrough in [`docs/migration_orphan_history.md`](docs/migration_orphan_history.md).
 
 ## Troubleshooting
 

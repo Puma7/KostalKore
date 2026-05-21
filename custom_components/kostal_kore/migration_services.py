@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import logging
@@ -408,7 +409,19 @@ def _merge_statistics_metadata(
             select(StatisticsMeta).where(StatisticsMeta.statistic_id == new_entity_id)
         ).scalars()
     )
-    new_by_source = {str(meta.source): meta for meta in new_meta_rows}
+    source_counter = Counter(str(meta.source) for meta in new_meta_rows)
+    duplicate_sources = {src for src, count in source_counter.items() if count > 1}
+    if duplicate_sources:
+        _LOGGER.warning(
+            "StatisticsMeta has duplicate sources %s for %s — "
+            "skipping merge for these sources; manual cleanup required.",
+            duplicate_sources, new_entity_id,
+        )
+    new_by_source = {
+        str(meta.source): meta
+        for meta in new_meta_rows
+        if str(meta.source) not in duplicate_sources
+    }
 
     stats_rows_moved = 0
     short_term_rows_moved = 0
@@ -416,9 +429,29 @@ def _merge_statistics_metadata(
 
     for old_meta in old_meta_rows:
         old_meta_id = int(old_meta.id)
-        matching_new = new_by_source.pop(str(old_meta.source), None)
+        old_source = str(old_meta.source)
+        # Skip both merge AND rename when the target entity already has duplicate
+        # rows for this source. Renaming would create a third row with the same
+        # (statistic_id, source) combo — making the duplication worse, not better.
+        if old_source in duplicate_sources:
+            continue
+        matching_new = new_by_source.pop(old_source, None)
         if matching_new is not None:
             new_meta_id = int(matching_new.id)
+            old_unit = getattr(old_meta, "unit_of_measurement", None)
+            new_unit = getattr(matching_new, "unit_of_measurement", None)
+            if old_unit and new_unit and old_unit != new_unit:
+                # QA-2: on unit mismatch we MUST `continue`, not fall through.
+                # Without this, `old_meta.statistic_id = new_entity_id` below
+                # (outside the `if matching_new` block) would silently rename
+                # the old row to clash with the new row's statistic_id while
+                # the units still differ → guaranteed Recorder corruption.
+                _LOGGER.warning(
+                    "Skipping statistics merge from %s → %s: "
+                    "unit mismatch (%s vs %s). Manual cleanup required.",
+                    old_entity_id, new_entity_id, old_unit, new_unit,
+                )
+                continue
             stats_rows_moved += _merge_statistics_table(
                 session,
                 Statistics,
@@ -432,6 +465,10 @@ def _merge_statistics_metadata(
                 new_metadata_id=new_meta_id,
             )
             session.delete(matching_new)
+            # Flush the delete before renaming old_meta to avoid a transient
+            # UNIQUE constraint violation: both rows would share statistic_id
+            # inside the same flush if we don't force the DELETE first.
+            session.flush()
         old_meta.statistic_id = new_entity_id
         rebound_done = True
 

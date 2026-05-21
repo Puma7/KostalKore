@@ -37,7 +37,9 @@ class ModbusResetButton(ButtonEntity):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:restart"
     _attr_has_entity_name = True
-    _attr_name = "Reset Modbus Registers"
+    # Bug #4: use translation_key (not _attr_name) so the button label is
+    # localizable via translations/<lang>.json:entity.button.reset_modbus_registers.
+    _attr_translation_key = "reset_modbus_registers"
 
     def __init__(
         self,
@@ -68,7 +70,7 @@ class ModbusDiagnosticsButton(ButtonEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:stethoscope"
     _attr_has_entity_name = True
-    _attr_name = "Run Modbus Diagnostics"
+    _attr_translation_key = "run_modbus_diagnostics"
 
     def __init__(
         self,
@@ -251,7 +253,7 @@ class BatteryTestButton(ButtonEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:battery-sync"
     _attr_has_entity_name = True
-    _attr_name = "Battery Charge/Discharge Test"
+    _attr_translation_key = "battery_charge_discharge_test"
 
     def __init__(
         self,

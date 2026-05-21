@@ -216,7 +216,13 @@ class BatterySocController:
             Discharging: stop if current_soc <= target  (at or below)
         """
         await self._snapshot_limits()
-        was_charging = False
+        # Tri-state direction tracker. None = no action taken yet — the
+        # overshoot stop branches MUST NOT fire on the first iteration,
+        # otherwise (SoC < target, was_charging=False) would short-circuit
+        # via "not was_charging and current_soc <= target" and the controller
+        # would exit before any _write_charge call. True/False are set ONLY
+        # after we actually wrote a charge / discharge command this cycle.
+        was_charging: bool | None = None
         consecutive_read_fails = 0
         consecutive_write_fails = 0
         try:
@@ -251,12 +257,18 @@ class BatterySocController:
                 need_discharge = current_soc > target
 
                 # ── SAFE STOP: directional, handles SoC jumps ──
+                # Use `is True` / `is False` so the overshoot branches only
+                # trigger once was_charging has been EXPLICITLY set by a
+                # previous write — never on the initial None state.
                 target_reached = False
                 if need_charge is False and need_discharge is False:
                     target_reached = True
-                elif was_charging and current_soc >= target:
+                elif was_charging is True and current_soc >= target:
                     target_reached = True
-                elif not was_charging and need_discharge is False and current_soc <= target:
+                elif was_charging is False and current_soc <= target:
+                    # We were discharging last cycle and SoC has reached / passed
+                    # the target downward → done. (need_discharge is implicitly
+                    # False here because current_soc <= target.)
                     target_reached = True
 
                 if target_reached:

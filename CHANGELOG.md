@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Bug #11** — PV per-string energy statistics
+  (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`) were hardcoded for PV1–PV3
+  only. 1-string inverters saw permanent `unavailable` PV2/PV3 entries;
+  inverters with 4–6 strings lost energy stats entirely. New helper
+  `generate_pv_energy_sensor_descriptions(count)` mirrors
+  `generate_dc_sensor_descriptions(count)` and produces descriptions for the
+  actually-discovered string count. (commit `2973895`)
+
+### Reverted
+- **Bug #1 false fix on `FullChargeCap_E`** — commit `2973895` incorrectly
+  changed the REST-API `FullChargeCap_E` sensor from `"Ah"` to
+  `UnitOfEnergy.WATT_HOUR` with `device_class=ENERGY_STORAGE`. This was the
+  *second* occurrence of the identical hallucination (the first was reverted
+  in commit `6bf7680` in 2025). Live hardware measurement (LEARNINGS §23)
+  confirms `FullChargeCap_E ≈ 50 Ah` — multiplied by the inverter's ~760 V
+  DC bus this yields ~38 kWh, matching the SoC math. 50 Wh would be
+  physically absurd. The sensor description is reverted, the canary
+  regression test is restored to `test_bug1_full_charge_cap_unit_is_ah`
+  with a do-not-rename docstring, and LEARNINGS §47 documents how the loop
+  re-occurred.
+
+### Added
+- **Orphan-history MVP** for long-time KORE users who never ran the legacy
+  migration. New module `custom_components/kostal_kore/orphan_history.py`
+  exposes two services:
+  - `kostal_kore.scan_orphan_history` (read-only): scans Recorder
+    `StatesMeta` + `StatisticsMeta` for entity_ids matching legacy Plenticore
+    patterns that no longer exist in the Entity Registry. Posts a persistent
+    notification with fuzzy-match suggestions to current KORE entities.
+  - `kostal_kore.apply_orphan_history_mapping` (dry-run default): re-binds
+    orphan rows to current KORE entities by delegating to the existing
+    `_copy_legacy_history_sync` engine — unit-mismatch and duplicate-source
+    guards from QA-2 carry over. Targets that aren't registered to the
+    `kostal_kore` platform are rejected.
+  - User-facing walkthrough in `docs/migration_orphan_history.md`. (commit `bca1587`)
+
+### Tests
+- `Tests/test_bug_regression.py`: added
+  `test_bug11_pv_energy_sensors_generated_dynamically` (1/3/6 strings →
+  4/12/24 sensors) and `test_bug11_static_pv_energy_descriptions_removed`.
+  `test_bug1_full_charge_cap_unit_is_ah` is restored to its canary form
+  (asserts Ah + `device_class is None`) with an explicit do-not-rename
+  docstring referencing LEARNINGS §23/§36/§37/§47.
+- `Tests/test_orphan_history.py`: 26 new tests covering pure helpers, sync
+  scan with mocked recorder session, dry-run safety (executor never called),
+  apply path reaching the copy engine, backend/recording guards, notification
+  formatters, and service registration idempotence.
+
+## [2.16.10-rc.4] — 2026-05-19 — 100% Branch Coverage
+
+Final push to reach enforced 100% branch + statement coverage on all measured
+files. Includes a latent runtime bug fix in the migration check.
+
+### Fixed
+- **`__init__.py` migration check**: Removed reference to
+  `RegistryEntry.original_unit_of_measurement` which does not exist on the
+  supported HA version range. `unit_of_measurement` alone is the correct
+  attribute — it already holds the effective persisted unit (user override or
+  first-registration value). The original code was a latent `AttributeError`
+  waiting to fire on any installation that had migrated a WorkCapacity entity.
+- **mypy**: Zero errors after the `original_unit_of_measurement` removal.
+
+### Tests
+- **`test_init.py`**: Added 2 migration-check tests covering both branches of
+  the WorkCapacity unit check (Ah → issue created; Wh → issue cleared). The
+  "clear" path uses `_DummyPlenticore` + direct `async_setup_entry` call to
+  prevent HA's platform setup stack from touching the entity registry between
+  pre-fill and the migration check.
+- **`test_modbus_integration.py`**: Added 4 tests covering previously-missed
+  branches: MQTT bridge with empty identifiers (device_id falls back to
+  entry_id), MQTT bridge with a non-matching identifier before a matching one
+  (loop-continues path), `_async_options_updated` when entry_data is absent,
+  and `_async_options_updated` when options changed since last setup.
+
 ## [2.16.10-rc.3] — 2026-03-29 — CI Fixes, Test Coverage, QA Regression Fixes
 
 Third pass: CI compliance (mypy, test coverage 100%), plus self-review

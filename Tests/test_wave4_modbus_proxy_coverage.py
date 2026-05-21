@@ -96,17 +96,24 @@ def test_modbus_proxy_encode_and_build_image_paths() -> None:
         "kostal_plenticore.modbus_proxy._SORTED_REGISTERS",
         [(10, uint16_reg), (12, uint32_reg)],
     ):
+        # HIGH-02 fix: partial coverage (gap at register 11 because no
+        # register covers address 11) must NOT return a zero-filled image —
+        # the caller would otherwise serve fabricated zeros to evcc/EMS.
+        # Expectation is now None so the proxy falls back to forward-read.
+        assert (
+            _build_register_image(
+                10, 4, {"u16": 7, "u32": 0x12345678}, "little"
+            )
+            is None
+        )
+        # Full coverage of the requested range still returns a populated image.
+        # Request addr 12..13 → exactly the u32 (count=2) covers both.
         image = _build_register_image(
-            10,
-            4,
-            {"u16": 7, "u32": 0x12345678},
-            "little",
+            12, 2, {"u32": 0x12345678}, "little"
         )
-        assert image == (
-            struct.pack(">H", 7)
-            + b"\x00\x00"
-            + struct.pack(">HH", 0x5678, 0x1234)
-        )
+        assert image == struct.pack(">HH", 0x5678, 0x1234)
+        # Single-register request at addr 10 also fully covered by u16.
+        assert _build_register_image(10, 1, {"u16": 7}, "little") == struct.pack(">H", 7)
 
         assert _build_register_image(10, 4, {}, "little") is None
         assert _build_register_image(10, 4, {"u16": 70000}, "little") is None
@@ -122,12 +129,17 @@ def test_modbus_proxy_encode_and_build_image_paths() -> None:
             "kostal_plenticore.modbus_proxy._encode_value",
             return_value=b"\x12\x34\x56\x78",
         ):
+            # Slicing the second half of a 2-register encode for a 1-register
+            # request: fully covered, returns the matching slice.
             assert _build_register_image(9, 1, {"edge": 1}, "little") == b"\x56\x78"
         with patch(
             "kostal_plenticore.modbus_proxy._encode_value",
             return_value=b"\x12\x34",
         ):
-            assert _build_register_image(8, 2, {"edge": 1}, "little") == b"\x12\x34\x00\x00"
+            # HIGH-02 fix: when the encoded payload is too short to cover the
+            # full requested range, return None instead of zero-padding the
+            # uncovered byte (which would surface to evcc as a fake "0").
+            assert _build_register_image(8, 2, {"edge": 1}, "little") is None
 
 
 @pytest.mark.asyncio
@@ -269,11 +281,6 @@ async def test_modbus_proxy_read_and_forward_paths() -> None:
     proxy = _make_proxy(client=client)
     assert await proxy._forward_read(40000, 1) is None
 
-    assert proxy._check_write_arbitration(9999) is None
-    proxy = _make_proxy(soc_active=True)
-    assert proxy._check_write_arbitration(1034) is None
-    proxy = _make_proxy(soc_active=False)
-    assert proxy._check_write_arbitration(1034) is None
 
 
 @pytest.mark.asyncio
@@ -295,7 +302,9 @@ async def test_modbus_proxy_write_single_paths() -> None:
     pdu = struct.pack(">BHH", FC_WRITE_SINGLE, REG_ACTIVE_POWER_SETPOINT.address, 42)
     response = await proxy._handle_write_single(pdu)
     assert response == pdu[:5]
-    proxy._coordinator.async_write_by_address.assert_awaited_once_with(REG_ACTIVE_POWER_SETPOINT.address, 42)
+    proxy._coordinator.async_write_by_address.assert_awaited_once_with(
+        REG_ACTIVE_POWER_SETPOINT.address, 42, audit_source="proxy_fc06"
+    )
 
     proxy = _make_proxy(installer_access=True)
     proxy._coordinator.async_write_by_address.side_effect = RuntimeError("write failed")

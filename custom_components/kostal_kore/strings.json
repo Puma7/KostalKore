@@ -109,6 +109,10 @@
     "installer_required": {
       "title": "Installer access required",
       "description": "This action requires the installer/service code. Reconfigure the integration with the service code to enable advanced controls."
+    },
+    "battery_capacity_unit_migration": {
+      "title": "Battery Work Capacity unit changed",
+      "description": "The unit of `sensor.battery_work_capacity` was corrected from Ah to Wh (1 Wh ≠ 1 Ah; the previous label was wrong).\n\n**Two manual steps are required for existing installations:**\n\n1. **Recorder statistics**: open *Developer Tools → Statistics*, locate `Battery Work Capacity`, and resolve the unit-change warning so historical data remains continuous.\n2. **Display unit (optional)**: the entity still shows raw Wh because Home Assistant only applies the suggested display unit (kWh) to newly registered entities. Open the entity settings (cog icon) and set *Unit of measurement* to `kWh` for a more readable display.\n\nThis notice clears automatically once step 1 is done."
     }
   },
   "exceptions": {
@@ -839,6 +843,12 @@
     "button": {
       "reset_modbus_registers": {
         "name": "Reset Modbus Registers"
+      },
+      "run_modbus_diagnostics": {
+        "name": "Run Modbus Diagnostics"
+      },
+      "battery_charge_discharge_test": {
+        "name": "Battery Charge/Discharge Test"
       }
     }
   }

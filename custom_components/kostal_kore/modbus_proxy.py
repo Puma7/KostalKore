@@ -46,6 +46,15 @@ FC_READ_INPUT: Final[int] = 0x04
 FC_WRITE_SINGLE: Final[int] = 0x06
 FC_WRITE_MULTIPLE: Final[int] = 0x10
 
+# Mirrors modbus_client._VENDOR_REGISTER_BASE: UINT32/SINT32 registers at
+# address >= 500 always use big-endian word order on the wire, regardless of
+# the byte_order register. The proxy must encode the same way so external
+# clients (evcc, iobroker) read the same bytes the inverter itself would
+# return. FLOAT32 word order is NOT inverted in the vendor area — it follows
+# byte_order everywhere — so this constant only gates the 32-bit integer
+# branches below.
+_VENDOR_REGISTER_BASE: Final[int] = 500
+
 # Build a sorted list of (start_address, register) for range lookups
 _SORTED_REGISTERS: Final[list[tuple[int, ModbusRegister]]] = sorted(
     ((r.address, r) for r in ALL_REGISTERS),
@@ -67,7 +76,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
 
     if dt == DataType.UINT32:
         v = int(value) if value is not None else 0
-        if endianness == "big":
+        if register.address >= _VENDOR_REGISTER_BASE or endianness == "big":
             return struct.pack(">I", v)
         lo = v & 0xFFFF
         hi = (v >> 16) & 0xFFFF
@@ -75,7 +84,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
 
     if dt == DataType.SINT32:
         v = int(value) if value is not None else 0
-        if endianness == "big":
+        if register.address >= _VENDOR_REGISTER_BASE or endianness == "big":
             return struct.pack(">i", v)
         if v < 0:
             v += 0x100000000
@@ -95,7 +104,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
 
     if dt == DataType.STRING:
         s = str(value) if value is not None else ""
-        raw = s.encode("ascii", errors="replace")
+        raw = s.encode("latin-1", errors="ignore")
         padded = raw.ljust(register.count * 2, b"\x00")[:register.count * 2]
         return padded
 
@@ -116,10 +125,14 @@ def _build_register_image(
 ) -> bytes | None:
     """Build raw register bytes for a read request from cached data.
 
-    Returns *quantity * 2* bytes or None if the range is completely unknown.
+    Returns *quantity * 2* bytes only when EVERY register in the requested
+    range is populated from the cache. Partial coverage returns None so
+    that the caller can fall back to a real-inverter forward read instead
+    of serving zero-bytes for unknown gaps — external clients (evcc, EMS)
+    would otherwise interpret those zeros as genuine measurements.
     """
     image = bytearray(quantity * 2)
-    found_any = False
+    covered = bytearray(quantity)  # one byte per Modbus register (0=miss, 1=hit)
 
     for base_addr, reg in _SORTED_REGISTERS:
         reg_end = base_addr + reg.count
@@ -140,16 +153,24 @@ def _build_register_image(
         for i in range(reg.count):
             abs_addr = base_addr + i
             if start_addr <= abs_addr < start_addr + quantity:
-                offset = (abs_addr - start_addr) * 2
+                reg_idx = abs_addr - start_addr
                 reg_byte_offset = i * 2
                 if reg_byte_offset + 2 <= len(raw):
-                    image[offset : offset + 2] = raw[reg_byte_offset : reg_byte_offset + 2]
-                    found_any = True
+                    image[reg_idx * 2 : reg_idx * 2 + 2] = (
+                        raw[reg_byte_offset : reg_byte_offset + 2]
+                    )
+                    covered[reg_idx] = 1
 
-    return bytes(image) if found_any else None
+    if not any(covered):
+        return None
+    if not all(covered):
+        # Partial coverage: do NOT return a half-zeroed image; let the
+        # caller forward the read to the inverter so consumers see real
+        # data or a clean Modbus error rather than fabricated zeros.
+        return None
+    return bytes(image)
 
 
-WRITE_LOCK_SECONDS: Final[float] = 5.0
 BATTERY_CONTROL_REGISTERS: Final[frozenset[int]] = frozenset({
     1034, 1038, 1040, 1042, 1044,  # Section 3.4 battery management
     1280, 1282, 1284, 1286, 1288,  # Section 3.5 G3 battery limits
@@ -190,6 +211,8 @@ class ModbusTcpProxyServer:
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task[None]] = set()
         self._last_ext_write: dict[int, float] = {}  # address → timestamp
+        self._fc06_count: int = 0
+        self._fc16_count: int = 0
 
     @property
     def port(self) -> int:
@@ -247,21 +270,29 @@ class ModbusTcpProxyServer:
 
         try:
             while True:
-                header = await reader.readexactly(MBAP_HEADER_SIZE)
+                try:
+                    header = await asyncio.wait_for(
+                        reader.readexactly(MBAP_HEADER_SIZE), timeout=60.0
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.debug("Modbus proxy: client %s idle timeout, closing", peer)
+                    break
                 txn_id, proto_id, length, unit_id = struct.unpack(">HHHB", header)
 
                 if proto_id != 0:
                     _LOGGER.debug("Non-Modbus protocol ID %d, ignoring", proto_id)
-                    await reader.readexactly(length - 1)
+                    await asyncio.wait_for(reader.readexactly(length - 1), timeout=10.0)
                     continue
 
                 if length < 2 or length > 260:
                     _LOGGER.debug("Proxy: invalid MBAP length %d, dropping", length)
                     if length > 1:
-                        await reader.readexactly(min(length - 1, 260))
+                        await asyncio.wait_for(
+                            reader.readexactly(min(length - 1, 260)), timeout=10.0
+                        )
                     continue
 
-                pdu = await reader.readexactly(length - 1)
+                pdu = await asyncio.wait_for(reader.readexactly(length - 1), timeout=10.0)
                 response_pdu = await self._process_pdu(pdu, unit_id)
 
                 resp_length = len(response_pdu) + 1
@@ -365,28 +396,6 @@ class ModbusTcpProxyServer:
             )
             return None
 
-    def _check_write_arbitration(self, address: int, peer: str = "") -> bytes | None:
-        """Check if a write to this address is allowed.
-
-        Returns a Modbus error response if blocked, None if allowed.
-        Battery control registers are blocked when the internal SoC
-        controller is active (returns 0x06 = Server Device Busy).
-        """
-        if address not in BATTERY_CONTROL_REGISTERS:
-            return None
-
-        ctrl = self._soc_controller
-        if ctrl is not None and getattr(ctrl, "active", False):
-            _LOGGER.warning(
-                "Proxy: BLOCKED external write to battery register %d "
-                "(SoC Controller is active, target=%.0f%%). "
-                "Stop the SoC Controller first to allow external control.",
-                address, ctrl.target_soc or 0,
-            )
-            return None  # We return 0x06 below per function code
-
-        return None
-
     async def _handle_write_single(self, pdu: bytes) -> bytes:
         """Handle FC 06: Write Single Register with arbitration."""
         if len(pdu) < 5:
@@ -401,6 +410,7 @@ class ModbusTcpProxyServer:
                 "(service code missing in integration config).",
                 address,
             )
+            self._log_audit(f"addr:{address}", value, "rejected_installer", "FC06")
             return self._error_response(FC_WRITE_SINGLE, 0x03)
 
         # Arbitration: block battery writes if SoC controller is active
@@ -412,9 +422,11 @@ class ModbusTcpProxyServer:
                     "target=%.0f%%). External client should retry later.",
                     address, value, ctrl.target_soc or 0,
                 )
+                self._log_audit(f"addr:{address}", value, "rejected_soc_active", "FC06")
                 return self._error_response(FC_WRITE_SINGLE, 0x06)
 
         self._last_ext_write[address] = time.monotonic()
+        self._fc06_count += 1
 
         reg = REGISTER_BY_ADDRESS.get(address)
         if reg is not None and reg.access == Access.RW:
@@ -423,9 +435,13 @@ class ModbusTcpProxyServer:
                     "Proxy: FC06 rejected for %d-register %s (use FC16)",
                     reg.count, reg.name,
                 )
+                self._log_audit(reg.name, value, "rejected_validation", "FC06 multi-reg")
                 return self._error_response(FC_WRITE_SINGLE, 0x03)
             try:
-                await self._coordinator.async_write_by_address(address, value)
+                # Coordinator hook records the ok/error event with source=proxy_fc06.
+                await self._coordinator.async_write_by_address(
+                    address, value, audit_source="proxy_fc06"
+                )
                 _LOGGER.info("Proxy: write reg %d = %d (external)", address, value)
                 return pdu[:5]
             except Exception as err:
@@ -434,6 +450,7 @@ class ModbusTcpProxyServer:
 
         raw_result = await self._forward_write_single(address, value)
         if raw_result:
+            self._log_audit(f"addr:{address}", value, "forwarded_direct", "FC06")
             return pdu[:5]
         return self._error_response(FC_WRITE_SINGLE, 0x04)
 
@@ -478,6 +495,7 @@ class ModbusTcpProxyServer:
                 start_addr,
                 start_addr + quantity - 1,
             )
+            self._log_audit(f"addr:{start_addr}", None, "rejected_installer", "FC16")
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
         # Arbitration: block battery writes if SoC controller is active
@@ -490,16 +508,32 @@ class ModbusTcpProxyServer:
                     "External client should retry later.",
                     start_addr, quantity, ctrl.target_soc or 0,
                 )
+                self._log_audit(f"addr:{start_addr}", None, "rejected_soc_active", "FC16")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x06)
 
         self._last_ext_write[start_addr] = time.monotonic()
+        self._fc16_count += 1
         reg_values = pdu[6 : 6 + byte_count]
 
         reg = REGISTER_BY_ADDRESS.get(start_addr)
         if reg is not None and reg.access == Access.RW and quantity == reg.count:
+            # Decode happens locally — coordinator never sees this failure, so
+            # audit it manually. Write failures are recorded by the coordinator
+            # hook with source=proxy_fc16 (no double-log).
             try:
                 decoded = self._decode_for_write(reg, reg_values)
-                await self._coordinator.async_write_register(reg, decoded)
+            except Exception as err:
+                _LOGGER.warning(
+                    "Proxy write-multiple decode failed at address %d: %s",
+                    start_addr, err,
+                )
+                self._log_audit(reg.name, None, "error", f"FC16 decode: {err}")
+                return self._error_response(FC_WRITE_MULTIPLE, 0x04)
+
+            try:
+                await self._coordinator.async_write_register(
+                    reg, decoded, audit_source="proxy_fc16"
+                )
                 _LOGGER.info(
                     "Proxy: write-multiple reg %d = %s (external)", start_addr, decoded,
                 )
@@ -512,6 +546,7 @@ class ModbusTcpProxyServer:
 
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)
         if raw_result:
+            self._log_audit(f"addr:{start_addr}", None, "forwarded_direct", "FC16")
             return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
         return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
@@ -548,12 +583,29 @@ class ModbusTcpProxyServer:
             hi, lo = struct.unpack(">HH", raw[:4])
             return struct.unpack(">f", struct.pack(">HH", lo, hi))[0]
         if dt == DataType.UINT32:
-            if self._endianness == "big":
+            if reg.address >= _VENDOR_REGISTER_BASE or self._endianness == "big":
                 return struct.unpack(">I", raw[:4])[0]
             hi, lo = struct.unpack(">HH", raw[:4])
             return (lo << 16) | hi
 
         return struct.unpack(">H", raw[:2])[0]
+
+    def _log_audit(self, key: str, value: Any, result: str, detail: str) -> None:
+        """Forward an event to the coordinator's write audit log if present."""
+        audit = getattr(self._coordinator, "_write_audit", None)
+        if audit is None:
+            return
+        from .write_audit import WriteEvent
+        audit.log(WriteEvent(
+            ts=time.monotonic(),
+            source="proxy_fc06" if "FC06" in detail else (
+                "proxy_fc16" if "FC16" in detail else "proxy_fwd"
+            ),
+            key=key,
+            value=value,
+            result=result,
+            detail=detail,
+        ))
 
     @staticmethod
     def _error_response(fc: int, exception_code: int) -> bytes:

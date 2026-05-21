@@ -59,6 +59,7 @@ def _modbus_client() -> MagicMock:
     client.detect_endianness = AsyncMock()
     client.disconnect = AsyncMock()
     client.read_register = AsyncMock()
+    client.read_registers_batch = AsyncMock(return_value={})
     client.write_register = AsyncMock()
     client.write_by_name = AsyncMock()
     client.write_by_address = AsyncMock()
@@ -147,15 +148,12 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     fast_perm = _modbus_reg(30, "fast_perm", group=RegisterGroup.BATTERY)
     fast_err = _modbus_reg(40, "fast_err", group=RegisterGroup.PHASE)
 
-    async def _read_side_effect(reg: ModbusRegister):
-        if reg.name == "fast_perm":
-            raise ModbusPermanentError("perm")
-        if reg.name == "fast_err":
-            raise ModbusClientError("oops")
-        return reg.address * 1.0
+    # Batch returns only successful reads; fast_perm absent (1 of 2 fail → no UpdateFailed)
+    async def _batch_normal(regs):
+        return {r.name: r.address * 1.0 for r in regs if r.name in ("fast_ok", "slow_ok")}
 
     client.connected = False
-    client.read_register.side_effect = _read_side_effect
+    client.read_registers_batch = AsyncMock(side_effect=_batch_normal)
     coordinator._slow_tick = 5
     coordinator._device_info_tick = 59
     with patch(
@@ -171,6 +169,7 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     read_info.assert_awaited_once()
     save_state.assert_awaited_once()
 
+    # Connection error during reconnect → UpdateFailed
     client.connected = False
     client.connect = AsyncMock(side_effect=ModbusConnectionError("down"))
     with patch(
@@ -180,10 +179,11 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
 
+    # Connection lost during batch read → UpdateFailed
     client.connect = AsyncMock()
     client.detect_endianness = AsyncMock()
     client.connected = True
-    client.read_register.side_effect = ModbusConnectionError("lost")
+    client.read_registers_batch = AsyncMock(side_effect=ModbusConnectionError("lost"))
     with patch(
         "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
         (fast_ok,),
@@ -191,7 +191,9 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
 
-    client.read_register.side_effect = ModbusClientError("all bad")
+    # All fast registers fail (batch returns {}, none suppressed) → UpdateFailed
+    client.read_registers_batch = AsyncMock(return_value={})
+    client.unavailable_registers = set()
     with patch(
         "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
         (fast_ok, fast_err),
@@ -199,28 +201,32 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
 
-    client.read_register.side_effect = _read_side_effect
+    # All fast registers permanently suppressed → returns {} without raising
     coordinator._slow_tick = 0
     coordinator._device_info_tick = 0
+    client.read_registers_batch = AsyncMock(return_value={})
+    client.unavailable_registers = {fast_perm.address}
     with patch(
         "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
         (fast_perm,),
     ), patch.object(
         coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
     ):
-        assert await coordinator._async_update_data() == {}
+        # With _last_slow_data cache, stale slow values are served even when
+        # all fast registers are suppressed — that is the correct behaviour.
+        assert await coordinator._async_update_data() == {"slow_ok": 20.0}
 
     slow_perm = _modbus_reg(50, "slow_perm", group=RegisterGroup.ENERGY)
     slow_err = _modbus_reg(60, "slow_err", group=RegisterGroup.ENERGY)
 
-    async def _slow_side_effect(reg: ModbusRegister):
-        if reg.name == "slow_perm":
-            raise ModbusPermanentError("perm slow")
-        if reg.name == "slow_err":
-            raise ModbusClientError("err slow")
-        return 1.0
+    # Slow-poll batch raises ModbusClientError (caught by coordinator) → fast_ok still returned
+    async def _batch_slow_err(regs):
+        if any(r.group == RegisterGroup.ENERGY for r in regs):
+            raise ModbusClientError("slow batch failed")
+        return {r.name: 1.0 for r in regs if r.name == "fast_ok"}
 
-    client.read_register.side_effect = _slow_side_effect
+    client.read_registers_batch = AsyncMock(side_effect=_batch_slow_err)
+    client.unavailable_registers = set()
     coordinator._slow_tick = 5
     coordinator._device_info_tick = 0
     with patch(
@@ -229,8 +235,11 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     ), patch.object(
         coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
     ):
-        assert await coordinator._async_update_data() == {"fast_ok": 1.0}
+        # _last_slow_data carries the last successful slow-poll values; they are
+        # merged into every tick so entities stay available between slow polls.
+        assert await coordinator._async_update_data() == {"fast_ok": 1.0, "slow_ok": 20.0}
 
+    # _read_device_info calls individual read_register, not batch
     info_values = {"serial_number": "SN", "product_name": "PLENTICORE"}
 
     async def _info_read(reg: ModbusRegister):

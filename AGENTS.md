@@ -13,7 +13,7 @@ The test directory is `Tests/` (uppercase T) but `pytest.ini` references `testpa
 source .venv/bin/activate
 python -m pytest Tests/ -v --timeout=60
 ```
-The suite currently collects about 420 tests. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list).
+The suite currently collects about 648 tests. Coverage config (`.coveragerc`) omits many platform files from branch-coverage counting (see the file for full list). `pytest.ini` enforces `--cov-fail-under=100`; all measured files must reach 100% branch coverage.
 
 ### Type checking
 ```bash

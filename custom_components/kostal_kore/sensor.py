@@ -29,7 +29,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import AddConfigEntryEntitiesCallback
+from .const import AddConfigEntryEntitiesCallback, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId
 from .coordinator import (
     EventDataUpdateCoordinator,
@@ -198,22 +198,22 @@ def _handle_api_error(err: Exception, operation: str) -> None:
 
 def generate_dc_sensor_descriptions(dc_string_count: int) -> list[PlenticoreSensorEntityDescription]:
     """Generate DC sensor descriptions dynamically based on available string count.
-    
+
     Args:
         dc_string_count: Number of DC strings available on the inverter
-        
+
     Returns:
         List of sensor descriptions for all available DC strings
     """
     dc_descriptions = []
-    
+
     # Define the metrics for each DC string
     dc_metrics = [
         ("P", "Power", UnitOfPower.WATT, SensorDeviceClass.POWER, "format_round"),
         ("U", "Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, "format_round"),
         ("I", "Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, "format_float"),
     ]
-    
+
     # Generate sensors for each available DC string
     for dc_num in range(1, dc_string_count + 1):
         for metric, name_suffix, unit, device_class, formatter in dc_metrics:
@@ -228,8 +228,36 @@ def generate_dc_sensor_descriptions(dc_string_count: int) -> list[PlenticoreSens
                     formatter=formatter,
                 )
             )
-    
+
     return dc_descriptions
+
+
+def generate_pv_energy_sensor_descriptions(
+    dc_string_count: int,
+) -> list[PlenticoreSensorEntityDescription]:
+    """Generate per-string PV energy statistic sensors for Day/Month/Year/Total.
+
+    The Kostal REST API exposes Statistic:EnergyPv{N}:{period} dynamically for as
+    many PV strings as the inverter has. Previously only PV1–PV3 were declared
+    statically: single-string inverters saw permanent unavailable PV2/PV3 sensors,
+    and >3-string inverters lost the PV4–PV6 statistics entirely.
+    """
+    descriptions: list[PlenticoreSensorEntityDescription] = []
+    periods = ("Day", "Month", "Year", "Total")
+    for pv_num in range(1, dc_string_count + 1):
+        for period in periods:
+            descriptions.append(
+                PlenticoreSensorEntityDescription(
+                    module_id="scb:statistic:EnergyFlow",
+                    key=f"Statistic:EnergyPv{pv_num}:{period}",
+                    name=f"Energy PV{pv_num} {period}",
+                    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+                    device_class=SensorDeviceClass.ENERGY,
+                    state_class=SensorStateClass.TOTAL_INCREASING,
+                    formatter="format_energy",
+                )
+            )
+    return descriptions
 
 
 SENSOR_PROCESS_DATA = [
@@ -397,6 +425,14 @@ SENSOR_PROCESS_DATA = [
     PlenticoreSensorEntityDescription(
         module_id="devices:local:battery",
         key="FullChargeCap_E",
+        # IMPORTANT: do NOT "fix" this unit to Wh. Live hardware measurement
+        # (LEARNINGS §23) returns ~50 for this register; 50 Ah × ~760 V ≈ 38 kWh
+        # which matches the SoC math. The "_E" suffix is misleading — it does
+        # NOT mean Energy. A previous audit hallucinated this as a Wh-bug
+        # (LEARNINGS §36) and the same canary unit-mismatch was reintroduced
+        # again in commit 2973895 because the protective test had been renamed
+        # to match the wrong assumption. The canary test is now back to
+        # `test_bug1_full_charge_cap_unit_is_ah` precisely to block this loop.
         name="Battery Full Charge Capacity",
         native_unit_of_measurement="Ah",
         icon="mdi:battery-high",
@@ -408,10 +444,16 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="WorkCapacity",
         name="Battery Work Capacity",
-        native_unit_of_measurement="Ah",
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,  # NEU: zeigt "35.7 kWh" statt "35700 Wh"
+        suggested_display_precision=2,  # NEU
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-medium",
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
+        # GEÄNDERT: entity_category=DIAGNOSTIC entfernt. Begründung: die Schwester-
+        # Sensoren SoC, P, U (Zeilen 344-371) sind ebenfalls user-facing und tragen
+        # kein DIAGNOSTIC; das hier war eine Inkonsistenz. WorkCapacity zeigt die
+        # aktuell verfügbare Speicherenergie — eine Hauptmetrik, kein Diagnosewert.
         formatter="format_round",
     ),
     PlenticoreSensorEntityDescription(
@@ -671,114 +713,8 @@ SENSOR_PROCESS_DATA = [
         state_class=SensorStateClass.TOTAL_INCREASING,
         formatter="format_energy",
     ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Day",
-        name="Energy PV1 Day",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Month",
-        name="Energy PV1 Month",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Year",
-        name="Energy PV1 Year",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Total",
-        name="Energy PV1 Total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Day",
-        name="Energy PV2 Day",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Month",
-        name="Energy PV2 Month",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Year",
-        name="Energy PV2 Year",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Total",
-        name="Energy PV2 Total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Day",
-        name="Energy PV3 Day",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Month",
-        name="Energy PV3 Month",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Year",
-        name="Energy PV3 Year",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Total",
-        name="Energy PV3 Total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
+    # Per-string PV energy statistics are generated dynamically based on the
+    # discovered DC string count via generate_pv_energy_sensor_descriptions().
     PlenticoreSensorEntityDescription(
         module_id="scb:statistic:EnergyFlow",
         key="Statistic:Yield:Day",
@@ -1516,8 +1452,20 @@ async def async_setup_entry(
         _modbus_strings = _modbus_coord.device_info_data.get("num_pv_strings")
         if _modbus_strings is not None:
             try:
-                dc_string_count = int(_modbus_strings)
-                _LOGGER.info("Discovered %d DC strings via Modbus register 34", dc_string_count)
+                raw = int(_modbus_strings)
+                # Bug #6: clamp to MAX_SANE_STRING_COUNT. A corrupted Modbus
+                # response (e.g. 99) would otherwise spawn 297 phantom sensors.
+                # diagnostics.py and switch.py already clamp the same value.
+                if raw > MAX_SANE_STRING_COUNT:
+                    _LOGGER.warning(
+                        "Modbus DC string count %d exceeds sane max %d, clamped",
+                        raw, MAX_SANE_STRING_COUNT,
+                    )
+                    dc_string_count = MAX_SANE_STRING_COUNT
+                else:
+                    dc_string_count = raw  # raw <= 0 fällt durch zum REST-Fallback
+                if dc_string_count >= 1:
+                    _LOGGER.info("Discovered %d DC strings via Modbus register 34", dc_string_count)
             except (TypeError, ValueError):
                 pass
 
@@ -1545,6 +1493,7 @@ async def async_setup_entry(
 
     # Generate DC sensor descriptions dynamically
     dc_descriptions = generate_dc_sensor_descriptions(dc_string_count)
+    pv_energy_descriptions = generate_pv_energy_sensor_descriptions(dc_string_count)
     
     # Keep REST process polling responsive for decision-making.
     _rest_poll_interval = REST_PROCESS_POLL_SECONDS_DEFAULT
@@ -1558,6 +1507,13 @@ async def async_setup_entry(
     process_data_update_coordinator = ProcessDataUpdateCoordinator(
         hass, entry, _LOGGER, "Process Data", timedelta(seconds=_rest_poll_interval), plenticore
     )
+    # Expose process_coordinator via entry_store so the debug bundle can
+    # snapshot REST data alongside Modbus data without re-fetching.
+    from .const import DOMAIN as _DOMAIN_PC
+    _entry_store_pc = hass.data.get(_DOMAIN_PC, {}).get(entry.entry_id)
+    if isinstance(_entry_store_pc, dict):
+        _entry_store_pc["process_coordinator"] = process_data_update_coordinator
+
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(
         process_data_update_coordinator: ProcessDataUpdateCoordinator,
@@ -1567,51 +1523,11 @@ async def async_setup_entry(
         plenticore: Any,
         dc_string_count: int,  # Add string count for smart filtering
     ) -> list[PlenticoreDataSensor | CalculatedPvSumSensor]:
-        """
-        Create sensor entities in batches for optimal performance.
-        
-        This function implements batch entity creation to minimize overhead during
-        integration setup. It pre-filters descriptions, groups similar entities,
-        and uses list comprehensions for efficient object creation.
-        
-        Performance Benefits:
-        - Reduces function call overhead by 60-70%
-        - Minimizes repeated availability checks
-        - Optimizes memory allocation patterns
-        - Improves setup time for large sensor sets
-        
-        Architecture:
-        - Pre-filtering to avoid repeated API availability checks
-        - Batch creation using list comprehensions
-        - Special handling for calculated sensors
-        - Efficient memory usage patterns
-        
-        Usage Example:
-            >>> entities = create_entities_batch(
-            ...     coordinator, descriptions, available_data, entry, plenticore
-            ... )
-            >>> async_add_entities(entities)
-        
-        Performance Metrics:
-        - Setup time reduction: 40-50% for typical installations
-        - Memory usage: 20-30% more efficient
-        - Function calls: Reduced by 60-70%
-        - CPU usage: 25% lower during setup
-        
-        Args:
-            process_data_update_coordinator: Coordinator for data updates
-            descriptions: List of sensor entity descriptions to create
-            available_process_data: Available modules from API discovery
-            entry: Home Assistant configuration entry
-            plenticore: Plenticore API client instance
-            
-        Returns:
-            List of created sensor entities (regular and calculated)
-            
-        Performance Characteristics:
-            - Time complexity: O(n) where n is number of descriptions
-            - Space complexity: O(n) for entity list creation
-            - Memory efficiency: Optimized for large sensor sets
+        """Filter descriptions by API availability and instantiate sensor entities.
+
+        Skips entities whose module/data_id is not in available_process_data,
+        applies DC-string-count limits, and routes CalculatedPvSumSensor through
+        a dedicated constructor.
         """
         entities: list[PlenticoreDataSensor | CalculatedPvSumSensor] = []
         
@@ -1721,9 +1637,9 @@ async def async_setup_entry(
     # Combine static and dynamic sensor descriptions
     # EXCLUDE calculated sensors from the general batch - they are handled separately below
     all_descriptions = [
-        desc for desc in SENSOR_PROCESS_DATA 
+        desc for desc in SENSOR_PROCESS_DATA
         if desc.module_id != "_calc_"
-    ] + dc_descriptions
+    ] + dc_descriptions + pv_energy_descriptions
     
     entities.extend(create_entities_batch(
         process_data_update_coordinator,
@@ -1886,6 +1802,23 @@ async def async_setup_entry(
             async_add_entities(longevity_entities)
             _LOGGER.info("Added %d longevity sensors", len(longevity_entities))
 
+    # Observability sensors (write audit, scheduler, coordinator health, consistency)
+    write_audit_obj = entry_store.get("write_audit") if entry_store else None
+    scheduler_obj = entry_store.get("request_scheduler") if entry_store else None
+    if modbus_coordinator is not None and write_audit_obj is not None and scheduler_obj is not None:
+        from .observability_entities import create_observability_sensors
+        obs_entities = create_observability_sensors(
+            modbus_coordinator=modbus_coordinator,
+            process_coordinator=process_data_update_coordinator,
+            write_audit=write_audit_obj,
+            scheduler=scheduler_obj,
+            entry_id=entry.entry_id,
+            device_info=plenticore.device_info,
+        )
+        if obs_entities:
+            async_add_entities(obs_entities)
+            _LOGGER.info("Added %d observability sensors", len(obs_entities))
+
 
 class PlenticoreCalculatedSensor(
     CoordinatorEntity[ProcessDataUpdateCoordinator], SensorEntity
@@ -1935,33 +1868,36 @@ class PlenticoreCalculatedSensor(
         try:
             # Extract metric and period from data_id (e.g., BatteryEfficiency:Total)
             metric, period = self.data_id.split(":", 1)
-            if "TotalGridConsumption" in self.data_id:
+            # GEÄNDERT: exakter Match auf `metric` statt fragilem `in self.data_id`.
+            # Vorher hätte z. B. ein Key "ExportFromBatteryDischargeTotal:Day" in den
+            # BatteryDischargeTotal-Zweig fallen können.
+            if metric == "TotalGridConsumption":
                 # Grid to Home + Grid to Battery
                 grid_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeGrid:{period}")
                 grid_battery = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}")
-                
+
                 # If any component is None, return None to avoid calculating partial sums
                 # which would look like sudden data drops/resets to HA statistics
                 if grid_home is None or grid_battery is None:
                     return None
-                    
+
                 val_home = float(grid_home)
                 val_batt = float(grid_battery)
                 return cast(StateType, self._formatter(str(val_home + val_batt)))
-            
-            elif "BatteryDischargeTotal" in self.data_id:
+
+            elif metric == "BatteryDischargeTotal":
                 # Total AC-side battery discharge: Battery → Home + Battery → Grid
                 # Uses pure AC measurements for consistency.
                 battery_home = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyHomeBat:{period}")
                 battery_grid = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyDischargeGrid:{period}")
-                
+
                 if battery_home is None or battery_grid is None:
                     return None
-                
+
                 total_discharge = float(battery_home) + float(battery_grid)
                 return cast(StateType, self._formatter(str(total_discharge)))
-            
-            elif "BatteryChargeTotal" in self.data_id:
+
+            elif metric == "BatteryChargeTotal":
                 # Battery Charge from Grid + Battery Charge from PV
                 charge_grid = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}")
                 charge_pv = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargePv:{period}")
@@ -2200,46 +2136,40 @@ class CalculatedPvSumSensor(
         """Return the calculated sum of PV powers from all available DC strings."""
         if self.coordinator.data is None:
             return None
-        
+
         total_power = 0.0
         available_pv_count = 0
-        
-        # Iterate through all available DC strings and sum their power
-        for module_id in self.coordinator.data:
-            if module_id.startswith("devices:local:pv") and "P" in self.coordinator.data[module_id]:
+
+        # Bug #8/#9: iterate exactly dc_string_count strings using MODULE_ID_PREFIX.
+        # Earlier versions iterated all coordinator-data keys with a hardcoded
+        # "devices:local:pv" string, which (a) ignored the configured string
+        # count and (b) duplicated a magic value defined elsewhere.
+        for dc_num in range(1, self.dc_string_count + 1):
+            module_id = f"{MODULE_ID_PREFIX}{dc_num}"
+            module_data = self.coordinator.data.get(module_id, {})
+            if "P" in module_data:
                 try:
-                    pv_power = self.coordinator.data[module_id]["P"]
-                    
+                    pv_power = module_data["P"]
                     if pv_power is not None:
                         total_power += float(pv_power)
                         available_pv_count += 1
-                except (IndexError, ValueError, TypeError) as e:
+                except (ValueError, TypeError) as e:
                     _LOGGER.debug("PV Sum Sensor: Error processing %s: %s", module_id, e)
-                    continue
-        
+
         if available_pv_count == 0:
             return None
-        
+
         return cast(StateType, self._formatter(str(total_power)))
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return True if the sensor is available."""
-        base_available = super().available
-        coordinator_data = self.coordinator.data is not None
-        
-        # Check if any DC string with power data is available
-        pv_available = False
-        if coordinator_data:
-            for module_id in self.coordinator.data:
-                if module_id.startswith("devices:local:pv") and "P" in self.coordinator.data[module_id]:
-                    pv_available = True
-                    break
-        
-        return (
-            base_available
-            and coordinator_data
-            and pv_available
+        if not super().available or self.coordinator.data is None:
+            return False
+
+        return any(
+            "P" in self.coordinator.data.get(f"{MODULE_ID_PREFIX}{dc_num}", {})
+            for dc_num in range(1, self.dc_string_count + 1)
         )
 
     async def async_added_to_hass(self) -> None:
@@ -2248,13 +2178,13 @@ class CalculatedPvSumSensor(
         # Only fetch data for DC strings that actually exist (safe fetching)
         _LOGGER.debug("PV Sum Sensor: Starting data fetch for %d DC strings", self.dc_string_count)
         for dc_num in range(1, self.dc_string_count + 1):
-            self.coordinator.start_fetch_data(f"devices:local:pv{dc_num}", "P")
+            self.coordinator.start_fetch_data(f"{MODULE_ID_PREFIX}{dc_num}", "P")
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister this entity from the Update Coordinator."""
         # Stop fetching data only for DC strings that exist
         for dc_num in range(1, self.dc_string_count + 1):
-            self.coordinator.stop_fetch_data(f"devices:local:pv{dc_num}", "P")
+            self.coordinator.stop_fetch_data(f"{MODULE_ID_PREFIX}{dc_num}", "P")
         await super().async_will_remove_from_hass()
 
 
@@ -2518,6 +2448,11 @@ class PlenticoreDataSensor(
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
         self._attr_name = name
+        # QA-4: cache the last good value so MEASUREMENT sensors survive a
+        # single NaN/Inf parse from the API instead of flickering to None.
+        # TOTAL_INCREASING sensors deliberately do NOT use this cache –
+        # see native_value() below.
+        self._last_valid_native_value: Any = None
 
         tk = _sensor_translation_key(description.module_id, description.key)
         if tk is not None:
@@ -2555,10 +2490,17 @@ class PlenticoreDataSensor(
         ):
             return None
         value = self._formatter(self.coordinator.data[self.module_id][self.data_id])
+        if value is None:
+            # Formatter returned None (e.g. NaN/Inf): keep last good value unless this
+            # is a cumulative counter – those must be allowed to reset to 0. // GEÄNDERT
+            if self.entity_description.state_class == SensorStateClass.TOTAL_INCREASING:
+                return None
+            return cast(StateType, self._last_valid_native_value)
         if (
             self.entity_description.state_class == SensorStateClass.TOTAL_INCREASING
             and isinstance(value, (int, float))
             and value < 0
         ):
-            return cast(StateType, 0.0)
+            value = 0.0
+        self._last_valid_native_value = value
         return cast(StateType, value)

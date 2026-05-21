@@ -164,7 +164,7 @@ class FireSafetyMonitor:
         # Stale-data detection: if key safety sensors are missing for too long,
         # the safety monitor is effectively blind.
         bat_temp = _float(data.get("battery_temperature"))
-        ctrl_temp = _float(data.get("controller_temperature"))
+        ctrl_temp = _float(data.get("controller_temp"))
         has_safety_data = bat_temp is not None or ctrl_temp is not None
         if has_safety_data:
             self._consecutive_empty_polls = 0

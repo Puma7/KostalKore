@@ -112,6 +112,9 @@ class KostalMqttBridge:
         self._started = False
         self._last_write: dict[str, float] = {}
         self._write_lock = asyncio.Lock()
+        self._publish_task: asyncio.Task[None] | None = None
+        self._command_count: int = 0
+        self._rate_limited_count: int = 0
 
     @property
     def topic_base(self) -> str:
@@ -174,6 +177,14 @@ class KostalMqttBridge:
             self._unsub_coordinator()
             self._unsub_coordinator = None
 
+        if self._publish_task is not None and not self._publish_task.done():
+            self._publish_task.cancel()
+            try:
+                await self._publish_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._publish_task = None
+
         for unsub in self._unsub_command:
             unsub()
         self._unsub_command.clear()
@@ -200,7 +211,9 @@ class KostalMqttBridge:
         data = self._coordinator.data
         if data is None:
             return
-        self._hass.async_create_task(self._publish_data(data))
+        if self._publish_task is not None and not self._publish_task.done():
+            self._publish_task.cancel()
+        self._publish_task = self._hass.async_create_task(self._publish_data(data))
 
     async def _publish_data(self, data: dict[str, Any]) -> None:
         """Publish register values and simplified proxy topics."""
@@ -222,11 +235,17 @@ class KostalMqttBridge:
             json.dumps(safe, default=str), QOS, retain=True,
         )
 
-        for key, val in safe.items():
-            payload = json.dumps(val, default=str) if not isinstance(val, str) else val
-            await mqtt.async_publish(  # type: ignore[attr-defined]
-                self._hass, f"{self._topic_base}/register/{key}", payload, QOS, retain=True,
+        publishes = [
+            mqtt.async_publish(  # type: ignore[attr-defined]
+                self._hass,
+                f"{self._topic_base}/register/{key}",
+                json.dumps(val, default=str) if not isinstance(val, str) else val,
+                QOS,
+                retain=True,
             )
+            for key, val in safe.items()
+        ]
+        await asyncio.gather(*publishes, return_exceptions=True)
 
         await self._publish_proxy_topics(safe)
 
@@ -237,12 +256,28 @@ class KostalMqttBridge:
 
         from homeassistant.components import mqtt
 
+        # GEÄNDERT: home_power = home_from_pv + home_from_battery + home_from_grid
+        # Vorher wurde nur home_from_pv (PV→Haus-Anteil) verwendet, was bei Netz-
+        # oder Batteriebezug zu massiv zu niedrigen Werten führte und externe EMS
+        # (evcc/iobroker) zu falschen Lade-/Entladeentscheidungen verleitete.
+        home_pv = data.get("home_from_pv")
+        home_bat = data.get("home_from_battery")
+        home_grid = data.get("home_from_grid")
+        parts = [home_pv, home_bat, home_grid]
+        if all(p is None for p in parts):
+            home_total: float | None = None
+        else:
+            try:
+                home_total = sum(float(p) for p in parts if p is not None)
+            except (TypeError, ValueError):
+                home_total = None
+
         proxy_map: dict[str, str | None] = {
             "pv_power": self._fmt(data.get("total_dc_power")),
             "grid_power": self._fmt(data.get("pm_total_active")),
             "battery_power": self._fmt(data.get("battery_cd_power")),
             "battery_soc": self._fmt(data.get("battery_soc")),
-            "home_power": self._fmt(data.get("home_from_pv", data.get("total_ac_power"))),
+            "home_power": self._fmt(home_total),
         }
 
         state_raw = data.get("inverter_state")
@@ -331,11 +366,14 @@ class KostalMqttBridge:
         topic: str = msg.topic
         payload: str = msg.payload
 
-        parts = topic.split("/")
-        if len(parts) < 2:
+        expected_prefix = f"{self._topic_base}/command/"
+        if not topic.startswith(expected_prefix):
             _LOGGER.warning("Malformed command topic: %s", topic)
             return
-        reg_name = parts[-1]
+        reg_name = topic[len(expected_prefix):]
+        if not reg_name or "/" in reg_name:
+            _LOGGER.warning("Malformed command topic: %s", topic)
+            return
 
         reg = REGISTER_BY_NAME.get(reg_name)
         if reg is None:
@@ -357,10 +395,14 @@ class KostalMqttBridge:
         topic: str = msg.topic
         payload: str = msg.payload
 
-        parts = topic.split("/")
-        if len(parts) < 2:
+        expected_prefix = f"{self._proxy_base}/command/"
+        if not topic.startswith(expected_prefix):
+            _LOGGER.warning("Malformed proxy command topic: %s", topic)
             return
-        proxy_name = parts[-1]
+        proxy_name = topic[len(expected_prefix):]
+        if not proxy_name or "/" in proxy_name:
+            _LOGGER.warning("Malformed proxy command topic: %s", topic)
+            return
 
         reg = PROXY_COMMAND_MAP.get(proxy_name)
         if reg is None:
@@ -385,6 +427,7 @@ class KostalMqttBridge:
                 reg.name,
                 source,
             )
+            self._log_audit_rejection(reg.name, None, "rejected_installer", source)
             return
 
         # SoC controller arbitration for battery registers
@@ -396,6 +439,7 @@ class KostalMqttBridge:
                     "Stop the SoC Controller first. (source: %s)",
                     reg.name, ctrl.target_soc or 0, source,
                 )
+                self._log_audit_rejection(reg.name, None, "rejected_soc_active", source)
                 return
 
         try:
@@ -412,6 +456,8 @@ class KostalMqttBridge:
                     "MQTT command rejected: unsupported type %s for %s (source: %s)",
                     type(value).__name__, reg.name, source,
                 )
+                self._log_audit_rejection(reg.name, None, "rejected_validation",
+                                          f"type={type(value).__name__}")
                 return
 
             if isinstance(value, str):
@@ -422,6 +468,8 @@ class KostalMqttBridge:
                         "MQTT command rejected: non-numeric value %r for %s (source: %s)",
                         payload, reg.name, source,
                     )
+                    self._log_audit_rejection(reg.name, None, "rejected_validation",
+                                              f"non-numeric={payload!r}")
                     return
 
             if isinstance(value, (int, float)) and (math.isnan(value) or math.isinf(value)):
@@ -429,15 +477,21 @@ class KostalMqttBridge:
                     "MQTT command rejected: NaN/Infinity for %s (source: %s)",
                     reg.name, source,
                 )
+                self._log_audit_rejection(reg.name, None, "rejected_validation", "NaN/Inf")
                 return
 
             # --- Rate-limit AFTER validation passes ---
             if not self._check_rate_limit(reg.name):
+                self._rate_limited_count += 1
+                self._log_audit_rejection(reg.name, value, "rejected_rate", source)
                 return
 
             async with self._write_lock:
-                await self._coordinator.async_write_register(reg, value)
+                await self._coordinator.async_write_register(
+                    reg, value, audit_source="mqtt"
+                )
 
+            self._command_count += 1
             _LOGGER.info(
                 "MQTT command executed: %s = %s (source: %s)",
                 reg.name, value, source,
@@ -451,3 +505,21 @@ class KostalMqttBridge:
                 reg.name, err, source,
                 exc_info=True,
             )
+
+    def _log_audit_rejection(
+        self, key: str, value: Any, result: str, detail: str
+    ) -> None:
+        """Log a rejection event to the write audit if one is attached."""
+        audit = getattr(self._coordinator, "_write_audit", None)
+        if audit is None:
+            return
+        import time
+        from .write_audit import WriteEvent
+        audit.log(WriteEvent(
+            ts=time.monotonic(),
+            source="mqtt",
+            key=key,
+            value=value,
+            result=result,
+            detail=detail,
+        ))
