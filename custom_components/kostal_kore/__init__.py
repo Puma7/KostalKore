@@ -441,6 +441,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Mark that PLATFORMS are now registered so _rollback_setup can unload
+        # them cleanly and async_unload_entry can skip unload when they were
+        # never forwarded (avoids HA logging "Config entry was never loaded!").
+        hass.data[DOMAIN][entry.entry_id]["_platforms_forwarded"] = True
         if modbus_coordinator is not None:
             # Modbus platforms expose fire-safety and health binary sensors,
             # so a silent skip would hide critical safety entities. Surface
@@ -448,6 +452,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             # returning True with the binary-sensor platform missing.
             try:
                 await hass.config_entries.async_forward_entry_setups(entry, MODBUS_PLATFORMS)
+                hass.data[DOMAIN][entry.entry_id]["_modbus_platforms_forwarded"] = True
             except Exception as modbus_err:
                 _LOGGER.error(
                     "Modbus platform setup failed - safety binary sensors will be missing: %s",
@@ -482,6 +487,19 @@ async def _rollback_setup(
     plenticore: Plenticore,
 ) -> None:
     """Clean up runtime objects after a failed platform-forwarding attempt."""
+    # Unload any platforms that were already forwarded before the failure so
+    # HA's entity_component does not retain stale registrations on retry.
+    entry_data_for_flags = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    if entry_data_for_flags.get("_modbus_platforms_forwarded"):
+        try:
+            await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
+        except Exception:
+            pass
+    if entry_data_for_flags.get("_platforms_forwarded"):
+        try:
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        except Exception:
+            pass
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:
@@ -570,10 +588,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
-        try:
-            await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
-        except Exception:  # pragma: no cover
-            _LOGGER.debug("Modbus platform unload incomplete (non-fatal)")
+        # Only unload MODBUS_PLATFORMS if they were actually forwarded; avoids
+        # HA logging "Config entry was never loaded!" for entries that failed
+        # setup before reaching async_forward_entry_setups.
+        if entry_data.get("_modbus_platforms_forwarded"):
+            try:
+                await hass.config_entries.async_unload_platforms(entry, MODBUS_PLATFORMS)
+            except Exception:  # pragma: no cover
+                _LOGGER.debug("Modbus platform unload incomplete (non-fatal)")
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
@@ -591,7 +613,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
             "Event coordinator shutdown", event_coordinator.async_shutdown()
         )
 
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    # Only unload PLATFORMS if they were actually forwarded; returns True
+    # trivially when the entry never completed setup (SETUP_RETRY state).
+    if entry_data.get("_platforms_forwarded"):
+        unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    else:
+        unload_ok = True
 
     if unload_ok:
         # Only drop the entry store once every platform has unloaded; on

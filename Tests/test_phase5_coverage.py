@@ -215,6 +215,12 @@ async def test_async_unload_entry_unload_platforms_false(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
+    # Simulate an entry whose PLATFORMS were forwarded so async_unload_platforms
+    # is actually called (and its False return value propagates to the result).
+    from custom_components.kostal_kore.const import DOMAIN
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        "_platforms_forwarded": True,
+    }
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=False),
