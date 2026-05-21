@@ -1093,7 +1093,7 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 name=name,
                 update_interval=update_interval,
             )
-            self.config_entry = config_entry  # type: ignore[assignment]
+            self.config_entry = config_entry
         self._plenticore = plenticore
         self._history: deque[dict[str, Any]] = deque(maxlen=EVENT_HISTORY_MAX)
         self._last_signature_ts: dict[str, float] = {}
