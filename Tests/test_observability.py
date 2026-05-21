@@ -433,6 +433,36 @@ def test_consistency_sensor_dc_mismatch_relative():
     assert dc_pair["status"] == "mismatch"
 
 
+def test_consistency_sensor_low_power_no_spurious_mismatch():
+    """At low power (<150W absolute delta), large relative %s must NOT trip mismatch."""
+    from custom_components.kostal_kore.observability_entities import RestModbusConsistencySensor
+
+    # rest=50W, modbus=60W → delta_abs=10W, delta_pct=16.7% (would be mismatch
+    # under pure-relative comparison, but absolute floor must suppress it).
+    rest = _make_rest_coord({
+        "devices:local:battery": {"SoC": "67"},
+        "devices:local": {"Dc_P": "50", "Home_P": "40"},
+    })
+    modbus = _make_modbus_coord_with_data({
+        "battery_soc": 67.0,
+        "total_dc_power": 60.0,
+        "home_from_pv": 30.0,
+        "home_from_battery": 0.0,
+        "home_from_grid": 0.0,
+    })
+
+    sensor = RestModbusConsistencySensor.__new__(RestModbusConsistencySensor)
+    sensor._process_coord = rest
+    sensor.coordinator = modbus
+
+    pairs = sensor._compute_pairs()
+    dc_pair = next(p for p in pairs if p["key"] == "dc_power_w")
+    home_pair = next(p for p in pairs if p["key"] == "home_power_w")
+    assert dc_pair["status"] == "ok"
+    assert home_pair["status"] == "ok"
+    assert sensor.native_value == "ok"
+
+
 def test_consistency_sensor_extra_state_attributes_returns_pairs():
     from custom_components.kostal_kore.observability_entities import RestModbusConsistencySensor
 
@@ -638,6 +668,25 @@ def test_proxy_log_audit_writes_to_coordinator_audit():
     assert e.result == "forwarded_direct"
     assert e.source == "proxy_fc06"
     assert e.key == "addr:1034"
+
+
+def test_proxy_log_audit_fc16_error_classifies_as_proxy_fc16():
+    """FC16 decode/write errors must surface as proxy_fc16 audit events."""
+    from custom_components.kostal_kore.modbus_proxy import ModbusTcpProxyServer
+
+    audit = WriteAuditLog()
+    coord_mock = MagicMock()
+    coord_mock._write_audit = audit
+
+    proxy = ModbusTcpProxyServer.__new__(ModbusTcpProxyServer)
+    proxy._coordinator = coord_mock
+
+    proxy._log_audit("min_soc", None, "error", "FC16 decode failure")
+
+    assert audit.total_count == 1
+    e = audit.recent[0]
+    assert e.source == "proxy_fc16"
+    assert e.result == "error"
 
 
 def test_proxy_log_audit_no_op_when_no_write_audit():

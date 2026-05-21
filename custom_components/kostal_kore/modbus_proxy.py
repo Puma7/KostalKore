@@ -527,6 +527,7 @@ class ModbusTcpProxyServer:
                 _LOGGER.warning(
                     "Proxy write-multiple failed at address %d: %s", start_addr, err
                 )
+                self._log_audit(reg.name, None, "error", f"FC16 {err}")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)

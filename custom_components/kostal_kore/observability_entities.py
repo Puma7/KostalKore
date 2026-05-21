@@ -31,6 +31,11 @@ _WARN_REL = 0.05    # 5 % relative deviation for power values
 _MISMATCH_REL = 0.15  # 15 %
 _SOC_WARN_ABS = 2.0   # ±2 pp absolute for SoC
 _SOC_MISMATCH_ABS = 5.0
+# Absolute floor for power-pair status: prevents spurious "mismatch" at
+# low-power readings where a small absolute delta becomes a large relative %.
+# Status escalates only when BOTH relative AND absolute thresholds are exceeded.
+_WARN_ABS_FLOOR_W = 50.0
+_MISMATCH_ABS_FLOOR_W = 150.0
 
 
 class WriteAuditSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], SensorEntity):
@@ -211,12 +216,16 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
                 "status": status,
             }
         # relative comparison (avoid division by zero)
+        delta_abs = abs(rest_val - modbus_val)
         denom = max(abs(rest_val), abs(modbus_val), 1.0)
-        delta_pct = abs(rest_val - modbus_val) / denom
+        delta_pct = delta_abs / denom
+        # Hybrid threshold: escalate only when BOTH relative AND absolute
+        # deltas exceed the floor — small absolute deltas at low power readings
+        # would otherwise trip the relative threshold spuriously.
         status = "ok"
-        if delta_pct > mismatch_threshold:
+        if delta_pct > mismatch_threshold and delta_abs > _MISMATCH_ABS_FLOOR_W:
             status = "mismatch"
-        elif delta_pct > warn_threshold:
+        elif delta_pct > warn_threshold and delta_abs > _WARN_ABS_FLOOR_W:
             status = "warn"
         return {
             "key": label,
