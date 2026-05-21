@@ -1112,3 +1112,82 @@ When a workflow has two profiles with different preconditions (Profile A:
 both registries loaded; Profile B: only Recorder rows survive), don't try
 to make one entry point handle both. Build the second as a thin add-on
 that reuses the apply layer of the first.
+
+---
+
+## 47) The §36 hallucination loop CAN and DID repeat itself one year later
+
+### What happened (2026-05, commit `2973895`)
+
+A multi-round bug-analysis session presented "Bug #1" as a verified critical
+issue: "`FullChargeCap_E` is declared `Ah`, but every other surface
+(`modbus_registers.py`, `health_monitor.py`, `degradation_tracker.py`, test
+fixtures with `35000.0`) reports `Wh`. 35 000 Ah at battery voltage would be
+absurd; 35 kWh is realistic."
+
+The reasoning was the *exact same pattern* §36 documents: `_E` interpreted as
+Energy, Modbus register `1068` (a different register) cited as corroborating
+evidence, internal docstrings about "Battery Capacity" read as proof.
+
+The fix was implemented (`sensor.py: native_unit → UnitOfEnergy.WATT_HOUR,
+device_class=ENERGY_STORAGE`), the canary test was renamed from
+`_is_ah` → `_is_wh` to match — destroying the protection §36 had built — and
+the fix was committed (`2973895`), pushed, and documented in `CHANGELOG.md`
+and `BUGFIX_LOG.md` as a CRITICAL severity fix.
+
+The user's question caught it: *"Hatten wir nicht mal irgendwo bei den
+learnings dokumentiert, dass `FullChargeCap_E` oder den Wert `Ah` kein Bug
+war?"* — pointing at the user's memory of the §23/§36 documentation. A
+grep across the docs surfaced commit `6bf7680` from one year prior, with a
+revert message that begins literally: "*Fix #1 was hallucination*".
+
+### Why §36 wasn't enough to prevent the repeat
+
+1. **§36 was history, not policy.** It explained the past failure but did
+   not change any operational guardrail. The next audit session simply
+   didn't read §36 before drafting the "bug analysis".
+2. **The canary test name was rename-able.** §36 warned that renaming the
+   test in the same commit as the behaviour change destroys its purpose,
+   but the test itself did not refuse renaming — it had no docstring
+   forbidding the rename, no link to LEARNINGS, no out-of-band protection.
+3. **The plan-mode bug analysis cited code-internal evidence only.** The
+   analysis listed `modbus_registers.py:163`, `health_monitor.py:198`,
+   `degradation_tracker.py:298`, and test fixture values — but never
+   `LEARNINGS.md` and never the prior revert commit. Audit scope didn't
+   include "search git log for previous decisions about this register".
+4. **The same session that ran the analysis also wrote the test.** When the
+   audit decided "this is Wh", the test got written for Wh — there was no
+   pre-existing test that would have flipped red.
+
+### Operational changes (added in this revert commit)
+
+- **The canary test now carries an explicit do-not-rename docstring** with
+  cross-references to LEARNINGS §23, §36, §37 and this §47. The docstring
+  ends with: *"If you're reading this in another regression session, you
+  are about to repeat it again."*
+- **The sensor description carries an in-source comment** with the same
+  cross-refs, so any future "fix" that touches the line has the warning
+  in immediate context.
+- **`BUGFIX_LOG.md` Bug #1 entry now opens with "is correctly Ah and
+  must stay that way"** plus a table of the false-fix/revert history.
+
+### Lesson (operational, not just informational)
+
+The §36 lesson on its own was a documentation artefact. A documentation
+artefact does not protect against the next AI audit that doesn't read it.
+Three things actually protect against the loop:
+
+1. **In-source comments at the exact line that gets modified.** A diff that
+   touches `native_unit_of_measurement="Ah"` will show the warning comment
+   in the same hunk.
+2. **Tests with self-protective docstrings that name the failure mode they
+   exist to prevent.** A test called `test_bug1_full_charge_cap_unit_is_ah`
+   with a docstring that says *"This test name is not a coincidence; do
+   not flip it to `_is_wh`"* is harder to silently rewrite than a generic
+   `test_battery_capacity_unit_is_correct`.
+3. **A standing rule in audit prompts: before claiming a unit-related
+   "bug", grep the LEARNINGS for the affected register name.** This needs
+   to live in the audit instructions, not in a doc the audit may skip.
+
+Documentation that explains a past mistake does not, on its own, prevent
+the next one. Build the prevention into the source files that get touched.

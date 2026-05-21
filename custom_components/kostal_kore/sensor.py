@@ -425,11 +425,16 @@ SENSOR_PROCESS_DATA = [
     PlenticoreSensorEntityDescription(
         module_id="devices:local:battery",
         key="FullChargeCap_E",
+        # IMPORTANT: do NOT "fix" this unit to Wh. Live hardware measurement
+        # (LEARNINGS §23) returns ~50 for this register; 50 Ah × ~760 V ≈ 38 kWh
+        # which matches the SoC math. The "_E" suffix is misleading — it does
+        # NOT mean Energy. A previous audit hallucinated this as a Wh-bug
+        # (LEARNINGS §36) and the same canary unit-mismatch was reintroduced
+        # again in commit 2973895 because the protective test had been renamed
+        # to match the wrong assumption. The canary test is now back to
+        # `test_bug1_full_charge_cap_unit_is_ah` precisely to block this loop.
         name="Battery Full Charge Capacity",
-        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
-        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=2,
-        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement="Ah",
         icon="mdi:battery-high",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,

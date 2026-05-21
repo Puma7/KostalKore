@@ -8,16 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **Bug #1 (CRITICAL)** — `FullChargeCap_E` battery-capacity sensor was annotated
-  with `native_unit_of_measurement="Ah"` while every other reference
-  (`modbus_registers.py`, `health_monitor.py`, `degradation_tracker.py`, test
-  fixtures) treats it as `Wh`. Long-term statistics ingested this register at
-  the wrong unit class. Now reports `UnitOfEnergy.WATT_HOUR` with
-  `device_class=SensorDeviceClass.ENERGY_STORAGE` and
-  `suggested_unit_of_measurement=KILO_WATT_HOUR`. Long-Term-Statistics consumers
-  with prior data will see a one-time history break at the unit boundary; the
-  existing `create_battery_capacity_unit_migration_issue` repair flow surfaces
-  the Recorder unit-change warning. (commit `2973895`)
 - **Bug #11** — PV per-string energy statistics
   (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`) were hardcoded for PV1–PV3
   only. 1-string inverters saw permanent `unavailable` PV2/PV3 entries;
@@ -25,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `generate_pv_energy_sensor_descriptions(count)` mirrors
   `generate_dc_sensor_descriptions(count)` and produces descriptions for the
   actually-discovered string count. (commit `2973895`)
+
+### Reverted
+- **Bug #1 false fix on `FullChargeCap_E`** — commit `2973895` incorrectly
+  changed the REST-API `FullChargeCap_E` sensor from `"Ah"` to
+  `UnitOfEnergy.WATT_HOUR` with `device_class=ENERGY_STORAGE`. This was the
+  *second* occurrence of the identical hallucination (the first was reverted
+  in commit `6bf7680` in 2025). Live hardware measurement (LEARNINGS §23)
+  confirms `FullChargeCap_E ≈ 50 Ah` — multiplied by the inverter's ~760 V
+  DC bus this yields ~38 kWh, matching the SoC math. 50 Wh would be
+  physically absurd. The sensor description is reverted, the canary
+  regression test is restored to `test_bug1_full_charge_cap_unit_is_ah`
+  with a do-not-rename docstring, and LEARNINGS §47 documents how the loop
+  re-occurred.
 
 ### Added
 - **Orphan-history MVP** for long-time KORE users who never ran the legacy
@@ -42,11 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - User-facing walkthrough in `docs/migration_orphan_history.md`. (commit `bca1587`)
 
 ### Tests
-- `Tests/test_bug_regression.py`: added `test_bug1_full_charge_cap_unit_is_wh`,
+- `Tests/test_bug_regression.py`: added
   `test_bug11_pv_energy_sensors_generated_dynamically` (1/3/6 strings →
-  4/12/24 sensors), `test_bug11_static_pv_energy_descriptions_removed`. The
-  old `test_bug1_full_charge_cap_unit_is_ah` baseline was updated to the new
-  expected behavior.
+  4/12/24 sensors) and `test_bug11_static_pv_energy_descriptions_removed`.
+  `test_bug1_full_charge_cap_unit_is_ah` is restored to its canary form
+  (asserts Ah + `device_class is None`) with an explicit do-not-rename
+  docstring referencing LEARNINGS §23/§36/§37/§47.
 - `Tests/test_orphan_history.py`: 26 new tests covering pure helpers, sync
   scan with mocked recorder session, dry-run safety (executor never called),
   apply path reaching the copy engine, backend/recording guards, notification

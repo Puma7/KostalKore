@@ -92,27 +92,43 @@ def test_bug1_work_capacity_uses_watt_hour() -> None:
     )
 
 
-def test_bug1_full_charge_cap_unit_is_wh() -> None:
-    """FullChargeCap_E must be Wh with ENERGY_STORAGE device class.
+def test_bug1_full_charge_cap_unit_is_ah() -> None:
+    """PROTECTIVE CANARY — DO NOT RENAME OR FLIP TO Wh.
 
-    Every other surface (`modbus_registers.py:163` REG_BATTERY_WORK_CAPACITY,
-    `health_monitor.py:198` ParameterTracker, `degradation_tracker.py:298`
-    TrackedParameter, test fixtures with `35000.0`) reports this register in Wh.
-    Annotating it as "Ah" produced wrong units in the Energy Dashboard and
-    rejected statistics consumers expecting an energy unit.
+    LEARNINGS §23 documents the live hardware reality:
+        FullChargeCap_E live value = 50, Unit = Ah
+        50 Ah × ~760 V ≈ 38 kWh matches the SoC math
+        50 Wh would be absurdly small for a home battery (~0.005 % of capacity)
+
+    LEARNINGS §36 documents a 2025-Q2 hallucination where an AI audit assumed
+    the `_E` suffix implied Energy (Wh) and rewrote both the sensor description
+    AND this test (renaming it to `_is_wh`) — silently destroying the only
+    guard against the wrong fix re-shipping. Commit `2973895` repeated the
+    same hallucination 12 months later. Commit `6bf7680` reverted it the
+    first time; if you're reading this in another regression session, you
+    are about to repeat it again.
+
+    Before changing this assertion: read LEARNINGS §23, §36, §37, §47. If
+    you still think this register reports Wh, write a 10-line diagnostic
+    script against a real inverter (LEARNINGS §23 "Process recommendation")
+    and confirm the raw value × inverter DC voltage matches your assumption.
+    Do not trust naming conventions, internal docstrings, or fixture values.
     """
-    from homeassistant.components.sensor import SensorDeviceClass
     import kostal_plenticore.sensor as sensor_mod
 
     desc = next(
         d for d in sensor_mod.SENSOR_PROCESS_DATA
         if d.key == "FullChargeCap_E" and d.module_id == "devices:local:battery"
     )
-    assert desc.native_unit_of_measurement == UnitOfEnergy.WATT_HOUR, (
-        f"FullChargeCap_E should be Wh, got {desc.native_unit_of_measurement!r}"
+    assert desc.native_unit_of_measurement == "Ah", (
+        f"FullChargeCap_E unit changed unexpectedly: {desc.native_unit_of_measurement!r}. "
+        "See docstring + LEARNINGS §23/36/47 before 'fixing' this."
     )
-    assert desc.device_class == SensorDeviceClass.ENERGY_STORAGE, (
-        f"FullChargeCap_E should have ENERGY_STORAGE device_class, got {desc.device_class!r}"
+    # ENERGY_STORAGE device class would tell HA to expect an energy unit and
+    # reject Ah outright. Must stay unset.
+    assert desc.device_class is None, (
+        f"FullChargeCap_E must not have a device_class (Ah is not an energy unit), "
+        f"got {desc.device_class!r}"
     )
 
 

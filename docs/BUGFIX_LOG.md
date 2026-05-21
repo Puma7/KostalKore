@@ -37,30 +37,40 @@ mis-scaling battery storage history by a factor of ~5 (cell-voltage dependent).
 `suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR` so the UI shows
 `35.7 kWh` rather than `35700 Wh`.
 
-`FullChargeCap_E` was initially left as `"Ah"` based on an assumption that the
-REST API mirrored the Modbus register's coulomb-based scale. Re-verification
-against `modbus_registers.py:163` (`REG_BATTERY_WORK_CAPACITY` → `"Wh"`),
-`health_monitor.py:198` (`ParameterTracker("Battery Work Capacity", unit="Wh")`),
-`degradation_tracker.py:298` and the test fixture value `35000.0` (= 35 kWh, a
-realistic home-battery capacity; 35 kAh would be physically absurd) all confirm
-that this register reports **Wh**, not Ah.
+`FullChargeCap_E` is **correctly** `"Ah"` and must stay that way. Live
+hardware measurement (LEARNINGS §23) returns ~50 for this register;
+50 Ah × ~760 V ≈ 38 kWh which matches the SoC math. 50 Wh would be
+physically absurd (~0.005 % of a home battery's capacity). The `_E` suffix
+is misleading — it does NOT mean Energy.
 
-**Follow-up fix (commit `2973895`):**
-`FullChargeCap_E` → `UnitOfEnergy.WATT_HOUR`, `device_class=ENERGY_STORAGE`,
-plus `suggested_unit_of_measurement=KILO_WATT_HOUR` for display. The
-`entity_category=DIAGNOSTIC` annotation is preserved because full-charge
-capacity is a degradation/health metric, distinct from `WorkCapacity` (which
-represents real-time available energy and was correctly promoted to a
-non-diagnostic main sensor).
+**False fix and revert history:**
 
-**Test:** `test_bug1_full_charge_cap_unit_is_wh` in `test_bug_regression.py`
-asserts both unit and device_class.
+| Commit | What happened |
+|--------|---------------|
+| (Round 1 audit, May 2025) | Hallucinated "Ah → Wh" fix; renamed canary test to `_is_wh`. |
+| `6bf7680` (May 2025) | Reverted to Ah after Red Team caught the hallucination; restored canary test. |
+| `2973895` (May 2026) | **Same hallucination repeated.** Audit cited `modbus_registers.py:163` Wh and `35000.0` fixture as "evidence". |
+| `<next commit>` (May 2026) | Reverted again. Canary test name now includes explicit do-not-rename docstring with cross-refs to §23/§36/§37/§47. |
 
-**User impact:** users with active Long-Term-Statistics for this sensor will
-see a one-time history break at the unit change boundary. Unavoidable since
-the previous annotation was wrong; the existing
-`repairs.create_battery_capacity_unit_migration_issue` flow already handles
-the user-facing Recorder warning.
+**Why the loop keeps repeating:**
+
+1. The `_E` suffix pattern (Energy) reads as evidence to a code-analysis
+   audit that hasn't consulted live hardware.
+2. The Modbus register `1068`/`1070` (`battery_work_capacity`) really is in
+   Wh — but that's a different register than the REST API
+   `devices:local:battery/FullChargeCap_E`.
+3. Internal docstrings and `health_monitor.py`/`degradation_tracker.py`
+   refer to "Battery Capacity" generically; the audit reads them as
+   describing `FullChargeCap_E` without distinguishing register sources.
+
+**The only protections that work:**
+
+- `test_bug1_full_charge_cap_unit_is_ah` asserts Ah AND `device_class is None`.
+  The test name and docstring explicitly forbid renaming or flipping in the
+  same session that changes the sensor description.
+- Live hardware diagnostic script (LEARNINGS §23 "Process recommendation").
+- A Red Team audit pass that re-reads primary evidence (LEARNINGS) before
+  trusting a code-analysis bug report (LEARNINGS §37).
 
 ### Bug #2 / #5 🟠 — Missing KSEM translation keys in `en.json`
 
@@ -369,7 +379,7 @@ guard cascades into silent data corruption.
 | Test name | Verifies |
 |-----------|----------|
 | `test_bug1_work_capacity_uses_watt_hour` | `WorkCapacity` is Wh |
-| `test_bug1_full_charge_cap_unit_is_wh` | `FullChargeCap_E` is Wh + ENERGY_STORAGE |
+| `test_bug1_full_charge_cap_unit_is_ah` | **PROTECTIVE CANARY** — `FullChargeCap_E` is Ah, no `device_class`. Do not rename. |
 | `test_bug11_pv_energy_sensors_generated_dynamically` | 1/3/6 strings → 4/12/24 sensors |
 | `test_bug11_static_pv_energy_descriptions_removed` | no leftover static EnergyPv entries |
 | `test_bug2_ksem_keys_in_options_step` | KSEM keys in options dialog |
