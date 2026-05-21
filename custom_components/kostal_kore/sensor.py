@@ -1528,9 +1528,6 @@ async def async_setup_entry(
         if isinstance(_entry_store_pc, dict) else None
     )
     if _health_monitor_obj is not None or _degradation_tracker_obj is not None:
-        from homeassistant.core import callback as _callback
-
-        @_callback
         def _feed_rest_soh() -> None:
             data = process_data_update_coordinator.data
             if not data:
