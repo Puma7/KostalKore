@@ -492,3 +492,176 @@ async def test_apply_service_handler_validates_schema(hass: HomeAssistant) -> No
             {},
             blocking=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Coverage tests for previously-missed branches
+# ---------------------------------------------------------------------------
+
+
+def test_suggest_target_returns_none_when_suffix_is_empty() -> None:
+    """A legacy id that is only the prefix yields an empty suffix → None."""
+    target, ratio = _suggest_target(
+        "sensor.kostal_plenticore_",  # suffix becomes "" after prefix strip
+        ["sensor.kore_pv_power"],
+    )
+    assert target is None
+    assert ratio == 0.0
+
+
+def test_suggest_target_returns_fuzzy_match_above_cutoff() -> None:
+    """A non-exact suffix match above the 0.72 cutoff returns the best candidate."""
+    # Suffixes differ by one trailing char → similarity well above 0.72.
+    target, ratio = _suggest_target(
+        "sensor.kostal_plenticore_pv_powerx",
+        ["sensor.kore_pv_power"],
+    )
+    assert target == "sensor.kore_pv_power"
+    assert 0.72 < ratio < 1.0
+
+
+def test_scan_orphans_sync_skips_registered_statistics_id() -> None:
+    """Statistics rows whose statistic_id is in the registry must NOT be orphan."""
+    recorder, _ = _make_recorder_with_states(
+        states_entity_ids=[],
+        statistics_ids=[
+            "sensor.kostal_plenticore_pv_power",  # in registry → skipped
+            "sensor.kostal_plenticore_battery_soc",  # orphan
+            "sensor.unrelated_thermostat",  # not legacy → skipped (177→176 branch)
+        ],
+    )
+    report = _scan_orphans_sync(
+        recorder,
+        registry_entity_ids={"sensor.kostal_plenticore_pv_power"},
+        kore_entity_ids=["sensor.kore_battery_soc"],
+    )
+    orphan_ids = {c.old_entity_id for c in report.candidates}
+    assert orphan_ids == {"sensor.kostal_plenticore_battery_soc"}
+
+
+async def test_scan_orphan_history_happy_path_invokes_executor(
+    hass: HomeAssistant,
+) -> None:
+    """When recorder is active, executor is invoked with built registry sets."""
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="unique-pv-power",
+        suggested_object_id="kore_pv_power",
+    )
+
+    fake_report = OrphanScanReport(backend="sqlite")
+    executor_mock = AsyncMock(return_value=fake_report)
+    fake_recorder = SimpleNamespace(
+        recording=True,
+        db_url="sqlite:///memory:",
+        async_add_executor_job=executor_mock,
+    )
+    with patch(
+        "custom_components.kostal_kore.migration_services._get_recorder_instance",
+        return_value=fake_recorder,
+    ):
+        result = await scan_orphan_history(hass)
+
+    assert result is fake_report
+    executor_mock.assert_awaited_once()
+    # Executor was called with (_scan_orphans_sync, recorder, registry_ids, kore_ids)
+    args = executor_mock.await_args.args
+    assert "sensor.kore_pv_power" in args[2]  # registry_entity_ids contains it
+    assert "sensor.kore_pv_power" in args[3]  # kore_entity_ids contains it
+
+
+async def test_apply_orphan_mapping_skips_non_string_keys(hass: HomeAssistant) -> None:
+    """Non-string mapping keys are skipped with reason 'invalid_type'."""
+    fake_recorder = SimpleNamespace(
+        recording=True,
+        db_url="sqlite:///memory:",
+        async_add_executor_job=AsyncMock(),
+    )
+    with patch(
+        "custom_components.kostal_kore.migration_services._get_recorder_instance",
+        return_value=fake_recorder,
+    ):
+        report = await apply_orphan_mapping(
+            hass,
+            {123: "sensor.kore_pv_power"},  # type: ignore[dict-item]
+            dry_run=True,
+        )
+    assert report.applied_mappings == 0
+    assert report.skipped[0][2] == "invalid_type"
+
+
+async def test_notify_helper_calls_persistent_notification_service(
+    hass: HomeAssistant,
+) -> None:
+    """_notify must invoke persistent_notification.create with the given fields."""
+    from custom_components.kostal_kore.orphan_history import _notify
+
+    captured: list[dict] = []
+
+    async def _capture(call) -> None:
+        captured.append(dict(call.data))
+
+    hass.services.async_register("persistent_notification", "create", _capture)
+    await _notify(hass, "test-id", "Title", "Body")
+    await hass.async_block_till_done()
+
+    assert captured, "_notify must call persistent_notification.create"
+    assert captured[0]["notification_id"] == "test-id"
+    assert captured[0]["title"] == "Title"
+    assert captured[0]["message"] == "Body"
+
+
+async def test_apply_service_handler_full_path_posts_notification(
+    hass: HomeAssistant,
+) -> None:
+    """The apply service handler must convert the call payload and notify on success."""
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        domain="sensor",
+        platform=DOMAIN,
+        unique_id="unique-pv-power",
+        suggested_object_id="kore_pv_power",
+    )
+
+    fake_report = OrphanMergeReport(
+        backend="sqlite", total_mappings=1, dry_run=True, applied_mappings=0,
+    )
+    notify_mock = AsyncMock()
+    with patch.object(
+        orphan_history_mod, "apply_orphan_mapping",
+        new=AsyncMock(return_value=fake_report),
+    ), patch.object(orphan_history_mod, "_notify", new=notify_mock):
+        async_register_orphan_history_services(hass)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_APPLY_ORPHAN_HISTORY_MAPPING,
+            {"mapping": {"sensor.kostal_plenticore_pv_power": "sensor.kore_pv_power"}},
+            blocking=True,
+        )
+    notify_mock.assert_awaited_once()
+    title_arg = notify_mock.await_args.args[2]
+    assert "Dry-Run" in title_arg
+
+
+async def test_unregister_handles_non_dict_domain_data(hass: HomeAssistant) -> None:
+    """Defensive: if hass.data[DOMAIN] is not a dict, treat as no active entries."""
+    async_register_orphan_history_services(hass)
+    hass.data[DOMAIN] = ["unexpected-type"]  # not a dict — defensive branch
+
+    async_unregister_orphan_history_services_if_unused(hass)
+    assert not hass.services.has_service(DOMAIN, SERVICE_SCAN_ORPHAN_HISTORY)
+    assert not hass.services.has_service(DOMAIN, SERVICE_APPLY_ORPHAN_HISTORY_MAPPING)
+
+
+async def test_unregister_when_services_already_absent(hass: HomeAssistant) -> None:
+    """Unregister must be safe when services were never registered (442→444→exit)."""
+    # No prior register call — services don't exist.
+    async_unregister_orphan_history_services_if_unused(hass)
+    # No exception — that's the contract.
+    assert not hass.services.has_service(DOMAIN, SERVICE_SCAN_ORPHAN_HISTORY)
