@@ -72,6 +72,7 @@ async def test_sensor_setup_uses_modbus_dc_count_and_adds_optional_groups(hass) 
         patch.object(sensor_mod, "MODBUS_DIAGNOSTIC_SENSORS", (("modbus_key", "Modbus Key", None),)),
         patch.object(sensor_mod, "KSEM_DIAGNOSTIC_SENSORS", (("ksem_key", "Ksem Key", None),)),
         patch.object(sensor_mod, "generate_dc_sensor_descriptions", return_value=[]),
+        patch.object(sensor_mod, "generate_pv_energy_sensor_descriptions", return_value=[]),
         patch.object(sensor_mod, "ProcessDataUpdateCoordinator", return_value=fake_process) as process_ctor,
         patch("kostal_plenticore.health_sensor.create_health_sensors", return_value=[MagicMock()]),
         patch("kostal_plenticore.fire_safety_entities.create_fire_safety_sensors", return_value=[MagicMock()]),
