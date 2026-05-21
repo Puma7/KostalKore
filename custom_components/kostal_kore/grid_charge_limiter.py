@@ -195,6 +195,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             # capping charge until the user toggled the optimizer again.
             # Restore is idempotent so the user-toggle path remains safe.
             self._is_on = False
+            self.async_write_ha_state()
             try:
                 await self._write_charge_limit(self._restore_limit())
             except Exception as restore_err:  # pragma: no cover

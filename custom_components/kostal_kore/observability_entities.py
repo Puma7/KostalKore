@@ -243,8 +243,12 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
             return "mismatch"
         if "warn" in statuses:
             return "warn"
-        if "ok" in statuses:
+        # "ok" only when ALL pairs are ok — partial REST outage must not
+        # silently report "ok" while some pairs show insufficient_data.
+        if statuses == {"ok"}:
             return "ok"
+        if "ok" in statuses:
+            return "partial"
         return "insufficient_data"
 
     def _compute_pairs(self) -> list[dict[str, Any]]:

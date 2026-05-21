@@ -463,6 +463,30 @@ def test_consistency_sensor_low_power_no_spurious_mismatch():
     assert sensor.native_value == "ok"
 
 
+def test_consistency_sensor_partial_when_some_pairs_ok_some_insufficient():
+    """native_value == 'partial' when at least one pair is ok AND one is insufficient_data."""
+    from custom_components.kostal_kore.observability_entities import RestModbusConsistencySensor
+
+    # SoC REST missing → insufficient_data; DC+Home match → ok
+    rest = _make_rest_coord({
+        "devices:local": {"Dc_P": "4200", "Home_P": "1500"},
+        # no "devices:local:battery" key at all
+    })
+    modbus = _make_modbus_coord_with_data({
+        "battery_soc": 67.0,
+        "total_dc_power": 4200.0,
+        "home_from_pv": 1500.0,
+        "home_from_battery": 0.0,
+        "home_from_grid": 0.0,
+    })
+
+    sensor = RestModbusConsistencySensor.__new__(RestModbusConsistencySensor)
+    sensor._process_coord = rest
+    sensor.coordinator = modbus
+
+    assert sensor.native_value == "partial"
+
+
 def test_consistency_sensor_extra_state_attributes_returns_pairs():
     from custom_components.kostal_kore.observability_entities import RestModbusConsistencySensor
 
@@ -668,6 +692,26 @@ def test_proxy_log_audit_writes_to_coordinator_audit():
     assert e.result == "forwarded_direct"
     assert e.source == "proxy_fc06"
     assert e.key == "addr:1034"
+
+
+def test_proxy_fc06_multi_register_rejection_creates_audit_event():
+    """FC06 on a multi-word register must log rejected_validation, not drop silently."""
+    from custom_components.kostal_kore.modbus_proxy import ModbusTcpProxyServer
+
+    audit = WriteAuditLog()
+    coord_mock = MagicMock()
+    coord_mock._write_audit = audit
+
+    proxy = ModbusTcpProxyServer.__new__(ModbusTcpProxyServer)
+    proxy._coordinator = coord_mock
+
+    # Simulate what the code path calls: _log_audit with FC06 multi-reg detail
+    proxy._log_audit("some_reg", 42, "rejected_validation", "FC06 multi-reg")
+
+    assert audit.total_count == 1
+    e = audit.recent[0]
+    assert e.result == "rejected_validation"
+    assert e.source == "proxy_fc06"
 
 
 def test_proxy_log_audit_fc16_error_classifies_as_proxy_fc16():

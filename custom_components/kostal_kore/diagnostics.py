@@ -330,8 +330,8 @@ async def _export_bundle_for_entry(
                 "client_count": len(proxy._clients),
                 "fc06_count": proxy._fc06_count,
                 "fc16_count": proxy._fc16_count,
-                "last_ext_writes": {
-                    str(addr): round(time.time() - (time.monotonic() - ts), 1)
+                "last_ext_writes_seconds_ago": {
+                    str(addr): round(time.monotonic() - ts, 1)
                     for addr, ts in proxy._last_ext_write.items()
                 },
             }

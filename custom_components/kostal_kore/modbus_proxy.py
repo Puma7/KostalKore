@@ -435,6 +435,7 @@ class ModbusTcpProxyServer:
                     "Proxy: FC06 rejected for %d-register %s (use FC16)",
                     reg.count, reg.name,
                 )
+                self._log_audit(reg.name, value, "rejected_validation", "FC06 multi-reg")
                 return self._error_response(FC_WRITE_SINGLE, 0x03)
             try:
                 await self._coordinator.async_write_by_address(address, value)
