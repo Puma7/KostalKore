@@ -329,6 +329,110 @@ async def test_save_writes_all_state():
     assert saved["samples"][0][:2] == [pytest.approx(0.4), 35000.0]
 
 
+@pytest.mark.asyncio
+async def test_save_failure_is_swallowed():
+    """Storage write errors must not crash the calculator (line 139-140)."""
+    hass = MagicMock()
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(
+            side_effect=OSError("disk full")
+        )
+        c = BatterySohCalculator(hass, "k")
+        # async_save must NOT raise even though the underlying store fails
+        await c.async_save()
+
+
+def test_total_throughput_kwh_none_when_partial(calc):
+    """charge_kwh present but discharge_kwh absent should yield None (line 222)."""
+    # _latest_charge_kwh and _latest_discharge_kwh both start None
+    assert calc.total_throughput_kwh is None
+    # Set only charge — still None
+    calc._latest_charge_kwh = 5.0
+    assert calc.total_throughput_kwh is None
+    # Set only discharge — still None
+    calc._latest_charge_kwh = None
+    calc._latest_discharge_kwh = 5.0
+    assert calc.total_throughput_kwh is None
+    # Both set — value
+    calc._latest_charge_kwh = 5.0
+    calc._latest_discharge_kwh = 4.0
+    assert calc.total_throughput_kwh == pytest.approx(9.0)
+
+
+def test_baseline_age_days_none_until_set(calc):
+    """baseline_age_days returns None before any observation (lines 235-237)."""
+    assert calc.baseline_age_days is None
+    calc.update_from_modbus({"battery_work_capacity": 35000.0})
+    assert calc.baseline_age_days is not None
+    assert calc.baseline_age_days >= 0.0
+
+
+def test_has_min_window_false_with_single_sample(calc):
+    """_has_min_window must return False with fewer than 2 samples (line 272)."""
+    # Empty deque
+    assert calc._has_min_window() is False
+    # One sample only
+    calc._samples.append((10.0, 35000.0, 1000.0))
+    assert calc._has_min_window() is False
+    # Two samples spanning under the min age
+    calc._samples.append((20.0, 34900.0, 1500.0))
+    assert calc._has_min_window() is False
+
+
+def test_degradation_per_kwh_none_when_window_too_short(calc):
+    """Sufficient samples but window < 30 days returns None (line 266)."""
+    import time as _t
+    now = _t.time()
+    # 35 samples spanning only 5 days — fails the window gate
+    for i in range(35):
+        ts = now - (5 - i * (5 / 34)) * 86400
+        calc._samples.append((i * 10.0, 35000.0 - i, ts))
+    calc._baseline_capacity_wh = 35000.0
+    calc._current_capacity_wh = 34965.0
+    assert calc.degradation_per_kwh is None
+
+
+def test_degradation_slope_none_when_all_x_identical(calc):
+    """If every sample has the same throughput, denom == 0 and slope is None (line 266)."""
+    import time as _t
+    now = _t.time()
+    for i in range(30):
+        ts = now - (60 - i * (60 / 29)) * 86400
+        # SAME x value for every sample — OLS denominator collapses to zero
+        calc._samples.append((100.0, 35000.0 + i, ts))
+    assert calc.degradation_per_kwh is None
+
+
+def test_annual_throughput_none_when_timestamps_equal(calc):
+    """If oldest and newest sample share a timestamp, the rate is undefined (line 295)."""
+    fixed_ts = 1_700_000_000.0
+    calc._samples.append((0.0, 35000.0, fixed_ts))
+    calc._samples.append((10.0, 34999.0, fixed_ts))
+    assert calc.annual_throughput_kwh is None
+
+
+def test_projection_returns_current_soh_when_slope_positive(calc):
+    """Non-degrading (positive or zero slope) projects to current SoH (line 295)."""
+    import time as _t
+    now = _t.time()
+    # Mock a positive slope by seeding samples where capacity GROWS with throughput
+    for i in range(30):
+        ts = now - (60 - i * (60 / 29)) * 86400
+        # Positive slope: capacity increases by 0.05 Wh per kWh
+        calc._samples.append((i * 10.0, 35000.0 + i * 0.5, ts))
+    calc._baseline_capacity_wh = 35000.0
+    calc._baseline_set_at = now - 60 * 86400
+    calc._current_capacity_wh = calc._samples[-1][1]
+    slope = calc.degradation_per_kwh
+    assert slope is not None
+    assert slope > 0
+    # When slope is non-negative, projection should fall back to current SoH
+    assert calc.soh_projection_5y_pct == pytest.approx(calc.soh_pct)
+
+
 def test_load_failure_keeps_calculator_empty():
     """A storage read failure must not raise — calculator stays empty."""
     hass = MagicMock()
