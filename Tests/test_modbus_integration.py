@@ -659,3 +659,64 @@ async def test_rollback_setup_shuts_down_ksem_coordinator(
     await kp_init._rollback_setup(hass, entry, mock_plenticore)
 
     mock_ksem.async_shutdown.assert_awaited_once()
+
+
+async def test_async_unload_loaded_platforms_empty_list_is_noop(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """_async_unload_loaded_platforms([]) must return True without calling HA."""
+    mock_config_entry.add_to_hass(hass)
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(return_value=True),
+    ) as mock_unload:
+        result = await kp_init._async_unload_loaded_platforms(
+            hass, mock_config_entry, []
+        )
+
+    assert result is True
+    mock_unload.assert_not_awaited()
+
+
+async def test_async_unload_loaded_platforms_tolerates_never_loaded_value_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """HA 'Config entry was never loaded' during unload must be swallowed."""
+    mock_config_entry.add_to_hass(hass)
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(side_effect=ValueError("Config entry was never loaded!")),
+    ):
+        result = await kp_init._async_unload_loaded_platforms(
+            hass, mock_config_entry, list(kp_init.PLATFORMS)
+        )
+
+    assert result is True  # graceful — unload_ok starts True and the race is tolerated
+
+
+async def test_async_unload_loaded_platforms_reraises_unrelated_value_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """ValueError with a different message must propagate."""
+    import pytest
+
+    mock_config_entry.add_to_hass(hass)
+
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            AsyncMock(side_effect=ValueError("unrelated problem")),
+        ),
+        pytest.raises(ValueError, match="unrelated"),
+    ):
+        await kp_init._async_unload_loaded_platforms(
+            hass, mock_config_entry, list(kp_init.PLATFORMS)
+        )
