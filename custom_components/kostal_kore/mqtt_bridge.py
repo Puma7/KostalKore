@@ -487,7 +487,9 @@ class KostalMqttBridge:
                 return
 
             async with self._write_lock:
-                await self._coordinator.async_write_register(reg, value)
+                await self._coordinator.async_write_register(
+                    reg, value, audit_source="mqtt"
+                )
 
             self._command_count += 1
             _LOGGER.info(

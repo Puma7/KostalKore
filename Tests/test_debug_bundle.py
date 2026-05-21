@@ -58,6 +58,9 @@ def _minimal_store() -> dict:
     modbus_coord.slow_data_age_s = 12.5
     modbus_coord._fast_error_count = 0
 
+    process_coord = MagicMock()
+    process_coord.data = {"devices:local": {"Dc_P": "4200"}}
+
     return {
         "modbus_coordinator": modbus_coord,
         "health_monitor": health_mon,
@@ -65,6 +68,7 @@ def _minimal_store() -> dict:
         "write_audit": audit,
         "request_scheduler": scheduler,
         "modbus_proxy": proxy,
+        "process_coordinator": process_coord,
     }
 
 
@@ -149,6 +153,9 @@ async def test_export_bundle_for_entry_happy_path(tmp_path):
     assert "proxy_state" in bundle
     assert "modbus_snapshot" in bundle
     assert "coordinator_state" in bundle
+    assert "rest_snapshot" in bundle
+    assert bundle["rest_snapshot"]["devices:local"]["Dc_P"] == "4200"
+    assert "last_ext_writes_seconds_ago" in bundle["proxy_state"]
 
 
 @pytest.mark.asyncio
@@ -219,6 +226,30 @@ async def test_export_bundle_for_entry_proxy_exception_handled():
 
 
 @pytest.mark.asyncio
+async def test_export_bundle_for_entry_rest_snapshot_exception_handled():
+    """process_coordinator.data access failure must not crash the bundle."""
+    hass = MagicMock()
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+
+    store = _minimal_store()
+    bad_proc = MagicMock()
+    type(bad_proc).data = PropertyMock(side_effect=RuntimeError("rest-err"))
+    store["process_coordinator"] = bad_proc
+
+    with (
+        patch("custom_components.kostal_kore.diagnostics.async_get_system_info",
+              new=AsyncMock(return_value={})),
+        patch("custom_components.kostal_kore.diagnostics.os.makedirs"),
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.kostal_kore.diagnostics.json.dump") as mock_dump,
+    ):
+        await _export_bundle_for_entry(hass, "entry1", store)
+
+    bundle = mock_dump.call_args[0][0]
+    assert "error" in bundle["rest_snapshot"]
+
+
+@pytest.mark.asyncio
 async def test_export_bundle_for_entry_oserror_raises():
     hass = MagicMock()
 
@@ -248,6 +279,7 @@ async def test_export_bundle_for_entry_system_info_exception_handled():
     store.pop("request_scheduler")
     store.pop("modbus_proxy")
     store.pop("modbus_coordinator")
+    store.pop("process_coordinator")
 
     with (
         patch("custom_components.kostal_kore.diagnostics.async_get_system_info",

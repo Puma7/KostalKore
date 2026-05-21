@@ -39,14 +39,18 @@ _MISMATCH_ABS_FLOOR_W = 150.0
 
 
 class WriteAuditSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], SensorEntity):
-    """Diagnostic sensor: write events per minute + recent write history."""
+    """Diagnostic sensor: write-audit events per minute + recent history.
+
+    The rate counts ALL audit events (ok writes plus rejections/errors), not
+    only successful writes — this matches the underlying audit log semantics.
+    """
 
     _attr_icon = "mdi:pencil-box-outline"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "writes/min"
+    _attr_native_unit_of_measurement = "events/min"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Write Audit Rate"
+    _attr_name = "Write Audit Event Rate"
     _attr_suggested_display_precision = 1
 
     def __init__(

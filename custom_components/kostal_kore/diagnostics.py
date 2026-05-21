@@ -347,6 +347,20 @@ async def _export_bundle_for_entry(
             "fast_error_count": modbus_coord._fast_error_count,
         }
 
+    process_coord = entry_store.get("process_coordinator")
+    if process_coord is not None:
+        try:
+            rest_data = getattr(process_coord, "data", None) or {}
+            # ProcessDataUpdateCoordinator.data: dict[module_id, dict[key, str]].
+            # Coerce nested values so json.dump() with default=str handles any
+            # exotic types deterministically.
+            bundle["rest_snapshot"] = {
+                str(mod): dict(values) if isinstance(values, dict) else values
+                for mod, values in rest_data.items()
+            }
+        except Exception as err:  # noqa: BLE001
+            bundle["rest_snapshot"] = {"error": str(err)}
+
     ts_str = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
     filename = f"kore_debug_{entry_id[:8]}_{ts_str}.json"
     path = f"/config/www/{filename}"

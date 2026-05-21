@@ -310,9 +310,17 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Could not read device info register %s", reg.name)
 
     async def async_write_register(
-        self, register: ModbusRegister, value: Any
+        self,
+        register: ModbusRegister,
+        value: Any,
+        *,
+        audit_source: str = "modbus_coord",
     ) -> None:
-        """Write a value to a control register with safety validation."""
+        """Write a value to a control register with safety validation.
+
+        audit_source lets callers (MQTT bridge, proxy) tag the event so the
+        write-audit log distinguishes origin paths.
+        """
         if register.access != Access.RW:
             raise ValueError(f"Register {register.name} is read-only")
 
@@ -330,18 +338,18 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 from .write_audit import WriteEvent
                 self._write_audit.log(WriteEvent(
                     ts=time.monotonic(),
-                    source="modbus_coord",
+                    source=audit_source,
                     key=register.name,
                     value=value,
                     result="ok",
                 ))
-        except ModbusClientError as err:
+        except Exception as err:
             _LOGGER.error("Modbus write failed for %s: %s", register.name, err)
             if self._write_audit is not None:
                 from .write_audit import WriteEvent
                 self._write_audit.log(WriteEvent(
                     ts=time.monotonic(),
-                    source="modbus_coord",
+                    source=audit_source,
                     key=register.name,
                     value=value,
                     result="error",
@@ -354,7 +362,35 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._client.write_by_name(name, value)
         _LOGGER.info("Wrote %s = %s via Modbus", name, value)
 
-    async def async_write_by_address(self, address: int, value: Any) -> None:
-        """Write a value to a register identified by address."""
-        await self._client.write_by_address(address, value)
-        _LOGGER.info("Wrote address %d = %s via Modbus", address, value)
+    async def async_write_by_address(
+        self, address: int, value: Any, *, audit_source: str = "modbus_coord"
+    ) -> None:
+        """Write a value to a register identified by address.
+
+        Audits the operation so direct address-write callers (currently only
+        the Modbus TCP proxy) surface in the write log.
+        """
+        try:
+            await self._client.write_by_address(address, value)
+            _LOGGER.info("Wrote address %d = %s via Modbus", address, value)
+            if self._write_audit is not None:
+                from .write_audit import WriteEvent
+                self._write_audit.log(WriteEvent(
+                    ts=time.monotonic(),
+                    source=audit_source,
+                    key=f"addr:{address}",
+                    value=value,
+                    result="ok",
+                ))
+        except Exception as err:
+            if self._write_audit is not None:
+                from .write_audit import WriteEvent
+                self._write_audit.log(WriteEvent(
+                    ts=time.monotonic(),
+                    source=audit_source,
+                    key=f"addr:{address}",
+                    value=value,
+                    result="error",
+                    detail=str(err),
+                ))
+            raise

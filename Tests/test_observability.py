@@ -572,6 +572,112 @@ def test_modbus_coordinator_write_hook_logs_error_on_exception(monkeypatch):
     assert "timeout" in audit.recent[0].detail
 
 
+def test_modbus_coordinator_write_register_honors_audit_source():
+    """audit_source parameter must override default 'modbus_coord' tag."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+    from custom_components.kostal_kore.modbus_registers import Access
+
+    audit = WriteAuditLog()
+    client = MagicMock()
+    client.write_register = AsyncMock(return_value=None)
+
+    coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._client = client
+    coord._write_audit = audit
+
+    reg = MagicMock()
+    reg.access = Access.RW
+    reg.name = "bat_charge"
+
+    asyncio.get_event_loop().run_until_complete(
+        coord.async_write_register(reg, 5000, audit_source="mqtt")
+    )
+
+    assert audit.recent[0].source == "mqtt"
+
+
+def test_modbus_coordinator_write_register_logs_non_modbus_exceptions():
+    """Non-ModbusClientError exceptions must still produce an audit error event."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+    from custom_components.kostal_kore.modbus_registers import Access
+
+    audit = WriteAuditLog()
+    client = MagicMock()
+    client.write_register = AsyncMock(side_effect=TimeoutError("connection lost"))
+
+    coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._client = client
+    coord._write_audit = audit
+
+    reg = MagicMock()
+    reg.access = Access.RW
+    reg.name = "bat_charge"
+
+    with pytest.raises(TimeoutError):
+        asyncio.get_event_loop().run_until_complete(
+            coord.async_write_register(reg, 5000, audit_source="mqtt")
+        )
+
+    assert audit.total_count == 1
+    assert audit.recent[0].result == "error"
+    assert audit.recent[0].source == "mqtt"
+    assert "connection lost" in audit.recent[0].detail
+
+
+def test_modbus_coordinator_write_by_address_logs_ok():
+    """async_write_by_address must audit successful writes."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+
+    audit = WriteAuditLog()
+    client = MagicMock()
+    client.write_by_address = AsyncMock(return_value=None)
+
+    coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._client = client
+    coord._write_audit = audit
+
+    asyncio.get_event_loop().run_until_complete(
+        coord.async_write_by_address(1034, 80, audit_source="proxy_fc06")
+    )
+
+    assert audit.total_count == 1
+    e = audit.recent[0]
+    assert e.source == "proxy_fc06"
+    assert e.result == "ok"
+    assert e.key == "addr:1034"
+    assert e.value == 80
+
+
+def test_modbus_coordinator_write_by_address_logs_error():
+    """async_write_by_address must audit write failures and re-raise."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+
+    audit = WriteAuditLog()
+    client = MagicMock()
+    client.write_by_address = AsyncMock(side_effect=RuntimeError("nope"))
+
+    coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._client = client
+    coord._write_audit = audit
+
+    with pytest.raises(RuntimeError):
+        asyncio.get_event_loop().run_until_complete(
+            coord.async_write_by_address(1034, 80, audit_source="proxy_fc06")
+        )
+
+    assert audit.total_count == 1
+    assert audit.recent[0].result == "error"
+    assert "nope" in audit.recent[0].detail
+
+
 # ---------------------------------------------------------------------------
 # Modbus coordinator property tests
 # ---------------------------------------------------------------------------

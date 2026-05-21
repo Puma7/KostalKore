@@ -438,13 +438,14 @@ class ModbusTcpProxyServer:
                 self._log_audit(reg.name, value, "rejected_validation", "FC06 multi-reg")
                 return self._error_response(FC_WRITE_SINGLE, 0x03)
             try:
-                await self._coordinator.async_write_by_address(address, value)
+                # Coordinator hook records the ok/error event with source=proxy_fc06.
+                await self._coordinator.async_write_by_address(
+                    address, value, audit_source="proxy_fc06"
+                )
                 _LOGGER.info("Proxy: write reg %d = %d (external)", address, value)
-                self._log_audit(reg.name, value, "ok", "proxy_fc06")
                 return pdu[:5]
             except Exception as err:
                 _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
-                self._log_audit(f"addr:{address}", value, "error", str(err))
                 return self._error_response(FC_WRITE_SINGLE, 0x04)
 
         raw_result = await self._forward_write_single(address, value)
@@ -516,19 +517,31 @@ class ModbusTcpProxyServer:
 
         reg = REGISTER_BY_ADDRESS.get(start_addr)
         if reg is not None and reg.access == Access.RW and quantity == reg.count:
+            # Decode happens locally — coordinator never sees this failure, so
+            # audit it manually. Write failures are recorded by the coordinator
+            # hook with source=proxy_fc16 (no double-log).
             try:
                 decoded = self._decode_for_write(reg, reg_values)
-                await self._coordinator.async_write_register(reg, decoded)
+            except Exception as err:
+                _LOGGER.warning(
+                    "Proxy write-multiple decode failed at address %d: %s",
+                    start_addr, err,
+                )
+                self._log_audit(reg.name, None, "error", f"FC16 decode: {err}")
+                return self._error_response(FC_WRITE_MULTIPLE, 0x04)
+
+            try:
+                await self._coordinator.async_write_register(
+                    reg, decoded, audit_source="proxy_fc16"
+                )
                 _LOGGER.info(
                     "Proxy: write-multiple reg %d = %s (external)", start_addr, decoded,
                 )
-                # audit logged by coordinator.async_write_register
                 return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
             except Exception as err:
                 _LOGGER.warning(
                     "Proxy write-multiple failed at address %d: %s", start_addr, err
                 )
-                self._log_audit(reg.name, None, "error", f"FC16 {err}")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)

@@ -1507,6 +1507,13 @@ async def async_setup_entry(
     process_data_update_coordinator = ProcessDataUpdateCoordinator(
         hass, entry, _LOGGER, "Process Data", timedelta(seconds=_rest_poll_interval), plenticore
     )
+    # Expose process_coordinator via entry_store so the debug bundle can
+    # snapshot REST data alongside Modbus data without re-fetching.
+    from .const import DOMAIN as _DOMAIN_PC
+    _entry_store_pc = hass.data.get(_DOMAIN_PC, {}).get(entry.entry_id)
+    if isinstance(_entry_store_pc, dict):
+        _entry_store_pc["process_coordinator"] = process_data_update_coordinator
+
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(
         process_data_update_coordinator: ProcessDataUpdateCoordinator,

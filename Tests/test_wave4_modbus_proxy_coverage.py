@@ -302,7 +302,9 @@ async def test_modbus_proxy_write_single_paths() -> None:
     pdu = struct.pack(">BHH", FC_WRITE_SINGLE, REG_ACTIVE_POWER_SETPOINT.address, 42)
     response = await proxy._handle_write_single(pdu)
     assert response == pdu[:5]
-    proxy._coordinator.async_write_by_address.assert_awaited_once_with(REG_ACTIVE_POWER_SETPOINT.address, 42)
+    proxy._coordinator.async_write_by_address.assert_awaited_once_with(
+        REG_ACTIVE_POWER_SETPOINT.address, 42, audit_source="proxy_fc06"
+    )
 
     proxy = _make_proxy(installer_access=True)
     proxy._coordinator.async_write_by_address.side_effect = RuntimeError("write failed")
