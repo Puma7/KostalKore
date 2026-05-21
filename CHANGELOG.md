@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Bug #1 (CRITICAL)** — `FullChargeCap_E` battery-capacity sensor was annotated
+  with `native_unit_of_measurement="Ah"` while every other reference
+  (`modbus_registers.py`, `health_monitor.py`, `degradation_tracker.py`, test
+  fixtures) treats it as `Wh`. Long-term statistics ingested this register at
+  the wrong unit class. Now reports `UnitOfEnergy.WATT_HOUR` with
+  `device_class=SensorDeviceClass.ENERGY_STORAGE` and
+  `suggested_unit_of_measurement=KILO_WATT_HOUR`. Long-Term-Statistics consumers
+  with prior data will see a one-time history break at the unit boundary; the
+  existing `create_battery_capacity_unit_migration_issue` repair flow surfaces
+  the Recorder unit-change warning. (commit `2973895`)
+- **Bug #11** — PV per-string energy statistics
+  (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`) were hardcoded for PV1–PV3
+  only. 1-string inverters saw permanent `unavailable` PV2/PV3 entries;
+  inverters with 4–6 strings lost energy stats entirely. New helper
+  `generate_pv_energy_sensor_descriptions(count)` mirrors
+  `generate_dc_sensor_descriptions(count)` and produces descriptions for the
+  actually-discovered string count. (commit `2973895`)
+
+### Added
+- **Orphan-history MVP** for long-time KORE users who never ran the legacy
+  migration. New module `custom_components/kostal_kore/orphan_history.py`
+  exposes two services:
+  - `kostal_kore.scan_orphan_history` (read-only): scans Recorder
+    `StatesMeta` + `StatisticsMeta` for entity_ids matching legacy Plenticore
+    patterns that no longer exist in the Entity Registry. Posts a persistent
+    notification with fuzzy-match suggestions to current KORE entities.
+  - `kostal_kore.apply_orphan_history_mapping` (dry-run default): re-binds
+    orphan rows to current KORE entities by delegating to the existing
+    `_copy_legacy_history_sync` engine — unit-mismatch and duplicate-source
+    guards from QA-2 carry over. Targets that aren't registered to the
+    `kostal_kore` platform are rejected.
+  - User-facing walkthrough in `docs/migration_orphan_history.md`. (commit `bca1587`)
+
+### Tests
+- `Tests/test_bug_regression.py`: added `test_bug1_full_charge_cap_unit_is_wh`,
+  `test_bug11_pv_energy_sensors_generated_dynamically` (1/3/6 strings →
+  4/12/24 sensors), `test_bug11_static_pv_energy_descriptions_removed`. The
+  old `test_bug1_full_charge_cap_unit_is_ah` baseline was updated to the new
+  expected behavior.
+- `Tests/test_orphan_history.py`: 26 new tests covering pure helpers, sync
+  scan with mocked recorder session, dry-run safety (executor never called),
+  apply path reaching the copy engine, backend/recording guards, notification
+  formatters, and service registration idempotence.
+
 ## [2.16.10-rc.4] — 2026-05-19 — 100% Branch Coverage
 
 Final push to reach enforced 100% branch + statement coverage on all measured

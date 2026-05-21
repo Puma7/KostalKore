@@ -190,3 +190,45 @@ logs unhandled patterns for manual review.
 - Current migration code: `custom_components/kostal_kore/legacy_migration.py`
 - Current coordinator device setup: `custom_components/kostal_kore/coordinator.py:328-337`
 - Migration guide for users: `migration.md`
+
+---
+
+## Addendum: Profile B (orphan-history) — added 2026-05
+
+The original document above covers Profile A: both old and new config entries
+loaded simultaneously, registry-driven discovery. A second profile surfaced
+in user reports:
+
+**Profile B — long-time KORE installation that never ran the legacy import.**
+The Recorder still holds `sensor.kostal_plenticore_*` rows, but the Entity
+Registry has no legacy entries; `discover_legacy_duplicate_entity_pairs`
+returns empty.
+
+### Architecture decision
+
+Rather than extend the registry-driven flow with a "phantom registry" mode,
+Profile B is a separate thin module (`orphan_history.py`) that:
+
+1. Queries `StatesMeta.entity_id` and `StatisticsMeta.statistic_id` directly
+   to enumerate Recorder content.
+2. Cross-references against the live Entity Registry to identify orphans.
+3. Fuzzy-matches orphans to current KORE entities (suffix-normalised
+   entity_id, `difflib` ratio ≥ 0.72).
+4. **Delegates the actual row movement to `_copy_legacy_history_sync`** —
+   the QA-2 unit-mismatch guard, the duplicate-source guard, and the
+   transaction/rollback machinery all carry over without duplication.
+
+### Why not a wizard UI
+
+Custom integrations cannot cleanly inject UI on the device page in HA. The
+implementation cost of a Lovelace custom card or a custom panel exceeds the
+implementation cost of the entire scan+apply machinery, and would lock the
+integration to specific HA frontend versions. The MVP ships as two services
++ persistent-notification reports + a documentation page.
+
+### Status
+
+Profile B is implemented in `custom_components/kostal_kore/orphan_history.py`
+(commit `bca1587`). User-facing walkthrough in
+`docs/migration_orphan_history.md`. Phase 1/2/3 from the original
+remediation timeline above remain valid for Profile A.

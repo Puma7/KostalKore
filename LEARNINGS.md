@@ -970,3 +970,145 @@ A structured audit of `legacy_migration.py` and `migration_services.py` exposed 
 **Fix:** Added a `_LOGGER.warning(...)` when `result.migrated_entities == 0` after migration. The warning explicitly mentions the `{entry_id}_*` format assumption.
 
 **Lesson:** Any function that silently skips items when a pre-condition isn't met should log a warning at the call site when the result is surprising (zero items processed from a non-empty source is always worth a warning).
+
+---
+
+## 44) Dynamic sensor descriptions need to mirror what the API actually exposes
+
+### What happened (Bug #11)
+
+PV per-string energy statistics (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`)
+were declared statically for `PV1`, `PV2`, `PV3` only, while DC power sensors
+already had a dynamic generator (`generate_dc_sensor_descriptions(count)`).
+
+Two failure modes resulted:
+
+1. **1- or 2-string inverters** — the PV2/PV3 sensors were always created but
+   the API never returned data for them. The entities sat permanently
+   `unavailable` and confused users into thinking their integration was
+   broken.
+2. **4–6-string inverters** — the energy stats for PV4/PV5/PV6 were missing
+   entirely. Users had per-string power graphs but no per-string daily energy
+   totals.
+
+### Pattern that fixes it
+
+For any per-instance metric that the Kostal REST API exposes dynamically:
+
+1. Discover the actual instance count from inverter metadata (`num_pv_strings`
+   via Modbus register 34, with REST fallback). Clamp to `MAX_SANE_STRING_COUNT`.
+2. Generate descriptions in a single helper:
+   ```python
+   def generate_pv_energy_sensor_descriptions(count: int) -> list[...]:
+       return [
+           PlenticoreSensorEntityDescription(
+               module_id="scb:statistic:EnergyFlow",
+               key=f"Statistic:EnergyPv{n}:{period}",
+               name=f"Energy PV{n} {period}",
+               ...,
+           )
+           for n in range(1, count + 1)
+           for period in ("Day", "Month", "Year", "Total")
+       ]
+   ```
+3. Rely on the existing `available_process_data` filter in
+   `create_entities_batch` to drop sensors the API doesn't actually expose —
+   never assume the API matches the discovered count exactly.
+
+### Why this works without a migration
+
+The translation/entity-id is derived from `name=f"Energy PV{n} {period}"`. As
+long as the new dynamic generator produces the same `name=` values for the
+same `(n, period)` pairs, existing registry entries on previously-installed
+systems keep their `unique_id` binding. Dropping a static description for a
+sensor that was always `unavailable` doesn't break anyone — that entity had
+no recorded data to lose.
+
+### Lesson
+
+**Static sensor blocks are a smell whenever the surrounding metric family is
+dynamic.** If you find yourself copying a block N times with `f"...Pv1..."`
+→ `f"...Pv2..."` → `f"...Pv3..."`, write the generator instead. The
+short-term cost of one helper is paid back the first time hardware varies.
+
+---
+
+## 45) Recorder schema imports inside lazy try-blocks avoid module-load coupling
+
+### What happened (Orphan-history MVP)
+
+The new `orphan_history.py` module needs `StatesMeta` and `StatisticsMeta`
+from `homeassistant.components.recorder.db_schema`. Importing these at
+module top-level couples the integration's load order to the recorder
+integration's load order — undesirable for an integration that should work
+even when the recorder is disabled (rare but supported).
+
+### Pattern
+
+Push recorder-schema imports inside the function bodies that actually need
+them, plus an explicit guard on recorder availability:
+
+```python
+async def scan_orphan_history(hass: HomeAssistant) -> OrphanScanReport:
+    from .migration_services import _get_recorder_instance
+
+    recorder_instance = _get_recorder_instance(hass)
+    if not bool(getattr(recorder_instance, "recording", True)):
+        raise HomeAssistantError("Recorder is not active.")
+    # ...
+```
+
+### Test consequence
+
+Tests need to patch the imported symbol at its **source** module
+(`migration_services._get_recorder_instance`), not on the module that
+re-imports it lazily. `patch.object(orphan_history_mod, "_get_recorder_instance", ...)`
+fails because the name isn't on the module namespace until the function
+body runs.
+
+### Lesson
+
+Lazy imports trade module-load decoupling for testing complexity. Document
+the patch target at the test layer (`patch("module_a._name", ...)`) so
+maintainers don't waste time chasing `AttributeError` from `patch.object`.
+
+---
+
+## 46) Profile-B (orphan-history) is a different shape from Profile-A (legacy import)
+
+### What we learned
+
+The legacy migration flow assumed both old and new entries are loadable in
+the Entity Registry simultaneously: `discover_legacy_duplicate_entity_pairs`
+queries `er.async_entries_for_config_entry(legacy_entry_id)` and matches
+on rewritten `unique_id`. Long-time KORE users who removed the legacy
+integration years ago have no legacy entry to query — the registry doesn't
+help them.
+
+The Recorder, however, still has the rows. `StatesMeta.entity_id` and
+`StatisticsMeta.statistic_id` survive integration removal. The fix is to
+treat **the Recorder as the source of truth for "what history exists"** and
+the Entity Registry as the source of truth for "where it should go".
+
+### Pattern
+
+For a Profile-B (nachholmigration) flow:
+
+1. Read all `StatesMeta.entity_id` from the recorder.
+2. Cross-reference against the current Entity Registry — anything in (1)
+   but not in the registry is an orphan candidate.
+3. Filter orphans to those matching legacy patterns (`kostal_plenticore_*`).
+4. For each orphan, fuzzy-match against current KORE entities on the
+   entity_id suffix using `difflib.get_close_matches` with a conservative
+   cutoff (we use 0.72).
+5. Surface suggestions to the user; let them decide which mappings to apply.
+6. Apply via the existing `_copy_legacy_history_sync` engine — never write
+   a parallel path. The migration engine has accreted years of unit-mismatch
+   and duplicate-source guards that an MVP shouldn't try to recreate.
+
+### Lesson
+
+When a workflow has two profiles with different preconditions (Profile A:
+both registries loaded; Profile B: only Recorder rows survive), don't try
+to make one entry point handle both. Build the second as a thin add-on
+that reuses the apply layer of the first.

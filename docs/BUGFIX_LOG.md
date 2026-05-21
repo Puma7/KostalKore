@@ -37,12 +37,30 @@ mis-scaling battery storage history by a factor of ~5 (cell-voltage dependent).
 `suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR` so the UI shows
 `35.7 kWh` rather than `35700 Wh`.
 
-`FullChargeCap_E` was left as `"Ah"`: the REST-API register actually reports
-charge capacity in ampere-hours. The regression test documents this as the
-expected baseline so a future "fix" doesn't silently flip it.
+`FullChargeCap_E` was initially left as `"Ah"` based on an assumption that the
+REST API mirrored the Modbus register's coulomb-based scale. Re-verification
+against `modbus_registers.py:163` (`REG_BATTERY_WORK_CAPACITY` → `"Wh"`),
+`health_monitor.py:198` (`ParameterTracker("Battery Work Capacity", unit="Wh")`),
+`degradation_tracker.py:298` and the test fixture value `35000.0` (= 35 kWh, a
+realistic home-battery capacity; 35 kAh would be physically absurd) all confirm
+that this register reports **Wh**, not Ah.
 
-A `repairs.create_battery_capacity_unit_migration_issue` notice was added so
-existing installations are prompted to resolve the Recorder unit-change warning.
+**Follow-up fix (commit `2973895`):**
+`FullChargeCap_E` → `UnitOfEnergy.WATT_HOUR`, `device_class=ENERGY_STORAGE`,
+plus `suggested_unit_of_measurement=KILO_WATT_HOUR` for display. The
+`entity_category=DIAGNOSTIC` annotation is preserved because full-charge
+capacity is a degradation/health metric, distinct from `WorkCapacity` (which
+represents real-time available energy and was correctly promoted to a
+non-diagnostic main sensor).
+
+**Test:** `test_bug1_full_charge_cap_unit_is_wh` in `test_bug_regression.py`
+asserts both unit and device_class.
+
+**User impact:** users with active Long-Term-Statistics for this sensor will
+see a one-time history break at the unit change boundary. Unavoidable since
+the previous annotation was wrong; the existing
+`repairs.create_battery_capacity_unit_migration_issue` flow already handles
+the user-facing Recorder warning.
 
 ### Bug #2 / #5 🟠 — Missing KSEM translation keys in `en.json`
 
@@ -132,14 +150,31 @@ false critical alarm.
 ### Bug #11 🟢 — PV energy statistics hardcoded for PV1–PV3
 
 DC power sensors are generated dynamically for the actual string count
-(1–6). The energy statistics (`Statistic:EnergyPv1:Day`, …) are statically
-defined for PV1, PV2 and PV3 only. Inverters with one string see PV2/PV3
-energy sensors permanently `unavailable`; inverters with >3 strings lose
+(1–6). The energy statistics (`Statistic:EnergyPv1:Day`, …) were statically
+defined for PV1, PV2 and PV3 only. Inverters with one string saw PV2/PV3
+energy sensors permanently `unavailable`; inverters with >3 strings lost
 energy stats for PV4–6.
 
-**Status:** Documented in source. Migrating these to a dynamic generator
-mirroring `generate_dc_sensor_descriptions()` is left for a follow-up since
-it requires HA entity-registry migration logic for upgrades.
+**Fix (commit `2973895`):** New helper `generate_pv_energy_sensor_descriptions(count)`
+in `sensor.py` mirrors `generate_dc_sensor_descriptions` and produces one
+`SensorDescription` per `(pv_num, period)` combination for
+`period ∈ {Day, Month, Year, Total}`. Static PV1–PV3 blocks removed from
+`SENSOR_PROCESS_DATA`. The dynamic descriptions go through the existing
+`available_process_data`-aware filter in `create_entities_batch`, so PV4–6
+sensors materialize only when the API actually exposes them — no phantom
+`unavailable` entities on smaller inverters.
+
+**Migration concern (negative):** No entity-registry migration is required.
+The previous static sensors used the same translation keys derived from
+`name=`; the dynamic generator preserves that exact naming, so existing
+1-string installations don't get *new* registry entries — the dropped
+`Energy PV2/PV3 *` entities simply disappear from new installs and are
+already `unavailable` (and likely never recorded any data) on existing ones.
+
+**Tests:** `test_bug11_pv_energy_sensors_generated_dynamically` (count=1/3/6
+yield exactly 4/12/24 sensors with correct unit + device_class) and
+`test_bug11_static_pv_energy_descriptions_removed` (no `Statistic:EnergyPv*`
+leftover in the static description list).
 
 ---
 
@@ -312,7 +347,8 @@ guard cascades into silent data corruption.
 
 | File | Bugs / QAs addressed |
 |------|----------------------|
-| `custom_components/kostal_kore/sensor.py` | #1, #6, #8, #9, #11 (doc), QA-4 |
+| `custom_components/kostal_kore/sensor.py` | #1, #6, #8, #9, #11, QA-4 |
+| `custom_components/kostal_kore/orphan_history.py` | Orphan-history MVP (new) |
 | `custom_components/kostal_kore/translations/en.json` | #2, #3, #4, #5 |
 | `custom_components/kostal_kore/strings.json` | #4 |
 | `custom_components/kostal_kore/modbus_button.py` | #4 |
@@ -333,7 +369,9 @@ guard cascades into silent data corruption.
 | Test name | Verifies |
 |-----------|----------|
 | `test_bug1_work_capacity_uses_watt_hour` | `WorkCapacity` is Wh |
-| `test_bug1_full_charge_cap_unit_is_ah` | `FullChargeCap_E` baseline (Ah) |
+| `test_bug1_full_charge_cap_unit_is_wh` | `FullChargeCap_E` is Wh + ENERGY_STORAGE |
+| `test_bug11_pv_energy_sensors_generated_dynamically` | 1/3/6 strings → 4/12/24 sensors |
+| `test_bug11_static_pv_energy_descriptions_removed` | no leftover static EnergyPv entries |
 | `test_bug2_ksem_keys_in_options_step` | KSEM keys in options dialog |
 | `test_bug5_ksem_keys_in_config_setup_options_step` | KSEM keys in setup dialog |
 | `test_bug3_reauth_confirm_has_description` | reauth dialog description present |
@@ -362,3 +400,61 @@ TZ=UTC python -m pytest tests/test_bug_regression.py --no-cov -v
 ```
 
 All 22 tests pass on HA core `2024.3.3` against the pinned test environment.
+
+---
+
+## Capability addition — Orphan-History MVP (commit `bca1587`)
+
+### Problem
+
+Long-time KORE users whose Recorder DB still carries entity_ids from the
+removed `kostal_plenticore` integration had no path to merge that history
+into their current entities. The existing `import_legacy_plenticore` flow
+needs the legacy config entry to still be loaded; users who removed it years
+ago could not benefit. `copy_legacy_history` only works when its
+`discover_legacy_duplicate_entity_pairs` finds matching Entity Registry
+entries on both sides — which fails when the legacy registry rows are long
+gone.
+
+### Solution
+
+New module `custom_components/kostal_kore/orphan_history.py` exposes two
+services:
+
+| Service | Behavior |
+|---------|----------|
+| `kostal_kore.scan_orphan_history` | Read-only. Scans `StatesMeta` + `StatisticsMeta` for entity_ids matching legacy patterns that no longer exist in the Entity Registry. Posts a persistent notification with fuzzy-match suggestions to current KORE entities. Never writes. |
+| `kostal_kore.apply_orphan_history_mapping` | Dry-run default. Re-binds orphan rows to current KORE entities by delegating to the existing `_copy_legacy_history_sync` engine — the unit-mismatch and duplicate-source guards from QA-2 carry over. |
+
+Mapping validation rejects entries whose target is not registered to the
+`kostal_kore` platform, preventing accidental cross-integration pointers.
+Fuzzy matching uses `difflib.get_close_matches` with a 0.72 cutoff on
+suffix-normalized entity_ids (`sensor.kostal_plenticore_pv_power` →
+`pv_power`; `sensor.kore_pv_power` → `pv_power` → suffix match ratio = 1.0).
+
+### Why MVP and not a full wizard
+
+The original migration improvement plan proposed a 4-phase build-out with a
+device-page assistant card. Critical review found:
+
+- HA has no clean API for custom cards on device pages from custom
+  integrations — would require a Lovelace custom card (separate JS frontend).
+- A 1-step "merge" modal is a foot-gun for power users with thousands of
+  rows; the existing 3-step confirmation is bullet-proof on purpose.
+- The biggest user-need-vs-tooling gap is exactly the orphan-scan path; it
+  ships in one module, two services, and a documentation page.
+
+The orphan-history MVP fills that gap without committing to a UI surface
+that the platform doesn't really support.
+
+### Tests
+
+`Tests/test_orphan_history.py` covers pure helpers, scan with mocked
+recorder session, dry-run safety (executor never called), apply path
+reaching the copy engine, backend/recording guards, notification
+formatters, and service registration idempotence.
+
+### Documentation
+
+User-facing walkthrough in `docs/migration_orphan_history.md` covers backup
+→ scan → dry-run → apply.
