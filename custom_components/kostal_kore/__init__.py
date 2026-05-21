@@ -353,6 +353,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     health_monitor = None
     fire_safety = None
     degradation_tracker = None
+    battery_soh_calc = None
     if modbus_coordinator is not None:
         num_bi = 0
         _bi_raw = modbus_coordinator.device_info_data.get("num_bidirectional")
@@ -364,6 +365,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         health_monitor = InverterHealthMonitor(num_bidirectional=num_bi)
         fire_safety = FireSafetyMonitor(num_bidirectional=num_bi)
         degradation_tracker = DegradationTracker()
+        from .battery_soh_calculator import BatterySohCalculator
+        battery_soh_calc = BatterySohCalculator(
+            hass,
+            f"kostal_kore_battery_soh_{entry.entry_id}",
+        )
+        await battery_soh_calc.async_load()
         _clear_sent: dict[str, bool] = {"value": False}
 
         modbus_coordinator._health_monitor = health_monitor
@@ -379,6 +386,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             if data:
                 health_monitor.update_from_modbus(data)
                 degradation_tracker.update_from_modbus(data)
+                if battery_soh_calc.update_from_modbus(data):
+                    hass.async_create_task(battery_soh_calc.async_save())
                 iso_current = health_monitor.isolation.current
                 if iso_current is not None:
                     hass.async_create_task(
@@ -436,6 +445,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "health_monitor": health_monitor,
         "fire_safety": fire_safety,
         "degradation_tracker": degradation_tracker,
+        "battery_soh_calc": battery_soh_calc,
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
         "request_scheduler": request_scheduler,

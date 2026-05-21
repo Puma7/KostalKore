@@ -1856,6 +1856,19 @@ async def async_setup_entry(
                 [getattr(e, "_attr_unique_id", "?") for e in obs_entities],
             )
 
+    battery_soh_calc = entry_store.get("battery_soh_calc") if entry_store else None
+    if modbus_coordinator is not None and battery_soh_calc is not None:
+        from .battery_soh_entities import create_battery_soh_sensors
+        soh_entities = create_battery_soh_sensors(
+            modbus_coordinator,
+            battery_soh_calc,
+            entry.entry_id,
+            plenticore.device_info,
+        )
+        if soh_entities:
+            async_add_entities(soh_entities)
+            _LOGGER.info("Added %d battery SoH sensors", len(soh_entities))
+
 
 class PlenticoreCalculatedSensor(
     CoordinatorEntity[ProcessDataUpdateCoordinator], SensorEntity
