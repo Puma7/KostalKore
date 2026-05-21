@@ -143,13 +143,19 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         try:
             while self._is_on:
                 pv_power = await self._read_float("total_dc_power")
-                home_consumption = await self._read_float("home_from_pv")
+                # Full home consumption = PV share + battery share + grid share.
+                # Using only home_from_pv (as before mqtt_bridge fix) underestimates
+                # home load during battery discharge or grid consumption, causing the
+                # limiter to allow more feed-in than the configured cap.
+                home_pv = await self._read_float("home_from_pv")
+                home_bat = await self._read_float("home_from_battery")
+                home_grid = await self._read_float("home_from_grid")
 
                 if pv_power is None:
                     await asyncio.sleep(CONTROL_INTERVAL)
                     continue
 
-                home = abs(home_consumption or 0)
+                home = abs(home_pv or 0) + abs(home_bat or 0) + abs(home_grid or 0)
 
                 available_for_grid = pv_power - home
                 surplus = available_for_grid - self._feed_in_limit_w
@@ -165,10 +171,11 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                 await self._write_charge_limit(new_limit)
 
                 _LOGGER.debug(
-                    "FeedIn Optimizer: PV=%.0fW Home=%.0fW → Available=%.0fW "
-                    "(charge limit=%.0fW, feed-in cap=%.0fW)",
-                    pv_power, home, available_for_grid,
-                    new_limit, self._feed_in_limit_w,
+                    "FeedIn Optimizer: PV=%.0fW Home=%.0fW (pv=%.0f bat=%.0f grid=%.0f) "
+                    "→ Available=%.0fW (charge limit=%.0fW, feed-in cap=%.0fW)",
+                    pv_power, home,
+                    abs(home_pv or 0), abs(home_bat or 0), abs(home_grid or 0),
+                    available_for_grid, new_limit, self._feed_in_limit_w,
                 )
 
                 self.async_write_ha_state()

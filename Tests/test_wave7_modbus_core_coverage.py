@@ -212,7 +212,9 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     ), patch.object(
         coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
     ):
-        assert await coordinator._async_update_data() == {}
+        # With _last_slow_data cache, stale slow values are served even when
+        # all fast registers are suppressed — that is the correct behaviour.
+        assert await coordinator._async_update_data() == {"slow_ok": 20.0}
 
     slow_perm = _modbus_reg(50, "slow_perm", group=RegisterGroup.ENERGY)
     slow_err = _modbus_reg(60, "slow_err", group=RegisterGroup.ENERGY)
@@ -233,7 +235,9 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     ), patch.object(
         coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
     ):
-        assert await coordinator._async_update_data() == {"fast_ok": 1.0}
+        # _last_slow_data carries the last successful slow-poll values; they are
+        # merged into every tick so entities stay available between slow polls.
+        assert await coordinator._async_update_data() == {"fast_ok": 1.0, "slow_ok": 20.0}
 
     # _read_device_info calls individual read_register, not batch
     info_values = {"serial_number": "SN", "product_name": "PLENTICORE"}

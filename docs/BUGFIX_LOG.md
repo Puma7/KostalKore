@@ -413,6 +413,93 @@ All 22 tests pass on HA core `2024.3.3` against the pinned test environment.
 
 ---
 
+## Bugbot deep-scan fixes (2026-05-21)
+
+Five additional bugs were found during an external Bugbot audit of commit `fa372a3` and fixed in the session that followed. All five have regression tests in `Tests/test_bug_regression.py`.
+
+### Bugbot KRITISCH-1 🔴 — Modbus slow-poll cache missing
+
+**File:** `custom_components/kostal_kore/modbus_coordinator.py`
+
+`_async_update_data` started each tick with `data: dict[str, Any] = {}` and only merged slow-group results (ENERGY / CONTROL / BATTERY_MGMT / …) on every 6th tick. On the 5 intervening ticks the coordinator returned only fast-group keys, making all slow-group entities unavailable for ~25 of every 30 seconds.
+
+**Fix:** Added `self._last_slow_data: dict[str, Any] = {}`. After a successful slow poll, the result is stored there. On every tick, `data.update(self._last_slow_data)` is applied before the slow-tick check so entities always see the last known slow values (updated every ~30 s, stale by at most 30 s — which is acceptable given the ENERGY/CONTROL nature of those registers).
+
+**Test:** `test_audit_modbus_slow_poll_cache_preserves_slow_registers`
+
+---
+
+### Bugbot KRITISCH-2 🔴 — fire_safety stale-data detection used wrong register key
+
+**File:** `custom_components/kostal_kore/fire_safety.py:167`
+
+`analyze()` called `data.get("controller_temperature")` for the stale-data detection guard. The Modbus register key (from `modbus_registers.py:97`) is `"controller_temp"`. The wrong key always returned `None`, so the consecutive-empty-polls counter advanced even while valid controller temperature readings arrived — silently increasing the risk of a false "safety monitor is blind" warning while simultaneously preventing the counter from resetting.
+
+`_check_controller_thermal()` and `_record_history()` already used the correct key `"controller_temp"` — only the stale-data branch was wrong.
+
+**Fix:** Line 167 changed from `"controller_temperature"` to `"controller_temp"`.
+
+**Test:** `test_audit_fire_safety_stale_data_uses_correct_controller_temp_key`
+
+---
+
+### Bugbot HOCH-1 🟠 — INVERTER_STATES labels wrong for states 18/19
+
+**File:** `custom_components/kostal_kore/modbus_registers.py:350`
+
+`INVERTER_STATES[18]` was `"Unknown"` and `INVERTER_STATES[19]` was `"DcCheck"`. The corresponding constants in `helper.py` are:
+- `INVERTER_STATE_BATTERY_CHARGING = 18`
+- `INVERTER_STATE_BATTERY_DISCHARGING = 19`
+
+Users with an active battery saw the inverter state entity show "Unknown" while charging and "DcCheck" while discharging.
+
+**Fix:** Labels corrected to `"BatteryCharging"` and `"BatteryDischarging"`.
+
+**Test:** `test_audit_inverter_states_18_19_labels_match_helper_constants`
+
+---
+
+### Bugbot HOCH-2 🟠 — Grid Feed-In Limiter underestimated home consumption
+
+**File:** `custom_components/kostal_kore/grid_charge_limiter.py:146`
+
+`_control_loop` read only `home_from_pv` (the PV → house power share) as the home consumption estimate. During battery discharge or grid import, the rest of the actual home load was invisible, causing `available_for_grid` to be overestimated — allowing more feed-in than the configured cap.
+
+The MQTT bridge had already received this exact fix (documented in the MQTT bridge changelog). The grid limiter was missed.
+
+**Fix:** Control loop now reads all three registers and sums them:
+```python
+home = abs(home_from_pv or 0) + abs(home_from_battery or 0) + abs(home_from_grid or 0)
+```
+
+**Test:** `test_audit_grid_limiter_uses_full_home_consumption`
+
+---
+
+### Bugbot MITTEL-1 🟡 — migration_services duplicate_source path renamed old row anyway
+
+**File:** `custom_components/kostal_kore/migration_services.py:430+`
+
+QA-2 added `continue` for the unit-mismatch case inside `_merge_statistics_metadata`. A second skip path existed for `duplicate_sources` (target entity has multiple `StatisticsMeta` rows with the same source), which correctly excluded those sources from `new_by_source`. However `old_meta.statistic_id = new_entity_id` (the rename) was executed unconditionally outside the `if matching_new is not None` block, so even when `matching_new` was `None` due to the source being a duplicate, the old row was renamed — creating a third row with the same `(statistic_id, source)` combination and worsening the corruption the duplicate-source check was intended to protect against.
+
+**Fix:** Added `if old_source in duplicate_sources: continue` before the `new_by_source.pop()`, skipping both merge and rename for duplicate sources.
+
+**Test:** `test_audit_migration_duplicate_source_skips_rename`
+
+---
+
+### Test registry additions
+
+| Test | Verifies |
+|------|---------|
+| `test_audit_modbus_slow_poll_cache_preserves_slow_registers` | slow-group values survive non-slow ticks |
+| `test_audit_fire_safety_stale_data_uses_correct_controller_temp_key` | correct key for stale-data detection |
+| `test_audit_inverter_states_18_19_labels_match_helper_constants` | display labels match helper constants |
+| `test_audit_grid_limiter_uses_full_home_consumption` | all 3 home sources read and summed |
+| `test_audit_migration_duplicate_source_skips_rename` | duplicate source → no rename |
+
+---
+
 ## Capability addition — Orphan-History MVP (commit `bca1587`)
 
 ### Problem

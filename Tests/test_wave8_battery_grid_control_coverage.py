@@ -465,7 +465,8 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
     limiter._is_on = True
     limiter._current_charge_limit = 0.0
     limiter._write_charge_limit = AsyncMock(side_effect=lambda watts: setattr(limiter, "_is_on", False))
-    limiter._read_float = AsyncMock(side_effect=[15000.0, 1000.0])
+    # Order: total_dc_power, home_from_pv, home_from_battery, home_from_grid
+    limiter._read_float = AsyncMock(side_effect=[15000.0, 1000.0, 200.0, 300.0])
     with patch(
         "custom_components.kostal_kore.grid_charge_limiter.asyncio.sleep",
         new=AsyncMock(),
@@ -475,7 +476,8 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
 
     limiter._is_on = True
     limiter._write_charge_limit = AsyncMock(side_effect=lambda watts: setattr(limiter, "_is_on", False))
-    limiter._read_float = AsyncMock(side_effect=[1200.0, 1000.0])
+    # PV 1200W, full home consumption 1000W → surplus below MIN_CHARGE_POWER_W → limit 0
+    limiter._read_float = AsyncMock(side_effect=[1200.0, 1000.0, 0.0, 0.0])
     with patch(
         "custom_components.kostal_kore.grid_charge_limiter.asyncio.sleep",
         new=AsyncMock(),

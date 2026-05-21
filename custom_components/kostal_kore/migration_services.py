@@ -429,7 +429,13 @@ def _merge_statistics_metadata(
 
     for old_meta in old_meta_rows:
         old_meta_id = int(old_meta.id)
-        matching_new = new_by_source.pop(str(old_meta.source), None)
+        old_source = str(old_meta.source)
+        # Skip both merge AND rename when the target entity already has duplicate
+        # rows for this source. Renaming would create a third row with the same
+        # (statistic_id, source) combo — making the duplication worse, not better.
+        if old_source in duplicate_sources:
+            continue
+        matching_new = new_by_source.pop(old_source, None)
         if matching_new is not None:
             new_meta_id = int(matching_new.id)
             old_unit = getattr(old_meta, "unit_of_measurement", None)

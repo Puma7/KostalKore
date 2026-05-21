@@ -1759,3 +1759,263 @@ async def test_audit_grid_optimizer_restores_limit_on_exception(
         for call in sw._write_charge_limit.await_args_list
     ), "Charge limit must be restored to snapshot on exception exit"
     assert sw._is_on is False, "Optimizer must mark itself OFF after restore"
+
+
+# ---------------------------------------------------------------------------
+# Bugbot-Audit KRITISCH-1 — Modbus slow-poll cache
+#
+# Before fix: data = {} per tick; slow-group registers (ENERGY/CONTROL/…)
+# were absent from the result on the 5 out of 6 ticks that skip the slow
+# poll.  Entities for those registers went unavailable every 5 ticks.
+#
+# After fix: _last_slow_data persists the last successful slow-poll result
+# and is merged into every tick so slow-group entities stay available.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_audit_modbus_slow_poll_cache_preserves_slow_registers(
+    hass: HomeAssistant,
+) -> None:
+    """Slow-group register values must survive on non-slow ticks via _last_slow_data."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from custom_components.kostal_kore.modbus_coordinator import (
+        ModbusDataUpdateCoordinator,
+        FAST_GROUPS,
+        SLOW_GROUPS,
+    )
+    from custom_components.kostal_kore.modbus_registers import (
+        Access,
+        DataType,
+        ModbusRegister,
+        RegisterGroup,
+    )
+
+    def _reg(addr: int, name: str, group: RegisterGroup) -> ModbusRegister:
+        return ModbusRegister(addr, name, name, DataType.FLOAT32, 2, Access.RO, group)
+
+    fast_reg = _reg(10, "fast_val", RegisterGroup.POWER)    # FAST group
+    slow_reg = _reg(20, "slow_val", RegisterGroup.ENERGY)   # SLOW group
+
+    client = MagicMock()
+    client.host = "127.0.0.1"
+    client.port = 1502
+    client.unit_id = 1
+    client.connected = True
+    client.connect = AsyncMock()
+    client.detect_endianness = AsyncMock()
+    client.unavailable_registers = set()
+    client.export_unavailable_state = MagicMock(return_value={})
+
+    async def _batch(regs: list) -> dict:
+        return {r.name: float(r.address) for r in regs}
+
+    client.read_registers_batch = AsyncMock(side_effect=_batch)
+
+    coord = ModbusDataUpdateCoordinator(hass, client)
+
+    with patch(
+        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
+        (fast_reg, slow_reg),
+    ), patch.object(coord, "_save_register_capability_state_if_changed", new=AsyncMock()):
+        # Tick 1: _slow_tick=0 → increments to 1 (no slow poll yet, _last_slow_data={})
+        coord._slow_tick = 0
+        coord._device_info_tick = 0
+        data1 = await coord._async_update_data()
+        assert "fast_val" in data1
+        assert "slow_val" not in data1, "No slow data yet — _last_slow_data is empty"
+
+        # Tick 2: _slow_tick=5 → triggers slow poll, populates _last_slow_data
+        coord._slow_tick = 5
+        coord._device_info_tick = 0
+        data2 = await coord._async_update_data()
+        assert data2["fast_val"] == 10.0
+        assert data2["slow_val"] == 20.0, "Slow poll should populate slow_val"
+        assert coord._last_slow_data == {"slow_val": 20.0}, (
+            "_last_slow_data stores only slow-group results, not fast-poll results"
+        )
+
+        # Tick 3: _slow_tick=0 again (no slow poll) → _last_slow_data must be merged
+        coord._slow_tick = 0
+        coord._device_info_tick = 0
+        data3 = await coord._async_update_data()
+        assert data3["fast_val"] == 10.0
+        assert data3["slow_val"] == 20.0, (
+            "Slow-group value must be served from _last_slow_data on non-slow tick"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bugbot-Audit KRITISCH-2 — fire_safety.py stale-data detection key
+#
+# Line 167 used data.get("controller_temperature") — always None because
+# the register key is "controller_temp" (modbus_registers.py REG_CONTROLLER_TEMP).
+# The wrong key meant stale-data detection never counted controller temp as
+# "having safety data", so the STALE_DATA_THRESHOLD counter advanced even
+# while valid controller temperature readings arrived.
+# ---------------------------------------------------------------------------
+
+def test_audit_fire_safety_stale_data_uses_correct_controller_temp_key() -> None:
+    """analyze() must use 'controller_temp', not 'controller_temperature'."""
+    from custom_components.kostal_kore.fire_safety import FireSafetyMonitor
+
+    monitor = FireSafetyMonitor()
+    monitor._check_interval = 0.0  # bypass rate-limiting
+
+    # Provide data with the CORRECT key 'controller_temp'; bat_temp absent.
+    # If the key is wrong, consecutive_empty_polls would increment.
+    monitor.analyze({"controller_temp": 55.0})
+    assert monitor._consecutive_empty_polls == 0, (
+        "controller_temp should satisfy has_safety_data; wrong key would increment counter"
+    )
+
+    # Verify old wrong key does NOT satisfy detection (regression guard)
+    monitor2 = FireSafetyMonitor()
+    monitor2._check_interval = 0.0
+    monitor2.analyze({"controller_temperature": 55.0})
+    assert monitor2._consecutive_empty_polls == 1, (
+        "'controller_temperature' is not a Modbus register key and must NOT satisfy detection"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bugbot-Audit HOCH-1 — INVERTER_STATES labels for states 18 and 19
+#
+# States 18 and 19 were labelled "Unknown" / "DcCheck" in INVERTER_STATES,
+# contradicting INVERTER_STATE_BATTERY_CHARGING / _DISCHARGING constants in
+# helper.py. Correct labels are "BatteryCharging" / "BatteryDischarging".
+# ---------------------------------------------------------------------------
+
+def test_audit_inverter_states_18_19_labels_match_helper_constants() -> None:
+    """INVERTER_STATES[18] == 'BatteryCharging', [19] == 'BatteryDischarging'."""
+    from custom_components.kostal_kore.modbus_registers import INVERTER_STATES
+    from custom_components.kostal_kore.helper import (
+        INVERTER_STATE_BATTERY_CHARGING,
+        INVERTER_STATE_BATTERY_DISCHARGING,
+    )
+
+    assert INVERTER_STATES[INVERTER_STATE_BATTERY_CHARGING] == "BatteryCharging", (
+        "State 18 label must be 'BatteryCharging' — was previously mislabelled 'Unknown'"
+    )
+    assert INVERTER_STATES[INVERTER_STATE_BATTERY_DISCHARGING] == "BatteryDischarging", (
+        "State 19 label must be 'BatteryDischarging' — was previously mislabelled 'DcCheck'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bugbot-Audit HOCH-2 — Grid Feed-In Limiter full home consumption
+#
+# _control_loop only read home_from_pv (PV→house share). During battery
+# discharge or grid import the remaining home load was invisible, causing
+# the limiter to allow more feed-in than the configured cap.
+# After fix: home = home_from_pv + home_from_battery + home_from_grid.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_audit_grid_limiter_uses_full_home_consumption(
+    hass: HomeAssistant,
+) -> None:
+    """_control_loop must sum all three home-source registers."""
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
+
+    sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
+    sw._is_on = True
+    sw._current_charge_limit = 0.0
+    sw._device_power_limit_w = 10000.0
+    sw._feed_in_limit_w = 5000.0
+    sw._original_charge_limit = None
+
+    calls: list[str] = []
+
+    async def _read_float(name: str) -> float | None:
+        calls.append(name)
+        return {"total_dc_power": 8000.0,
+                "home_from_pv": 500.0,
+                "home_from_battery": 300.0,
+                "home_from_grid": 700.0}.get(name)
+
+    sw._read_float = _read_float
+
+    write_calls: list[float] = []
+
+    async def _write(watts: float) -> None:
+        write_calls.append(watts)
+        sw._is_on = False  # stop after one iteration
+
+    sw._write_charge_limit = _write
+    sw.async_write_ha_state = MagicMock()
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        await sw._control_loop()
+
+    assert "home_from_battery" in calls, "home_from_battery must be read"
+    assert "home_from_grid" in calls, "home_from_grid must be read"
+
+    # home = 500 + 300 + 700 = 1500 W; available = 8000 - 1500 = 6500 W
+    # surplus over 5000 W cap = 1500 W → charge limit = 1500 W
+    assert write_calls, "Charge limit must have been written"
+    assert abs(write_calls[0] - 1500.0) < 1.0, (
+        f"Charge limit should be 1500 W (all home sources summed), got {write_calls[0]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bugbot-Audit MITTEL — migration_services duplicate_sources rename guard
+#
+# When StatisticsMeta for the target entity had duplicate source entries,
+# the source was excluded from new_by_source (to avoid merging into the
+# wrong row). But old_meta.statistic_id was still renamed to new_entity_id
+# (line 466 outside the if-block), creating a third row with the same
+# (statistic_id, source) — making corruption worse.
+# After fix: if old_meta.source is in duplicate_sources, `continue` skips
+# both the merge AND the rename.
+# ---------------------------------------------------------------------------
+
+def test_audit_migration_duplicate_source_skips_rename() -> None:
+    """Old metadata row must NOT be renamed when its source is a duplicate in the target."""
+    from unittest.mock import MagicMock, patch
+    from custom_components.kostal_kore.migration_services import _merge_statistics_metadata
+
+    # Simulate: new entity has TWO StatisticsMeta rows with source "recorder"
+    old_meta = MagicMock()
+    old_meta.id = 1
+    old_meta.source = "recorder"
+    old_meta.statistic_id = "sensor.kostal_plenticore_pv_power"
+    old_meta.unit_of_measurement = "W"
+
+    new_meta_a = MagicMock()
+    new_meta_a.id = 2
+    new_meta_a.source = "recorder"
+    new_meta_a.statistic_id = "sensor.kore_pv_power"
+    new_meta_a.unit_of_measurement = "W"
+
+    new_meta_b = MagicMock()
+    new_meta_b.id = 3
+    new_meta_b.source = "recorder"  # duplicate source
+    new_meta_b.statistic_id = "sensor.kore_pv_power"
+    new_meta_b.unit_of_measurement = "W"
+
+    session = MagicMock()
+    session.execute.return_value.scalars.side_effect = [
+        iter([old_meta]),          # old_meta_rows query
+        iter([new_meta_a, new_meta_b]),  # new_meta_rows query (duplicate source)
+    ]
+
+    with patch(
+        "custom_components.kostal_kore.migration_services.StatisticsMeta",
+    ), patch(
+        "custom_components.kostal_kore.migration_services.select",
+    ), patch(
+        "custom_components.kostal_kore.migration_services._merge_statistics_table",
+        return_value=0,
+    ):
+        _merge_statistics_metadata(
+            session,
+            old_entity_id="sensor.kostal_plenticore_pv_power",
+            new_entity_id="sensor.kore_pv_power",
+        )
+
+    # old_meta.statistic_id must NOT have been reassigned
+    assert old_meta.statistic_id == "sensor.kostal_plenticore_pv_power", (
+        "Rename must be skipped when source is in duplicate_sources — "
+        "otherwise a third row with same source is created"
+    )

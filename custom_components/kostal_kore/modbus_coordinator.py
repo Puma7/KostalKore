@@ -86,6 +86,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._slow_tick = 0
         self._device_info_tick = 0
         self._device_info: dict[str, Any] = {}
+        self._last_slow_data: dict[str, Any] = {}
         self._capability_store = Store[dict[str, Any]](
             hass,
             CAPABILITY_STORE_VERSION,
@@ -172,12 +173,18 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 fast_total,
             )
 
+        # Always merge last known slow values so entities that depend on
+        # ENERGY/CONTROL/BATTERY_MGMT registers are not unavailable on the
+        # 5 out of 6 ticks where we skip the slow poll.
+        data.update(self._last_slow_data)
+
         self._slow_tick += 1
         if self._slow_tick >= 6:
             self._slow_tick = 0
             slow_regs = [r for r in MONITORING_REGISTERS if r.group in SLOW_GROUPS]
             try:
                 slow_result = await self._client.read_registers_batch(slow_regs)
+                self._last_slow_data = slow_result
                 data.update(slow_result)
             except ModbusConnectionError as err:
                 _LOGGER.debug("Slow-poll connection lost: %s", err)
