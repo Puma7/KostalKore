@@ -101,7 +101,7 @@ class RequestSchedulerSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], Sen
     @property
     def native_value(self) -> int:
         stats = self._scheduler.get_stats()
-        return stats.get("total_requests", 0)
+        return int(stats.get("total_requests", 0))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -134,7 +134,7 @@ class ModbusCoordinatorSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], Se
 
     @property
     def native_value(self) -> int:
-        return self.coordinator.update_count
+        return int(self.coordinator.update_count)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
