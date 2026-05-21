@@ -92,6 +92,7 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 
 # Platforms that completed async_forward_entry_setups for this entry.
 KEY_LOADED_PLATFORMS: Final[str] = "_loaded_platforms"
+KEY_SETUP_IN_PROGRESS: Final[str] = "_setup_in_progress"
 
 # Performance constants
 SETUP_TIMEOUT_SECONDS: Final[float] = 90.0
@@ -425,7 +426,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         modbus_coordinator._write_audit = write_audit
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "_setup_options": dict(entry.options),
+        KEY_SETUP_IN_PROGRESS: True,
         "modbus_coordinator": modbus_coordinator,
         "ksem_coordinator": ksem_coordinator,
         "event_coordinator": event_coordinator,
@@ -479,6 +480,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     async_register_orphan_history_services(hass)
     from .diagnostics import async_register_debug_bundle_service
     async_register_debug_bundle_service(hass)
+    from .config_flow import _normalize_options
+
+    entry_store[KEY_SETUP_IN_PROGRESS] = False
+    entry_store["_setup_options"] = _normalize_options(entry.options)
     _log_setup_metrics(start_time, True)
     return True
 
@@ -578,15 +583,31 @@ async def _async_options_updated(
     """Reload integration when options actually change."""
     domain_data = hass.data.get(DOMAIN, {})
     entry_data = domain_data.get(entry.entry_id)
-    if entry_data is not None:
-        prev = entry_data.get("_setup_options")
-        if prev is not None and dict(entry.options) == prev:
-            _LOGGER.debug(
-                "Config entry %s updated but options unchanged – skipping reload",
-                entry.entry_id,
-            )
-            return
-    _LOGGER.info("Options changed for %s, reloading integration", entry.entry_id)
+    if entry_data is None:
+        # Unload/reload gap: hass.data was popped but HA may still emit updates.
+        _LOGGER.debug(
+            "Options update for %s ignored (integration not loaded)",
+            entry.entry_id,
+        )
+        return
+    if entry_data.get(KEY_SETUP_IN_PROGRESS):
+        _LOGGER.debug(
+            "Options update for %s ignored (setup still in progress)",
+            entry.entry_id,
+        )
+        return
+
+    from .config_flow import _normalize_options
+
+    new_options = _normalize_options(entry.options)
+    prev = entry_data.get("_setup_options")
+    if prev is not None and new_options == prev:
+        _LOGGER.debug(
+            "Config entry %s updated but options unchanged – skipping reload",
+            entry.entry_id,
+        )
+        return
+    _LOGGER.info("Options changed for %s, reloading integration", entry.title)
     await hass.config_entries.async_reload(entry.entry_id)
 
 
