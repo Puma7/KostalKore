@@ -1817,7 +1817,11 @@ async def async_setup_entry(
         )
         if obs_entities:
             async_add_entities(obs_entities)
-            _LOGGER.info("Added %d observability sensors", len(obs_entities))
+            _LOGGER.info(
+                "Added %d observability sensors: %s",
+                len(obs_entities),
+                [getattr(e, "_attr_unique_id", "?") for e in obs_entities],
+            )
 
 
 class PlenticoreCalculatedSensor(

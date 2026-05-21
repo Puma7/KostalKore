@@ -512,11 +512,13 @@ async def test_options_updated_triggers_reload(
     await hass.async_block_till_done()
 
 
-async def test_options_updated_no_prior_setup_triggers_reload(
+async def test_options_updated_ignored_when_entry_not_loaded(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """_async_options_updated reloads when entry_data is absent (branch 478→486)."""
+    """Options updates that arrive during the unload/reload gap (no entry_data
+    in hass.data) must NOT trigger another reload — that was the self-sustaining
+    loop behind the "Config entry was never loaded!" binary_sensor errors."""
     mock_config_entry.add_to_hass(hass)
 
     with patch.object(
@@ -524,7 +526,47 @@ async def test_options_updated_no_prior_setup_triggers_reload(
     ) as mock_reload:
         await kp_init._async_options_updated(hass, mock_config_entry)
 
-    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+    mock_reload.assert_not_awaited()
+
+
+async def test_options_updated_ignored_during_setup_in_progress(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Options updates while async_setup_entry is still running must not reload."""
+    mock_config_entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        kp_init.KEY_SETUP_IN_PROGRESS: True,
+    }
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_not_awaited()
+
+
+async def test_options_updated_skips_reload_when_normalized_options_unchanged(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Normalized option snapshot must match the options-flow output exactly so
+    HA-side dict reshuffles don't masquerade as actual user changes."""
+    from custom_components.kostal_kore.config_flow import _normalize_options
+
+    mock_config_entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        "_setup_options": _normalize_options(mock_config_entry.options),
+        kp_init.KEY_SETUP_IN_PROGRESS: False,
+    }
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_not_awaited()
 
 
 async def test_options_updated_changed_options_triggers_reload(
@@ -617,3 +659,64 @@ async def test_rollback_setup_shuts_down_ksem_coordinator(
     await kp_init._rollback_setup(hass, entry, mock_plenticore)
 
     mock_ksem.async_shutdown.assert_awaited_once()
+
+
+async def test_async_unload_loaded_platforms_empty_list_is_noop(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """_async_unload_loaded_platforms([]) must return True without calling HA."""
+    mock_config_entry.add_to_hass(hass)
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(return_value=True),
+    ) as mock_unload:
+        result = await kp_init._async_unload_loaded_platforms(
+            hass, mock_config_entry, []
+        )
+
+    assert result is True
+    mock_unload.assert_not_awaited()
+
+
+async def test_async_unload_loaded_platforms_tolerates_never_loaded_value_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """HA 'Config entry was never loaded' during unload must be swallowed."""
+    mock_config_entry.add_to_hass(hass)
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(side_effect=ValueError("Config entry was never loaded!")),
+    ):
+        result = await kp_init._async_unload_loaded_platforms(
+            hass, mock_config_entry, list(kp_init.PLATFORMS)
+        )
+
+    assert result is True  # graceful — unload_ok starts True and the race is tolerated
+
+
+async def test_async_unload_loaded_platforms_reraises_unrelated_value_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """ValueError with a different message must propagate."""
+    import pytest
+
+    mock_config_entry.add_to_hass(hass)
+
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            AsyncMock(side_effect=ValueError("unrelated problem")),
+        ),
+        pytest.raises(ValueError, match="unrelated"),
+    ):
+        await kp_init._async_unload_loaded_platforms(
+            hass, mock_config_entry, list(kp_init.PLATFORMS)
+        )
