@@ -17,7 +17,7 @@ from custom_components.kostal_kore.battery_soh_calculator import (
 def calc():
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=None)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -126,7 +126,7 @@ def _seed_samples(c, count: int, span_days: float = 60.0, slope_wh_per_kwh: floa
 def test_soh_projection_with_linear_degradation():
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=None)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -153,7 +153,7 @@ def test_soh_projection_with_linear_degradation():
 def test_soh_projection_non_degrading_returns_current_soh():
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=None)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -170,7 +170,7 @@ def test_projection_blocked_until_min_age():
     """Many samples within a short window do not unlock the projection."""
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=None)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -188,7 +188,7 @@ def test_projection_blocked_until_min_age():
 def test_sample_interval_throttles_recording():
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=None)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -223,7 +223,7 @@ async def test_load_restores_state():
         "samples": [[10.0, 35900.0, 1000.0], [20.0, 35850.0, 2000.0]],
     }
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=saved)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -233,6 +233,52 @@ async def test_load_restores_state():
     assert c.baseline_capacity_wh == 36000.0
     assert c._baseline_set_at == 12345.0
     assert c.sample_count == 2
+
+
+@pytest.mark.asyncio
+async def test_store_migration_v1_to_v2_drops_old_format_samples():
+    """v1 stored throughput=charge+discharge; v2 uses discharge only.
+
+    Mixing samples from both formats in one OLS slope would mis-attribute
+    degradation. Migration must drop the samples but keep the baseline.
+    """
+    from custom_components.kostal_kore.battery_soh_calculator import (
+        _BatterySohStore,
+    )
+
+    store = _BatterySohStore.__new__(_BatterySohStore)
+    old_v1_data = {
+        "baseline_capacity_wh": 36000.0,
+        "baseline_set_at": 12345.0,
+        "samples": [
+            [100.0, 35900.0, 1000.0],
+            [200.0, 35850.0, 2000.0],
+            [300.0, 35800.0, 3000.0],
+        ],
+    }
+    migrated = await store._async_migrate_func(1, 1, old_v1_data)
+    assert migrated["baseline_capacity_wh"] == 36000.0
+    assert migrated["baseline_set_at"] == 12345.0
+    assert migrated["samples"] == []
+
+
+@pytest.mark.asyncio
+async def test_store_migration_passthrough_for_current_version():
+    """No mutation should happen for stores already at the current version."""
+    from custom_components.kostal_kore.battery_soh_calculator import (
+        _BatterySohStore,
+        _STORE_VERSION,
+    )
+
+    store = _BatterySohStore.__new__(_BatterySohStore)
+    data = {
+        "baseline_capacity_wh": 36000.0,
+        "baseline_set_at": 12345.0,
+        "samples": [[100.0, 35900.0, 1000.0]],
+    }
+    out = await store._async_migrate_func(_STORE_VERSION, 1, data)
+    assert out is data
+    assert out["samples"] == [[100.0, 35900.0, 1000.0]]
 
 
 @pytest.mark.asyncio
@@ -248,7 +294,7 @@ async def test_load_handles_corrupt_samples():
         ],
     }
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(return_value=saved)
         store_cls.return_value.async_save = AsyncMock(return_value=None)
@@ -262,7 +308,7 @@ async def test_load_handles_corrupt_samples():
 async def test_save_writes_all_state():
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         save_mock = AsyncMock(return_value=None)
         store_cls.return_value.async_load = AsyncMock(return_value=None)
@@ -287,7 +333,7 @@ def test_load_failure_keeps_calculator_empty():
     """A storage read failure must not raise — calculator stays empty."""
     hass = MagicMock()
     with patch(
-        "custom_components.kostal_kore.battery_soh_calculator.Store"
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
     ) as store_cls:
         store_cls.return_value.async_load = AsyncMock(
             side_effect=OSError("boom")

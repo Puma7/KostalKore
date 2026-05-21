@@ -25,7 +25,13 @@ from homeassistant.helpers.storage import Store
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-_STORE_VERSION: Final = 1
+# Version history:
+#   1 = throughput axis = charge + discharge (deprecated, ambiguous units).
+#   2 = throughput axis = discharge only (industry-standard cycle metric).
+# A version mismatch on load discards old samples but keeps the baseline,
+# since baseline is just a capacity reading and not tied to the X-axis
+# semantics. A mid-flight downgrade is not supported.
+_STORE_VERSION: Final = 2
 # 500 samples × 3h interval ≈ 62 days of full coverage; long enough that
 # the OLS slope stabilises but bounded so the file stays small.
 _MAX_SAMPLES: Final = 500
@@ -51,11 +57,40 @@ _SECONDS_PER_YEAR: Final = 365.25 * 86400.0
 _MAX_PLAUSIBLE_CAPACITY_WH: Final = 10_000_000.0
 
 
+class _BatterySohStore(Store[dict[str, Any]]):
+    """Versioned store that drops incompatible-format samples on upgrade."""
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        if old_major_version < 2:
+            # v1 stored throughput_kwh = charge + discharge on the X-axis.
+            # v2 uses discharge only. Mixing both formats in one OLS slope
+            # would mis-attribute degradation — drop samples but keep the
+            # baseline since it is just a capacity reading.
+            _LOGGER.info(
+                "BatterySohCalculator: migrating storage v%d → v%d (dropping %d "
+                "old-format samples)",
+                old_major_version,
+                _STORE_VERSION,
+                len(old_data.get("samples", []) or []),
+            )
+            return {
+                "baseline_capacity_wh": old_data.get("baseline_capacity_wh"),
+                "baseline_set_at": old_data.get("baseline_set_at"),
+                "samples": [],
+            }
+        return old_data
+
+
 class BatterySohCalculator:
     """Track battery SoH and degradation slope from Modbus telemetry."""
 
     def __init__(self, hass: HomeAssistant, store_key: str) -> None:
-        self._store: Store[dict[str, Any]] = Store(
+        self._store: Store[dict[str, Any]] = _BatterySohStore(
             hass, _STORE_VERSION, store_key
         )
         self._loaded: bool = False

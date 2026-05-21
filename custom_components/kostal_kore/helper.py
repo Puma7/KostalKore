@@ -31,7 +31,8 @@ DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ234567
 # This avoids masking critical low-ohm readings (e.g. 5000 Ohm).
 ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
-# Modbus isolation-resistance sentinel (= 0xFFFFFF in FLOAT32 = 65,535,000 Ω).
+# Modbus isolation-resistance sentinel (= 0xFFFF × 1000, i.e. UINT16-max
+# multiplied by the inverter's internal kΩ→Ω scale factor = 65,535,000 Ω).
 # The inverter writes this value when no actual isolation measurement is
 # available — typically at night or before isolation has been measured for
 # the current cycle. Filtering it consistently prevents a flat sentinel line
