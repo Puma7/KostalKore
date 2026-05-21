@@ -48,6 +48,8 @@ DATA_KEY_HISTORY_MIGRATION_GUARDS: Final[str] = "history_migration_guards"
 # Services
 SERVICE_ADOPT_LEGACY_ENTITY_IDS: Final[str] = "adopt_legacy_entity_ids"
 SERVICE_COPY_LEGACY_HISTORY: Final[str] = "copy_legacy_history"
+SERVICE_SCAN_ORPHAN_HISTORY: Final[str] = "scan_orphan_history"
+SERVICE_APPLY_ORPHAN_HISTORY_MAPPING: Final[str] = "apply_orphan_history_mapping"
 
 # Centralised import for the platform callback type.
 # Older HA versions export ``AddEntitiesCallback``; newer ones renamed it to
@@ -96,6 +98,8 @@ __all__ = [
     "DATA_KEY_LEGACY_CLEANUP_GUARD",
     "DOMAIN",
     "SERVICE_ADOPT_LEGACY_ENTITY_IDS",
+    "SERVICE_APPLY_ORPHAN_HISTORY_MAPPING",
     "SERVICE_COPY_LEGACY_HISTORY",
+    "SERVICE_SCAN_ORPHAN_HISTORY",
     "ADVANCED_WRITE_ARM_TTL_SECONDS",
 ]

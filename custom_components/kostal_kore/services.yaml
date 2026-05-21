@@ -105,3 +105,37 @@ copy_legacy_history:
       default: false
       selector:
         boolean:
+
+scan_orphan_history:
+  name: Scan orphan Recorder history
+  description: >
+    Read-only scan: finds entity_ids in the Recorder database that came from the
+    removed legacy kostal_plenticore integration but have no current Entity
+    Registry binding. Posts a persistent notification with suggested mappings
+    to current kostal_kore entities. Never writes to the database.
+
+apply_orphan_history_mapping:
+  name: Apply orphan history mapping
+  description: >
+    Merge orphan Recorder rows into current kostal_kore entities using a
+    user-supplied mapping. Dry-run by default. Target entities are required to
+    be registered to the kostal_kore platform; unit-mismatch protection from
+    the migration engine still applies.
+  fields:
+    mapping:
+      name: Old → new mapping
+      description: >
+        Dictionary mapping each orphan entity_id (old Plenticore) to a current
+        kostal_kore entity_id.
+      required: true
+      example: >
+        {"sensor.kostal_plenticore_pv_power": "sensor.kore_pv_power"}
+      selector:
+        object:
+    dry_run:
+      name: Dry-run
+      description: Preview only (no database changes). Defaults to true.
+      required: false
+      default: true
+      selector:
+        boolean:

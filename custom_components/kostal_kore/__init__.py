@@ -66,6 +66,10 @@ from .migration_services import (
     async_register_migration_services,
     async_unregister_migration_services_if_unused,
 )
+from .orphan_history import (
+    async_register_orphan_history_services,
+    async_unregister_orphan_history_services_if_unused,
+)
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
 
@@ -459,6 +463,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         return False
 
     async_register_migration_services(hass)
+    async_register_orphan_history_services(hass)
     _log_setup_metrics(start_time, True)
     return True
 
@@ -604,6 +609,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         )
 
     async_unregister_migration_services_if_unused(
+        hass,
+        unloading_entry_id=entry.entry_id,
+    )
+    async_unregister_orphan_history_services_if_unused(
         hass,
         unloading_entry_id=entry.entry_id,
     )
