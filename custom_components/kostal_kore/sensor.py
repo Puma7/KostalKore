@@ -198,22 +198,22 @@ def _handle_api_error(err: Exception, operation: str) -> None:
 
 def generate_dc_sensor_descriptions(dc_string_count: int) -> list[PlenticoreSensorEntityDescription]:
     """Generate DC sensor descriptions dynamically based on available string count.
-    
+
     Args:
         dc_string_count: Number of DC strings available on the inverter
-        
+
     Returns:
         List of sensor descriptions for all available DC strings
     """
     dc_descriptions = []
-    
+
     # Define the metrics for each DC string
     dc_metrics = [
         ("P", "Power", UnitOfPower.WATT, SensorDeviceClass.POWER, "format_round"),
         ("U", "Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, "format_round"),
         ("I", "Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, "format_float"),
     ]
-    
+
     # Generate sensors for each available DC string
     for dc_num in range(1, dc_string_count + 1):
         for metric, name_suffix, unit, device_class, formatter in dc_metrics:
@@ -228,8 +228,36 @@ def generate_dc_sensor_descriptions(dc_string_count: int) -> list[PlenticoreSens
                     formatter=formatter,
                 )
             )
-    
+
     return dc_descriptions
+
+
+def generate_pv_energy_sensor_descriptions(
+    dc_string_count: int,
+) -> list[PlenticoreSensorEntityDescription]:
+    """Generate per-string PV energy statistic sensors for Day/Month/Year/Total.
+
+    The Kostal REST API exposes Statistic:EnergyPv{N}:{period} dynamically for as
+    many PV strings as the inverter has. Previously only PV1–PV3 were declared
+    statically: single-string inverters saw permanent unavailable PV2/PV3 sensors,
+    and >3-string inverters lost the PV4–PV6 statistics entirely.
+    """
+    descriptions: list[PlenticoreSensorEntityDescription] = []
+    periods = ("Day", "Month", "Year", "Total")
+    for pv_num in range(1, dc_string_count + 1):
+        for period in periods:
+            descriptions.append(
+                PlenticoreSensorEntityDescription(
+                    module_id="scb:statistic:EnergyFlow",
+                    key=f"Statistic:EnergyPv{pv_num}:{period}",
+                    name=f"Energy PV{pv_num} {period}",
+                    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+                    device_class=SensorDeviceClass.ENERGY,
+                    state_class=SensorStateClass.TOTAL_INCREASING,
+                    formatter="format_energy",
+                )
+            )
+    return descriptions
 
 
 SENSOR_PROCESS_DATA = [
@@ -398,7 +426,10 @@ SENSOR_PROCESS_DATA = [
         module_id="devices:local:battery",
         key="FullChargeCap_E",
         name="Battery Full Charge Capacity",
-        native_unit_of_measurement="Ah",
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=2,
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
         icon="mdi:battery-high",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -677,119 +708,8 @@ SENSOR_PROCESS_DATA = [
         state_class=SensorStateClass.TOTAL_INCREASING,
         formatter="format_energy",
     ),
-    # Bug #11 (known limitation): PV energy statistics are hardcoded for PV1–PV3
-    # only. Inverters with 1–2 strings see PV2/PV3 entities as "unavailable";
-    # inverters with 4–6 strings lose energy stats for the extra strings.
-    # The Kostal REST API exposes Statistic:EnergyPv{N}:* dynamically; future work
-    # is to mirror generate_dc_sensor_descriptions() for the energy statistics.
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Day",
-        name="Energy PV1 Day",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Month",
-        name="Energy PV1 Month",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Year",
-        name="Energy PV1 Year",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv1:Total",
-        name="Energy PV1 Total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Day",
-        name="Energy PV2 Day",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Month",
-        name="Energy PV2 Month",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Year",
-        name="Energy PV2 Year",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv2:Total",
-        name="Energy PV2 Total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Day",
-        name="Energy PV3 Day",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Month",
-        name="Energy PV3 Month",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Year",
-        name="Energy PV3 Year",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
-    PlenticoreSensorEntityDescription(
-        module_id="scb:statistic:EnergyFlow",
-        key="Statistic:EnergyPv3:Total",
-        name="Energy PV3 Total",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        formatter="format_energy",
-    ),
+    # Per-string PV energy statistics are generated dynamically based on the
+    # discovered DC string count via generate_pv_energy_sensor_descriptions().
     PlenticoreSensorEntityDescription(
         module_id="scb:statistic:EnergyFlow",
         key="Statistic:Yield:Day",
@@ -1568,6 +1488,7 @@ async def async_setup_entry(
 
     # Generate DC sensor descriptions dynamically
     dc_descriptions = generate_dc_sensor_descriptions(dc_string_count)
+    pv_energy_descriptions = generate_pv_energy_sensor_descriptions(dc_string_count)
     
     # Keep REST process polling responsive for decision-making.
     _rest_poll_interval = REST_PROCESS_POLL_SECONDS_DEFAULT
@@ -1704,9 +1625,9 @@ async def async_setup_entry(
     # Combine static and dynamic sensor descriptions
     # EXCLUDE calculated sensors from the general batch - they are handled separately below
     all_descriptions = [
-        desc for desc in SENSOR_PROCESS_DATA 
+        desc for desc in SENSOR_PROCESS_DATA
         if desc.module_id != "_calc_"
-    ] + dc_descriptions
+    ] + dc_descriptions + pv_energy_descriptions
     
     entities.extend(create_entities_batch(
         process_data_update_coordinator,

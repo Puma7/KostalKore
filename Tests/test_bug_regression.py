@@ -92,25 +92,64 @@ def test_bug1_work_capacity_uses_watt_hour() -> None:
     )
 
 
-def test_bug1_full_charge_cap_unit_is_ah() -> None:
-    """FullChargeCap_E is the REST-API ampere-hour register — expected Ah.
+def test_bug1_full_charge_cap_unit_is_wh() -> None:
+    """FullChargeCap_E must be Wh with ENERGY_STORAGE device class.
 
-    This test documents the current state. Real hardware returns ~50 for this
-    register (50 Ah ≈ 38 kWh at nominal voltage) — confirmed in LEARNINGS.md.
-    The "_E" suffix is misleading; this is charge capacity, not energy.
-    If the API is ever confirmed to report Wh, change the assertion and update
-    the sensor description accordingly.
+    Every other surface (`modbus_registers.py:163` REG_BATTERY_WORK_CAPACITY,
+    `health_monitor.py:198` ParameterTracker, `degradation_tracker.py:298`
+    TrackedParameter, test fixtures with `35000.0`) reports this register in Wh.
+    Annotating it as "Ah" produced wrong units in the Energy Dashboard and
+    rejected statistics consumers expecting an energy unit.
     """
+    from homeassistant.components.sensor import SensorDeviceClass
     import kostal_plenticore.sensor as sensor_mod
 
     desc = next(
         d for d in sensor_mod.SENSOR_PROCESS_DATA
         if d.key == "FullChargeCap_E" and d.module_id == "devices:local:battery"
     )
-    # The REST API FullChargeCap_E register is reported in Ah by Kostal firmware.
-    # If this assertion fails it means the unit was changed — verify against API docs.
-    assert desc.native_unit_of_measurement == "Ah", (
-        f"FullChargeCap_E unit changed unexpectedly: {desc.native_unit_of_measurement!r}"
+    assert desc.native_unit_of_measurement == UnitOfEnergy.WATT_HOUR, (
+        f"FullChargeCap_E should be Wh, got {desc.native_unit_of_measurement!r}"
+    )
+    assert desc.device_class == SensorDeviceClass.ENERGY_STORAGE, (
+        f"FullChargeCap_E should have ENERGY_STORAGE device_class, got {desc.device_class!r}"
+    )
+
+
+def test_bug11_pv_energy_sensors_generated_dynamically() -> None:
+    """generate_pv_energy_sensor_descriptions must emit Day/Month/Year/Total per string."""
+    from homeassistant.components.sensor import SensorDeviceClass
+    import kostal_plenticore.sensor as sensor_mod
+
+    for count, expected_total in ((1, 4), (3, 12), (6, 24)):
+        descs = sensor_mod.generate_pv_energy_sensor_descriptions(count)
+        assert len(descs) == expected_total, (
+            f"{count} string(s) → expected {expected_total} energy sensors, got {len(descs)}"
+        )
+        for pv_num in range(1, count + 1):
+            for period in ("Day", "Month", "Year", "Total"):
+                key = f"Statistic:EnergyPv{pv_num}:{period}"
+                assert any(d.key == key for d in descs), f"Missing energy sensor {key}"
+        # All must be energy-class kWh totals
+        for d in descs:
+            assert d.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
+            assert d.device_class == SensorDeviceClass.ENERGY
+
+
+def test_bug11_static_pv_energy_descriptions_removed() -> None:
+    """The static PV1/PV2/PV3 energy entries must no longer live in SENSOR_PROCESS_DATA.
+
+    Otherwise the dynamic generator would create duplicates and entity IDs would
+    collide on inverters with >0 strings.
+    """
+    import kostal_plenticore.sensor as sensor_mod
+
+    energy_pv_keys = [
+        d.key for d in sensor_mod.SENSOR_PROCESS_DATA
+        if isinstance(d.key, str) and d.key.startswith("Statistic:EnergyPv")
+    ]
+    assert energy_pv_keys == [], (
+        f"Static EnergyPv sensors leaked into SENSOR_PROCESS_DATA: {energy_pv_keys}"
     )
 
 
