@@ -1540,6 +1540,11 @@ async def async_setup_entry(
                 soh_val = float(soh_raw)
             except (TypeError, ValueError):
                 return
+            # NaN/Inf protection: inverter has been seen to emit "nan" on
+            # some firmware versions before the battery is fully calibrated.
+            # Recording NaN into a ParameterTracker poisons trend math.
+            if soh_val != soh_val or soh_val in (float("inf"), float("-inf")):
+                return
             if _health_monitor_obj is not None:
                 _health_monitor_obj.update_battery_soh(soh_val)
             if _degradation_tracker_obj is not None and soh_val > 0:

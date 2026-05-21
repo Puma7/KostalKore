@@ -201,6 +201,28 @@ def test_scan_orphans_sync_recognizes_wr_prefix() -> None:
     assert by_id["sensor.wr2_pv_power"].suggested_target == "sensor.kore_pv_power"
 
 
+def test_scan_orphans_sync_wr_anchor_avoids_substring_false_positives() -> None:
+    """`.wr_` is anchored to the slug start so unrelated substrings don't match.
+
+    `sensor.power_warning_state` contains `_war` but not `.wr_` — must be
+    treated as a normal non-legacy entity, not flagged as a Kostal orphan.
+    """
+    recorder, _ = _make_recorder_with_states(
+        states_entity_ids=[
+            "sensor.power_warning_state",
+            "sensor.thermostat_drawer_temp",
+            "sensor.front_lawnmower_battery",
+        ],
+        statistics_ids=[],
+    )
+    report = _scan_orphans_sync(
+        recorder,
+        registry_entity_ids=set(),
+        kore_entity_ids=["sensor.kore_battery_soc"],
+    )
+    assert report.total_orphans == 0
+
+
 # ---------------------------------------------------------------------------
 # scan_orphan_history — wires registry + recorder
 # ---------------------------------------------------------------------------

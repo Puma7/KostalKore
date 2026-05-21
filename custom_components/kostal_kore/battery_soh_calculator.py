@@ -35,6 +35,12 @@ _SAMPLE_MIN_INTERVAL_S: Final = 3 * 3600
 _BASELINE_RAISE_DELTA: Final = 0.005
 _MIN_SAMPLES_FOR_SLOPE: Final = 5
 _SECONDS_PER_YEAR: Final = 365.25 * 86400.0
+# Hard sanity ceiling on capacity readings. The Modbus outlier limit lets
+# values up to 10 GWh through (default for FLOAT32 telemetry), but no
+# real home battery is bigger than a few MWh. Without this guard, a one-off
+# corrupted Modbus frame could lock in a baseline that no future reading
+# can match, pinning the calculated SoH near zero forever.
+_MAX_PLAUSIBLE_CAPACITY_WH: Final = 10_000_000.0
 
 
 class BatterySohCalculator:
@@ -92,7 +98,7 @@ class BatterySohCalculator:
         Caller schedules async_save() when this returns True.
         """
         cap = _opt_float(data.get("battery_work_capacity"))
-        if cap is None or cap <= 0:
+        if cap is None or cap <= 0 or cap > _MAX_PLAUSIBLE_CAPACITY_WH:
             return False
         self._current_capacity_wh = cap
 

@@ -64,6 +64,23 @@ def test_rejects_zero_or_negative_capacity(calc):
     assert calc.baseline_capacity_wh is None
 
 
+def test_rejects_implausible_capacity(calc):
+    """A corrupted Modbus read with absurd capacity must not poison baseline."""
+    assert calc.update_from_modbus({"battery_work_capacity": 50_000_000.0}) is False
+    assert calc.baseline_capacity_wh is None
+    # Subsequent realistic readings still work normally
+    assert calc.update_from_modbus({"battery_work_capacity": 35000.0}) is True
+    assert calc.baseline_capacity_wh == 35000.0
+
+
+def test_rejects_nan_capacity(calc):
+    """NaN must be filtered out before any state change."""
+    assert calc.update_from_modbus(
+        {"battery_work_capacity": float("nan")}
+    ) is False
+    assert calc.baseline_capacity_wh is None
+
+
 def test_baseline_only_raises_above_threshold(calc):
     calc.update_from_modbus({"battery_work_capacity": 35000.0})
     # +0.3 % — below threshold, baseline stays
