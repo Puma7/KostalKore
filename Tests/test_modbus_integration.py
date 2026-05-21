@@ -597,6 +597,130 @@ async def test_modbus_platform_setup_fails_raises_config_entry_not_ready(
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
+async def test_rollback_unloads_only_platforms_that_loaded(
+    hass: HomeAssistant,
+) -> None:
+    """Partial setup must not unload binary_sensor when only PLATFORMS forwarded."""
+    from homeassistant.const import Platform
+
+    entry = MockConfigEntry(entry_id="rollback_partial", domain=DOMAIN, title="WR")
+    mock_modbus = MagicMock()
+    mock_modbus.async_shutdown = AsyncMock()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "modbus_coordinator": mock_modbus,
+        kp_init.KEY_LOADED_PLATFORMS: list(kp_init.PLATFORMS),
+    }
+
+    mock_plenticore = MagicMock()
+    mock_plenticore.async_unload = AsyncMock()
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(return_value=True),
+    ) as mock_unload:
+        await kp_init._rollback_setup(hass, entry, mock_plenticore)
+
+    mock_unload.assert_awaited_once_with(entry, kp_init.PLATFORMS)
+    assert Platform.BINARY_SENSOR not in mock_unload.await_args.args[1]
+
+
+async def test_unload_empty_loaded_platforms_is_noop(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Empty _loaded_platforms must not call async_unload_platforms."""
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = MagicMock()
+    mock_config_entry.runtime_data.async_unload = AsyncMock()
+
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        kp_init.KEY_LOADED_PLATFORMS: [],
+    }
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(return_value=True),
+    ) as mock_unload:
+        assert await kp_init.async_unload_entry(hass, mock_config_entry)
+
+    mock_unload.assert_not_awaited()
+
+
+async def test_unload_reraises_unrelated_value_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """ValueError without 'never loaded' must propagate."""
+    mock_config_entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        kp_init.KEY_LOADED_PLATFORMS: list(kp_init.PLATFORMS),
+    }
+
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            AsyncMock(side_effect=ValueError("unrelated")),
+        ),
+        pytest.raises(ValueError, match="unrelated"),
+    ):
+        await kp_init.async_unload_entry(hass, mock_config_entry)
+
+
+async def test_unload_tolerates_never_loaded_value_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """HA 'Config entry was never loaded' during unload must not abort teardown."""
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = MagicMock()
+    mock_config_entry.runtime_data.async_unload = AsyncMock()
+
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        kp_init.KEY_LOADED_PLATFORMS: list(kp_init.MODBUS_PLATFORMS),
+    }
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(side_effect=ValueError("Config entry was never loaded!")),
+    ):
+        assert await kp_init.async_unload_entry(hass, mock_config_entry)
+
+
+async def test_unload_skips_modbus_platforms_when_never_loaded(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Unload must not call binary_sensor teardown if MODBUS setup never completed."""
+    from homeassistant.const import Platform
+
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.runtime_data = MagicMock()
+    mock_config_entry.runtime_data.async_unload = AsyncMock()
+
+    mock_modbus = MagicMock()
+    mock_modbus.async_shutdown = AsyncMock()
+
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        "modbus_coordinator": mock_modbus,
+        kp_init.KEY_LOADED_PLATFORMS: list(kp_init.PLATFORMS),
+    }
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(return_value=True),
+    ) as mock_unload:
+        assert await kp_init.async_unload_entry(hass, mock_config_entry)
+
+    mock_unload.assert_awaited_once_with(mock_config_entry, kp_init.PLATFORMS)
+    assert Platform.BINARY_SENSOR not in mock_unload.await_args.args[1]
+
+
 async def test_rollback_setup_shuts_down_ksem_coordinator(
     hass: HomeAssistant,
 ) -> None:
