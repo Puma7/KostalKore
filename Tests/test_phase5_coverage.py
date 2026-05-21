@@ -219,7 +219,7 @@ async def test_async_unload_entry_unload_platforms_false(
     # is actually called (and its False return value propagates to the result).
     from custom_components.kostal_kore.const import DOMAIN
     hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-        "_platforms_forwarded": True,
+        kp_init.KEY_LOADED_PLATFORMS: list(kp_init.PLATFORMS),
     }
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
@@ -934,6 +934,11 @@ async def test_rollback_setup_cleans_up_all_objects() -> None:
                 "soc_controller": soc_ctrl,
                 "modbus_proxy": proxy,
                 "mqtt_bridge": mqtt,
+                # Empty loaded-platforms list keeps rollback from calling
+                # hass.config_entries.async_unload_platforms (MagicMock can't
+                # be awaited and the assertions here cover only the runtime
+                # object cleanup path).
+                kp_init.KEY_LOADED_PLATFORMS: [],
             }
         }
     }
@@ -1389,7 +1394,11 @@ async def test_rollback_setup_empty_cleanup_list() -> None:
 
     hass.data = {
         DOMAIN: {
-            "test_entry": {}  # No soc_controller, modbus_proxy, or mqtt_bridge
+            "test_entry": {
+                # Empty loaded-platforms list short-circuits the platform unload
+                # branch in _rollback_setup so MagicMock-only hass works here.
+                kp_init.KEY_LOADED_PLATFORMS: [],
+            }
         }
     }
 
