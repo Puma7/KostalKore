@@ -434,6 +434,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     if modbus_coordinator is not None:
         modbus_coordinator._write_audit = write_audit
 
+    # Pre-instantiate the Grid Feed-In Limiter switch BEFORE forwarding platform
+    # setup. number.py and switch.py both reach for this object, and platform
+    # setup runs them concurrently — without pre-instantiation the number
+    # platform raced ahead of the switch platform and found "grid_feedin_limiter"
+    # missing, silently dropping the FeedInLimitNumber entity.
+    grid_feedin_limiter = None
+    if modbus_coordinator is not None and entry.options.get(CONF_MODBUS_ENABLED, False):
+        try:
+            from .grid_charge_limiter import GridFeedInLimiterSwitch
+            grid_feedin_limiter = GridFeedInLimiterSwitch(
+                modbus_coordinator, entry.entry_id, plenticore.device_info, hass=hass,
+            )
+        except Exception as err:  # pragma: no cover
+            _LOGGER.error("Could not pre-instantiate Grid Feed-In Limiter: %s", err)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         KEY_SETUP_IN_PROGRESS: True,
         KEY_LOADED_PLATFORMS: [],
@@ -446,6 +461,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "fire_safety": fire_safety,
         "degradation_tracker": degradation_tracker,
         "battery_soh_calc": battery_soh_calc,
+        "grid_feedin_limiter": grid_feedin_limiter,
         "diagnostics_engine": diagnostics_engine,
         "longevity_advisor": longevity_advisor,
         "request_scheduler": request_scheduler,

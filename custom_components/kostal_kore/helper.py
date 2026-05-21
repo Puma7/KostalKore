@@ -31,6 +31,13 @@ DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ234567
 # This avoids masking critical low-ohm readings (e.g. 5000 Ohm).
 ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
+# Modbus isolation-resistance sentinel (= 0xFFFFFF in FLOAT32 = 65,535,000 Ω).
+# The inverter writes this value when no actual isolation measurement is
+# available — typically at night or before isolation has been measured for
+# the current cycle. Filtering it consistently prevents a flat sentinel line
+# from contaminating the recorder history and trend math.
+ISOLATION_SENTINEL_OHM: Final[float] = 65_535_000.0
+
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
     """Return mutable per-entry integration state store.

@@ -341,7 +341,8 @@ class InverterHealthMonitor:
                         # has been measured for the cycle). Recording it
                         # produces a flat sentinel line in the recorder
                         # history that hides real degradation.
-                        if fval == 65535000.0:
+                        from .helper import ISOLATION_SENTINEL_OHM
+                        if fval == ISOLATION_SENTINEL_OHM:
                             continue
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,

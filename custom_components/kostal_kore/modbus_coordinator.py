@@ -270,6 +270,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _restore_isolation_sample(self) -> None:
         """Seed the health-monitor deque with the last persisted isolation value."""
+        from .helper import ISOLATION_SENTINEL_OHM
         try:
             stored = await self._isolation_store.async_load()
         except Exception:
@@ -279,17 +280,29 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         iso_ohm = stored.get("isolation_ohm")
         if iso_ohm is None:
             return
+        try:
+            iso_float = float(iso_ohm)
+        except (TypeError, ValueError):
+            return
+        # Skip persisted sentinel values — would re-seed the tracker with the
+        # 0xFFFFFF marker and produce a flat history line until the next real
+        # measurement arrives. Existing stores written before the sentinel
+        # filter landed may still carry the sentinel.
+        if iso_float == ISOLATION_SENTINEL_OHM:
+            return
         if self._health_monitor is not None and hasattr(self._health_monitor, "isolation"):
-            try:
-                self._health_monitor.isolation.record(float(iso_ohm))
-                _LOGGER.debug(
-                    "Restored last isolation resistance: %.0f Ω", float(iso_ohm)
-                )
-            except (TypeError, ValueError):
-                pass
+            self._health_monitor.isolation.record(iso_float)
+            _LOGGER.debug(
+                "Restored last isolation resistance: %.0f Ω", iso_float
+            )
 
     async def _save_isolation_sample(self, iso_ohm: float) -> None:
         """Persist the most recent isolation resistance value."""
+        from .helper import ISOLATION_SENTINEL_OHM
+        # Never persist the sentinel — keeps restore_isolation_sample
+        # safe even on older stores that pre-date the in-line filter.
+        if iso_ohm == ISOLATION_SENTINEL_OHM:
+            return
         try:
             await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
         except Exception as err:

@@ -68,12 +68,21 @@ class BatterySohCalculatedSensor(_BatterySohBase):
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
         age = self._calc.baseline_age_days
         return {
+            # Disambiguates from the BMS-reported "Battery State of Health"
+            # sensor (REST devices:local:battery[SoH]) and the BMS-forwarded
+            # "Battery Health (SoH Trend)". This sensor is computed locally
+            # from work-capacity ratio against the max-observed baseline.
+            "source": "calculated_capacity_ratio",
             "baseline_wh": self._calc.baseline_capacity_wh,
             "current_wh": self._calc.current_capacity_wh,
             "baseline_age_days": round(age, 1) if age is not None else None,
-            "total_throughput_kwh": (
-                round(self._calc.total_throughput_kwh, 1)
-                if self._calc.total_throughput_kwh is not None else None
+            "total_discharge_kwh": (
+                round(self._calc.total_discharge_kwh, 1)
+                if self._calc.total_discharge_kwh is not None else None
+            ),
+            "total_charge_kwh": (
+                round(self._calc.total_charge_kwh, 1)
+                if self._calc.total_charge_kwh is not None else None
             ),
             "cycles_observed": self._calc.cycles,
             "samples": self._calc.sample_count,
@@ -110,9 +119,11 @@ class BatterySohProjection5yearsSensor(_BatterySohBase):
         slope = self._calc.degradation_per_kwh
         annual = self._calc.annual_throughput_kwh
         return {
+            "source": "calculated_ols_extrapolation",
             "degradation_per_kwh": round(slope, 4) if slope is not None else None,
-            "annual_throughput_kwh": round(annual, 1) if annual is not None else None,
+            "annual_discharge_kwh": round(annual, 1) if annual is not None else None,
             "samples": self._calc.sample_count,
+            "projection_reliable": self._calc.projection_reliable,
         }
 
 

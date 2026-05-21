@@ -989,12 +989,11 @@ async def async_setup_entry(
             entities.append(BatteryChargeBlockSwitch(
                 modbus_coord, entry.entry_id, plenticore.device_info, hass=hass,
             ))
-            from .grid_charge_limiter import GridFeedInLimiterSwitch
-            limiter_switch = GridFeedInLimiterSwitch(
-                modbus_coord, entry.entry_id, plenticore.device_info, hass=hass,
-            )
-            entities.append(limiter_switch)
-            entry_data["grid_feedin_limiter"] = limiter_switch
+            # Pre-instantiated in __init__.py so the number platform sees it
+            # even when platform setup runs in non-deterministic order.
+            limiter_switch = entry_data.get("grid_feedin_limiter")
+            if limiter_switch is not None:
+                entities.append(limiter_switch)
     except Exception as err:
         _LOGGER.error("Failed to create Modbus control entities: %s", err, exc_info=True)
 

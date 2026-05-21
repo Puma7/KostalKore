@@ -55,7 +55,10 @@ def test_first_observation_sets_baseline(calc):
     assert calc.current_capacity_wh == 35700.0
     assert calc.soh_pct == pytest.approx(100.0)
     assert calc.cycles == 76.0
+    # Throughput attribute exposes charge + discharge for debugging
     assert calc.total_throughput_kwh == pytest.approx(900.0)
+    assert calc.total_charge_kwh == pytest.approx(500.0)
+    assert calc.total_discharge_kwh == pytest.approx(400.0)
 
 
 def test_rejects_zero_or_negative_capacity(calc):
@@ -106,6 +109,20 @@ def test_soh_projection_requires_minimum_samples(calc):
     assert calc.soh_projection_5y_pct is None
 
 
+def _seed_samples(c, count: int, span_days: float = 60.0, slope_wh_per_kwh: float = -0.1):
+    """Helper: seed the calculator with synthetic linear-degradation samples."""
+    now = time.time()
+    for i in range(count):
+        # Span 'span_days' evenly. Oldest = now - span_days.
+        ts = now - (span_days - i * (span_days / max(count - 1, 1))) * 86400
+        discharge_kwh = i * 10.0
+        capacity_wh = 35000.0 + (discharge_kwh * slope_wh_per_kwh)
+        c._samples.append((discharge_kwh, capacity_wh, ts))
+    c._baseline_capacity_wh = 35000.0
+    c._baseline_set_at = now - span_days * 86400
+    c._current_capacity_wh = c._samples[-1][1]
+
+
 def test_soh_projection_with_linear_degradation():
     hass = MagicMock()
     with patch(
@@ -115,18 +132,9 @@ def test_soh_projection_with_linear_degradation():
         store_cls.return_value.async_save = AsyncMock(return_value=None)
         c = BatterySohCalculator(hass, "k")
 
-    # Simulate 6 samples spread over 60 days, linearly losing capacity.
-    # 50 kWh annual throughput, losing 100 Wh per 1000 kWh throughput.
-    now = time.time()
-    for i in range(6):
-        ts = now - (60 - i * 12) * 86400  # spread over 60 days
-        throughput_kwh = i * 10.0  # 10 kWh per sample
-        capacity_wh = 35000.0 - (throughput_kwh * 0.1)  # 0.1 Wh per kWh = 100 mWh
-        c._samples.append((throughput_kwh, capacity_wh, ts))
-
-    c._baseline_capacity_wh = 35000.0
-    c._baseline_set_at = now - 60 * 86400
-    c._current_capacity_wh = 35000.0 - 5.0  # 5 Wh lost so far
+    # 30 samples over 60 days → above both _MIN_SAMPLES_FOR_SLOPE (30)
+    # and _MIN_PROJECTION_AGE_S (30 days).
+    _seed_samples(c, count=30, span_days=60.0, slope_wh_per_kwh=-0.1)
 
     slope = c.degradation_per_kwh
     assert slope is not None
@@ -134,12 +142,12 @@ def test_soh_projection_with_linear_degradation():
 
     annual = c.annual_throughput_kwh
     assert annual is not None
-    # 50 kWh over 60 days × 365.25/60 ≈ 304 kWh/year
-    assert 250 < annual < 350
+    assert 1500 < annual < 2000  # 30 samples × 10 kWh = 290 kWh / 60 days
 
     projection = c.soh_projection_5y_pct
     assert projection is not None
-    assert projection < c.soh_pct  # must project a loss
+    assert projection < c.soh_pct
+    assert c.projection_reliable is True
 
 
 def test_soh_projection_non_degrading_returns_current_soh():
@@ -151,16 +159,30 @@ def test_soh_projection_non_degrading_returns_current_soh():
         store_cls.return_value.async_save = AsyncMock(return_value=None)
         c = BatterySohCalculator(hass, "k")
 
-    # Constant capacity over time — slope is 0 → not degrading
-    now = time.time()
-    for i in range(6):
-        c._samples.append((i * 10.0, 35000.0, now - (60 - i * 12) * 86400))
-    c._baseline_capacity_wh = 35000.0
-    c._current_capacity_wh = 35000.0
+    _seed_samples(c, count=30, span_days=60.0, slope_wh_per_kwh=0.0)
 
     slope = c.degradation_per_kwh
     assert slope == pytest.approx(0.0, abs=1e-9)
     assert c.soh_projection_5y_pct == pytest.approx(100.0)
+
+
+def test_projection_blocked_until_min_age():
+    """Many samples within a short window do not unlock the projection."""
+    hass = MagicMock()
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator.Store"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(return_value=None)
+        c = BatterySohCalculator(hass, "k")
+
+    # 50 samples in just 5 days — passes the count gate but fails the
+    # window gate (must be ≥ 30 days).
+    _seed_samples(c, count=50, span_days=5.0, slope_wh_per_kwh=-0.1)
+
+    assert c.projection_reliable is False
+    assert c.degradation_per_kwh is None
+    assert c.soh_projection_5y_pct is None
 
 
 def test_sample_interval_throttles_recording():
@@ -257,7 +279,8 @@ async def test_save_writes_all_state():
     saved = save_mock.call_args.args[0]
     assert saved["baseline_capacity_wh"] == 35000.0
     assert len(saved["samples"]) == 1
-    assert saved["samples"][0][:2] == [pytest.approx(0.9), 35000.0]
+    # Only discharge counts on the throughput axis (400/1000 = 0.4)
+    assert saved["samples"][0][:2] == [pytest.approx(0.4), 35000.0]
 
 
 def test_load_failure_keeps_calculator_empty():

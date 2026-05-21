@@ -33,7 +33,15 @@ _SAMPLE_MIN_INTERVAL_S: Final = 3 * 3600
 # Baseline can only rise (battery never gets better). Tiny upward noise is
 # ignored — only readings 0.5 % above the current baseline raise it.
 _BASELINE_RAISE_DELTA: Final = 0.005
-_MIN_SAMPLES_FOR_SLOPE: Final = 5
+# Slope needs enough points to filter measurement noise. With 3h sampling
+# this means ≥ 90h of data even if all samples are clustered, but in
+# practice users see a stable slope only after weeks of observation.
+_MIN_SAMPLES_FOR_SLOPE: Final = 30
+# Projection is only reliable once enough wall-clock time has passed to
+# average over diurnal/weekly load patterns. Without this gate, the
+# 5-year extrapolation would be derived from a few hours of noise and
+# look authoritative while being meaningless.
+_MIN_PROJECTION_AGE_S: Final = 30 * 86400.0
 _SECONDS_PER_YEAR: Final = 365.25 * 86400.0
 # Hard sanity ceiling on capacity readings. The Modbus outlier limit lets
 # values up to 10 GWh through (default for FLOAT32 telemetry), but no
@@ -55,8 +63,14 @@ class BatterySohCalculator:
         self._baseline_set_at: float | None = None  # unix ts
         self._current_capacity_wh: float | None = None
         self._latest_cycles: float | None = None
-        self._latest_throughput_kwh: float | None = None
-        # Samples: (throughput_kwh, capacity_wh, unix_ts)
+        # Discharge throughput is the industry-standard cycle-life metric:
+        # it counts only useful work output (energy delivered to the home).
+        # The previous `charge + discharge` summation double-counted each
+        # cycle and made degradation_per_kwh hard to compare against
+        # manufacturer cycle-life specs.
+        self._latest_discharge_kwh: float | None = None
+        self._latest_charge_kwh: float | None = None
+        # Samples: (discharge_kwh, capacity_wh, unix_ts)
         self._samples: deque[tuple[float, float, float]] = deque(
             maxlen=_MAX_SAMPLES
         )
@@ -102,10 +116,15 @@ class BatterySohCalculator:
             return False
         self._current_capacity_wh = cap
 
-        charge = _opt_float(data.get("total_dc_charge")) or 0.0
-        discharge = _opt_float(data.get("total_dc_discharge")) or 0.0
-        throughput_kwh = (charge + discharge) / 1000.0
-        self._latest_throughput_kwh = throughput_kwh
+        charge_wh = _opt_float(data.get("total_dc_charge")) or 0.0
+        discharge_wh = _opt_float(data.get("total_dc_discharge")) or 0.0
+        # Use only discharge as the throughput axis. Each cycle increments
+        # both charge and discharge by roughly equal amounts (modulo
+        # round-trip losses); summing both double-counts. Discharge alone
+        # is what battery vendors and academic papers use for cycle-life.
+        discharge_kwh = discharge_wh / 1000.0
+        self._latest_discharge_kwh = discharge_kwh
+        self._latest_charge_kwh = charge_wh / 1000.0
 
         cycles = _opt_float(data.get("battery_cycles"))
         if cycles is not None:
@@ -134,7 +153,7 @@ class BatterySohCalculator:
             self._last_sample_mono == 0.0
             or now_mono - self._last_sample_mono >= _SAMPLE_MIN_INTERVAL_S
         ):
-            self._samples.append((throughput_kwh, cap, now_unix))
+            self._samples.append((discharge_kwh, cap, now_unix))
             self._last_sample_mono = now_mono
             changed = True
 
@@ -151,8 +170,22 @@ class BatterySohCalculator:
         return self._current_capacity_wh
 
     @property
+    def total_discharge_kwh(self) -> float | None:
+        return self._latest_discharge_kwh
+
+    @property
+    def total_charge_kwh(self) -> float | None:
+        return self._latest_charge_kwh
+
+    @property
     def total_throughput_kwh(self) -> float | None:
-        return self._latest_throughput_kwh
+        """charge + discharge — exposed as attribute for debugging/comparison.
+
+        NOT used for slope or projection (see _latest_discharge_kwh).
+        """
+        if self._latest_charge_kwh is None or self._latest_discharge_kwh is None:
+            return None
+        return self._latest_charge_kwh + self._latest_discharge_kwh
 
     @property
     def cycles(self) -> float | None:
@@ -178,12 +211,15 @@ class BatterySohCalculator:
 
     @property
     def degradation_per_kwh(self) -> float | None:
-        """OLS slope of capacity_wh vs throughput_kwh (Wh-lost per kWh-throughput).
+        """OLS slope of capacity_wh vs discharge_kwh (Wh-lost per kWh-discharged).
 
         Negative slope ⇒ capacity falling with use (normal degradation).
-        Returns None until at least _MIN_SAMPLES_FOR_SLOPE points exist.
+        Returns None until at least _MIN_SAMPLES_FOR_SLOPE points exist
+        AND the observation window spans at least _MIN_PROJECTION_AGE_S.
         """
         if len(self._samples) < _MIN_SAMPLES_FOR_SLOPE:
+            return None
+        if not self._has_min_window():
             return None
         n = len(self._samples)
         sx = sum(s[0] for s in self._samples)
@@ -194,6 +230,22 @@ class BatterySohCalculator:
         if denom == 0:
             return None
         return (n * sxy - sx * sy) / denom
+
+    def _has_min_window(self) -> bool:
+        """True when oldest and newest samples span the min projection age."""
+        if len(self._samples) < 2:
+            return False
+        oldest_ts = self._samples[0][2]
+        newest_ts = self._samples[-1][2]
+        return (newest_ts - oldest_ts) >= _MIN_PROJECTION_AGE_S
+
+    @property
+    def projection_reliable(self) -> bool:
+        """Surface whether the projection is based on sufficient evidence."""
+        return (
+            len(self._samples) >= _MIN_SAMPLES_FOR_SLOPE
+            and self._has_min_window()
+        )
 
     @property
     def annual_throughput_kwh(self) -> float | None:
