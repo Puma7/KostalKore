@@ -641,6 +641,17 @@ class TestAdditionalClientCoverage:
         assert c._apply_quality_filter(sentinel_reg, "not-a-number") == "not-a-number"
         assert c._apply_quality_filter(REG_TOTAL_DC_POWER, 50.0) == 50.0
 
+        # worktime (address 144) has a per-register override – lifetime seconds
+        # counters must not trip the default 10M absolute outlier limit
+        worktime_reg = ModbusRegister(
+            144, "worktime", "Worktime", DataType.FLOAT32, 2, Access.RO,
+            RegisterGroup.DEVICE_INFO, "s",
+        )
+        assert c._apply_quality_filter(worktime_reg, 14_396_661.0) == 14_396_661.0
+        assert c._apply_quality_filter(worktime_reg, 947_000_000.0) == 947_000_000.0
+        with pytest.raises(ModbusReadError, match="absolute outlier limit"):
+            c._apply_quality_filter(worktime_reg, 1e11)
+
     @pytest.mark.asyncio
     async def test_raw_read_scheduler_and_inner_branches(self) -> None:
         scheduler = _Scheduler()
