@@ -113,6 +113,8 @@ class KostalMqttBridge:
         self._last_write: dict[str, float] = {}
         self._write_lock = asyncio.Lock()
         self._publish_task: asyncio.Task[None] | None = None
+        self._command_count: int = 0
+        self._rate_limited_count: int = 0
 
     @property
     def topic_base(self) -> str:
@@ -425,6 +427,7 @@ class KostalMqttBridge:
                 reg.name,
                 source,
             )
+            self._log_audit_rejection(reg.name, None, "rejected_installer", source)
             return
 
         # SoC controller arbitration for battery registers
@@ -436,6 +439,7 @@ class KostalMqttBridge:
                     "Stop the SoC Controller first. (source: %s)",
                     reg.name, ctrl.target_soc or 0, source,
                 )
+                self._log_audit_rejection(reg.name, None, "rejected_soc_active", source)
                 return
 
         try:
@@ -452,6 +456,8 @@ class KostalMqttBridge:
                     "MQTT command rejected: unsupported type %s for %s (source: %s)",
                     type(value).__name__, reg.name, source,
                 )
+                self._log_audit_rejection(reg.name, None, "rejected_validation",
+                                          f"type={type(value).__name__}")
                 return
 
             if isinstance(value, str):
@@ -462,6 +468,8 @@ class KostalMqttBridge:
                         "MQTT command rejected: non-numeric value %r for %s (source: %s)",
                         payload, reg.name, source,
                     )
+                    self._log_audit_rejection(reg.name, None, "rejected_validation",
+                                              f"non-numeric={payload!r}")
                     return
 
             if isinstance(value, (int, float)) and (math.isnan(value) or math.isinf(value)):
@@ -469,15 +477,19 @@ class KostalMqttBridge:
                     "MQTT command rejected: NaN/Infinity for %s (source: %s)",
                     reg.name, source,
                 )
+                self._log_audit_rejection(reg.name, None, "rejected_validation", "NaN/Inf")
                 return
 
             # --- Rate-limit AFTER validation passes ---
             if not self._check_rate_limit(reg.name):
+                self._rate_limited_count += 1
+                self._log_audit_rejection(reg.name, value, "rejected_rate", source)
                 return
 
             async with self._write_lock:
                 await self._coordinator.async_write_register(reg, value)
 
+            self._command_count += 1
             _LOGGER.info(
                 "MQTT command executed: %s = %s (source: %s)",
                 reg.name, value, source,
@@ -491,3 +503,21 @@ class KostalMqttBridge:
                 reg.name, err, source,
                 exc_info=True,
             )
+
+    def _log_audit_rejection(
+        self, key: str, value: Any, result: str, detail: str
+    ) -> None:
+        """Log a rejection event to the write audit if one is attached."""
+        audit = getattr(self._coordinator, "_write_audit", None)
+        if audit is None:
+            return
+        import time
+        from .write_audit import WriteEvent
+        audit.log(WriteEvent(
+            ts=time.monotonic(),
+            source="mqtt",
+            key=key,
+            value=value,
+            result=result,
+            detail=detail,
+        ))

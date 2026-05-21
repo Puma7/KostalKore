@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import time
+from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Final
 
 from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.system_info import async_get_system_info
 
 from .const import CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
@@ -20,6 +27,8 @@ from .helper import parse_modbus_exception
 
 import logging
 _LOGGER = logging.getLogger(__name__)
+
+SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
 
 # Data redaction constants
 TO_REDACT: Final[set[str]] = {CONF_PASSWORD, CONF_SERVICE_CODE}
@@ -216,3 +225,159 @@ async def async_get_config_entry_diagnostics(
         }
 
     return data
+
+
+# ---------------------------------------------------------------------------
+# export_debug_bundle service
+# ---------------------------------------------------------------------------
+
+async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Collect a full diagnostic snapshot and write it to /config/www/."""
+    bundles: list[str] = []
+    errors: list[str] = []
+
+    for entry_id, entry_store in hass.data.get(DOMAIN, {}).items():
+        if not isinstance(entry_store, dict):
+            continue
+        try:
+            path = await _export_bundle_for_entry(hass, entry_id, entry_store)
+            bundles.append(path)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("export_debug_bundle failed for entry %s: %s", entry_id, err)
+            errors.append(f"{entry_id}: {err}")
+
+    if bundles:
+        urls = "\n".join(f"/local/{os.path.basename(p)}" for p in bundles)
+        msg = f"Debug bundle(s) written:\n{urls}"
+    else:
+        msg = "No debug bundle written."
+    if errors:
+        msg += "\n\nErrors:\n" + "\n".join(errors)
+
+    await hass.services.async_call(
+        "persistent_notification",
+        "create",
+        {
+            "title": "KostalKore Debug Bundle",
+            "message": msg,
+            "notification_id": "kore_debug_bundle",
+        },
+    )
+
+
+async def _export_bundle_for_entry(
+    hass: HomeAssistant, entry_id: str, entry_store: dict[str, Any]
+) -> str:
+    """Build and write the debug bundle JSON for one config entry. Returns path."""
+    ha_info: dict[str, Any] = {}
+    try:
+        ha_info = await async_get_system_info(hass)
+    except Exception:  # noqa: BLE001
+        pass
+
+    modbus_coord = entry_store.get("modbus_coordinator")
+    health_mon = entry_store.get("health_monitor")
+    fire_safety = entry_store.get("fire_safety")
+    write_audit = entry_store.get("write_audit")
+    scheduler = entry_store.get("request_scheduler")
+    proxy = entry_store.get("modbus_proxy")
+
+    bundle: dict[str, Any] = {
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "entry_id": entry_id,
+        "ha_version": ha_info.get("version", "unknown"),
+    }
+
+    if health_mon is not None and hasattr(health_mon, "get_health_summary"):
+        try:
+            bundle["health_summary"] = health_mon.get_health_summary()
+        except Exception as err:  # noqa: BLE001
+            bundle["health_summary"] = {"error": str(err)}
+
+    if fire_safety is not None:
+        try:
+            bundle["fire_safety"] = {
+                "risk_level": str(fire_safety.current_risk_level),
+                "active_alert_count": fire_safety.alert_count,
+                "active_alerts": [
+                    {
+                        "risk_level": str(a.risk_level),
+                        "category": getattr(a, "category", ""),
+                        "title": a.title,
+                    }
+                    for a in list(fire_safety.active_alerts)[:10]
+                ],
+            }
+        except Exception as err:  # noqa: BLE001
+            bundle["fire_safety"] = {"error": str(err)}
+
+    if write_audit is not None:
+        recent = write_audit.recent
+        bundle["write_audit_last100"] = [e.as_dict() for e in recent[-100:]]
+        bundle["write_audit_stats"] = {
+            "total_count": write_audit.total_count,
+            "error_count_5min": write_audit.error_count_5min,
+            "write_rate_per_min": write_audit.write_rate_per_min,
+        }
+
+    if scheduler is not None and hasattr(scheduler, "get_stats"):
+        bundle["scheduler_stats"] = scheduler.get_stats()
+
+    if proxy is not None:
+        try:
+            bundle["proxy_state"] = {
+                "running": proxy.running,
+                "client_count": len(proxy._clients),
+                "fc06_count": proxy._fc06_count,
+                "fc16_count": proxy._fc16_count,
+                "last_ext_writes": {
+                    str(addr): round(time.time() - (time.monotonic() - ts), 1)
+                    for addr, ts in proxy._last_ext_write.items()
+                },
+            }
+        except Exception as err:  # noqa: BLE001
+            bundle["proxy_state"] = {"error": str(err)}
+
+    if modbus_coord is not None:
+        bundle["modbus_snapshot"] = dict(modbus_coord.data or {})
+        bundle["coordinator_state"] = {
+            "update_count": modbus_coord.update_count,
+            "poll_phase": modbus_coord.poll_phase,
+            "slow_data_age_s": modbus_coord.slow_data_age_s,
+            "fast_error_count": modbus_coord._fast_error_count,
+        }
+
+    ts_str = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
+    filename = f"kore_debug_{entry_id[:8]}_{ts_str}.json"
+    path = f"/config/www/{filename}"
+
+    def _write(p: str, data: dict[str, Any]) -> None:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, default=str)
+
+    try:
+        await hass.async_add_executor_job(_write, path, bundle)
+        _LOGGER.info("Debug bundle written to %s", path)
+    except OSError as err:
+        raise OSError(f"Cannot write to {path}: {err}") from err
+
+    return path
+
+
+def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
+    """Register the export_debug_bundle service (idempotent)."""
+    if hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
+        return
+
+    async def _handler(call: ServiceCall) -> None:
+        await _handle_export_debug_bundle(hass, call)
+
+    hass.services.async_register(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, _handler)
+
+
+def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None:
+    """Unregister the service when no more KORE entries remain."""
+    if hass.data.get(DOMAIN):
+        return
+    hass.services.async_remove(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE)

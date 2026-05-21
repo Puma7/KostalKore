@@ -211,6 +211,8 @@ class ModbusTcpProxyServer:
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task[None]] = set()
         self._last_ext_write: dict[int, float] = {}  # address → timestamp
+        self._fc06_count: int = 0
+        self._fc16_count: int = 0
 
     @property
     def port(self) -> int:
@@ -408,6 +410,7 @@ class ModbusTcpProxyServer:
                 "(service code missing in integration config).",
                 address,
             )
+            self._log_audit(f"addr:{address}", value, "rejected_installer", "FC06")
             return self._error_response(FC_WRITE_SINGLE, 0x03)
 
         # Arbitration: block battery writes if SoC controller is active
@@ -419,9 +422,11 @@ class ModbusTcpProxyServer:
                     "target=%.0f%%). External client should retry later.",
                     address, value, ctrl.target_soc or 0,
                 )
+                self._log_audit(f"addr:{address}", value, "rejected_soc_active", "FC06")
                 return self._error_response(FC_WRITE_SINGLE, 0x06)
 
         self._last_ext_write[address] = time.monotonic()
+        self._fc06_count += 1
 
         reg = REGISTER_BY_ADDRESS.get(address)
         if reg is not None and reg.access == Access.RW:
@@ -434,13 +439,16 @@ class ModbusTcpProxyServer:
             try:
                 await self._coordinator.async_write_by_address(address, value)
                 _LOGGER.info("Proxy: write reg %d = %d (external)", address, value)
+                self._log_audit(reg.name, value, "ok", "proxy_fc06")
                 return pdu[:5]
             except Exception as err:
                 _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
+                self._log_audit(f"addr:{address}", value, "error", str(err))
                 return self._error_response(FC_WRITE_SINGLE, 0x04)
 
         raw_result = await self._forward_write_single(address, value)
         if raw_result:
+            self._log_audit(f"addr:{address}", value, "forwarded_direct", "FC06")
             return pdu[:5]
         return self._error_response(FC_WRITE_SINGLE, 0x04)
 
@@ -485,6 +493,7 @@ class ModbusTcpProxyServer:
                 start_addr,
                 start_addr + quantity - 1,
             )
+            self._log_audit(f"addr:{start_addr}", None, "rejected_installer", "FC16")
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
         # Arbitration: block battery writes if SoC controller is active
@@ -497,9 +506,11 @@ class ModbusTcpProxyServer:
                     "External client should retry later.",
                     start_addr, quantity, ctrl.target_soc or 0,
                 )
+                self._log_audit(f"addr:{start_addr}", None, "rejected_soc_active", "FC16")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x06)
 
         self._last_ext_write[start_addr] = time.monotonic()
+        self._fc16_count += 1
         reg_values = pdu[6 : 6 + byte_count]
 
         reg = REGISTER_BY_ADDRESS.get(start_addr)
@@ -510,6 +521,7 @@ class ModbusTcpProxyServer:
                 _LOGGER.info(
                     "Proxy: write-multiple reg %d = %s (external)", start_addr, decoded,
                 )
+                # audit logged by coordinator.async_write_register
                 return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
             except Exception as err:
                 _LOGGER.warning(
@@ -519,6 +531,7 @@ class ModbusTcpProxyServer:
 
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)
         if raw_result:
+            self._log_audit(f"addr:{start_addr}", None, "forwarded_direct", "FC16")
             return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
         return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
@@ -561,6 +574,23 @@ class ModbusTcpProxyServer:
             return (lo << 16) | hi
 
         return struct.unpack(">H", raw[:2])[0]
+
+    def _log_audit(self, key: str, value: Any, result: str, detail: str) -> None:
+        """Forward an event to the coordinator's write audit log if present."""
+        audit = getattr(self._coordinator, "_write_audit", None)
+        if audit is None:
+            return
+        from .write_audit import WriteEvent
+        audit.log(WriteEvent(
+            ts=time.monotonic(),
+            source="proxy_fc06" if "FC06" in detail else (
+                "proxy_fc16" if "FC16" in detail else "proxy_fwd"
+            ),
+            key=key,
+            value=value,
+            result=result,
+            detail=detail,
+        ))
 
     @staticmethod
     def _error_response(fc: int, exception_code: int) -> bytes:

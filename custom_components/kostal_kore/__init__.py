@@ -72,6 +72,7 @@ from .orphan_history import (
 )
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
+from .write_audit import WriteAuditLog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -416,6 +417,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         longevity_advisor = LongevityAdvisor(health_monitor, bat_thresholds)
         _LOGGER.info("Battery chemistry: %s (%s)", bat_thresholds.chemistry, bat_thresholds.chemistry_full)
 
+    write_audit = WriteAuditLog()
+    if modbus_coordinator is not None:
+        modbus_coordinator._write_audit = write_audit
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "_setup_options": dict(entry.options),
         "modbus_coordinator": modbus_coordinator,
@@ -431,6 +436,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "request_scheduler": request_scheduler,
         "soc_controller": soc_controller,
         "num_bidirectional": num_bi if modbus_coordinator is not None else 0,
+        "write_audit": write_audit,
     }
 
     try:
@@ -464,6 +470,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     async_register_migration_services(hass)
     async_register_orphan_history_services(hass)
+    from .diagnostics import async_register_debug_bundle_service
+    async_register_debug_bundle_service(hass)
     _log_setup_metrics(start_time, True)
     return True
 
@@ -616,6 +624,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         hass,
         unloading_entry_id=entry.entry_id,
     )
+    from .diagnostics import async_unregister_debug_bundle_service_if_unused
+    async_unregister_debug_bundle_service_if_unused(hass)
     return unload_ok
 
 

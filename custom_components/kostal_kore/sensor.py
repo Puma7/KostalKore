@@ -1795,6 +1795,23 @@ async def async_setup_entry(
             async_add_entities(longevity_entities)
             _LOGGER.info("Added %d longevity sensors", len(longevity_entities))
 
+    # Observability sensors (write audit, scheduler, coordinator health, consistency)
+    write_audit_obj = entry_store.get("write_audit") if entry_store else None
+    scheduler_obj = entry_store.get("request_scheduler") if entry_store else None
+    if modbus_coordinator is not None and write_audit_obj is not None and scheduler_obj is not None:
+        from .observability_entities import create_observability_sensors
+        obs_entities = create_observability_sensors(
+            modbus_coordinator=modbus_coordinator,
+            process_coordinator=process_data_update_coordinator,
+            write_audit=write_audit_obj,
+            scheduler=scheduler_obj,
+            entry_id=entry.entry_id,
+            device_info=plenticore.device_info,
+        )
+        if obs_entities:
+            async_add_entities(obs_entities)
+            _LOGGER.info("Added %d observability sensors", len(obs_entities))
+
 
 class PlenticoreCalculatedSensor(
     CoordinatorEntity[ProcessDataUpdateCoordinator], SensorEntity

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 import json
+import time
 from datetime import timedelta
 from typing import Any, Final
 
@@ -87,6 +88,10 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_info_tick = 0
         self._device_info: dict[str, Any] = {}
         self._last_slow_data: dict[str, Any] = {}
+        self._update_count: int = 0
+        self._fast_error_count: int = 0
+        self._last_slow_ts: float = 0.0
+        self._write_audit: Any | None = None  # injected after init (WriteAuditLog)
         self._capability_store = Store[dict[str, Any]](
             hass,
             CAPABILITY_STORE_VERSION,
@@ -107,6 +112,22 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def device_info_data(self) -> dict[str, Any]:
         return self._device_info
+
+    @property
+    def poll_phase(self) -> int:
+        """Current slow-poll phase (0 = slow poll just ran, 1–5 = fast-only cycles)."""
+        return self._slow_tick
+
+    @property
+    def slow_data_age_s(self) -> float | None:
+        """Seconds since the last successful slow poll, or None if none yet."""
+        if self._last_slow_ts == 0.0:
+            return None
+        return time.monotonic() - self._last_slow_ts
+
+    @property
+    def update_count(self) -> int:
+        return self._update_count
 
     async def async_setup(self) -> None:
         """Connect to the inverter and read initial device info."""
@@ -137,6 +158,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
+        self._update_count += 1
         data: dict[str, Any] = {}
         fast_total = 0
         fast_errors = 0
@@ -163,6 +185,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except ModbusConnectionError as err:
             raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
+        if fast_errors > 0:
+            self._fast_error_count += fast_errors
+
         if fast_total > 0 and fast_errors >= fast_total:
             raise UpdateFailed(
                 f"All {fast_total} fast-poll registers failed – inverter may be unreachable"
@@ -185,6 +210,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 slow_result = await self._client.read_registers_batch(slow_regs)
                 self._last_slow_data = slow_result
+                self._last_slow_ts = time.monotonic()
                 data.update(slow_result)
             except ModbusConnectionError as err:
                 _LOGGER.debug("Slow-poll connection lost: %s", err)
@@ -300,8 +326,27 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info(
                 "Wrote %s = %s to inverter via Modbus", register.name, value
             )
+            if self._write_audit is not None:
+                from .write_audit import WriteEvent
+                self._write_audit.log(WriteEvent(
+                    ts=time.monotonic(),
+                    source="modbus_coord",
+                    key=register.name,
+                    value=value,
+                    result="ok",
+                ))
         except ModbusClientError as err:
             _LOGGER.error("Modbus write failed for %s: %s", register.name, err)
+            if self._write_audit is not None:
+                from .write_audit import WriteEvent
+                self._write_audit.log(WriteEvent(
+                    ts=time.monotonic(),
+                    source="modbus_coord",
+                    key=register.name,
+                    value=value,
+                    result="error",
+                    detail=str(err),
+                ))
             raise
 
     async def async_write_by_name(self, name: str, value: Any) -> None:
