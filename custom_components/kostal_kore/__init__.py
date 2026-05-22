@@ -19,6 +19,7 @@ from collections.abc import Awaitable
 from datetime import timedelta
 import logging
 import time
+import traceback
 from typing import Final
 
 from aiohttp.client_exceptions import ClientError
@@ -776,6 +777,44 @@ async def _async_options_updated(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _log_unload_caller(trace: SetupTrace, entry: PlenticoreConfigEntry) -> None:
+    """Log who triggered async_unload_entry so reload loops can be diagnosed.
+
+    HA does not log who calls async_unload internally — by the time we land
+    here, the only signal is "unload starts". This dumps the asyncio task
+    name and the most recent non-stdlib frames so an external caller (options
+    update, entity-registry change, HACS, foreign integration) is identifiable
+    from the log alone.
+    """
+    try:
+        task = asyncio.current_task()
+        task_name = task.get_name() if task is not None else "?"
+    except RuntimeError:  # pragma: no cover - no running loop
+        task_name = "?"
+    try:
+        frames = traceback.extract_stack()
+    except Exception:  # pragma: no cover - defensive
+        frames = []
+    # Skip our own frame and frames inside this module; keep the next ~10 outer
+    # frames so HA's call-chain (config_entries.async_unload → reload → …) is
+    # visible. Skip stdlib asyncio internals to keep the log readable.
+    interesting: list[str] = []
+    for frame in reversed(frames[:-1]):
+        if frame.filename.endswith("/__init__.py") and "kostal_kore" in frame.filename:
+            continue
+        if "/asyncio/" in frame.filename and frame.name in {"_run", "run", "_step", "__step"}:
+            continue
+        interesting.append(f"{frame.filename}:{frame.lineno} in {frame.name}")
+        if len(interesting) >= 10:
+            break
+    trace.info(
+        "unload triggered (task=%s, entry_state=%s, caller_stack=%s)",
+        task_name,
+        entry.state,
+        " <- ".join(interesting) if interesting else "<empty>",
+    )
+
+
 async def _await_cleanup_step(
     label: str,
     step: Awaitable[object],
@@ -806,6 +845,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     trace = trace_obj if isinstance(trace_obj, SetupTrace) else SetupTrace(
         entry.entry_id, entry.title
     )
+    # Capture caller context so the reload loop can be traced back to its
+    # actual trigger (options update, entity-registry change, service call,
+    # external reload) instead of just seeing "unload begins" every cycle.
+    _log_unload_caller(trace, entry)
     trace.phase_begin("unload_entry")
     entry_data[KEY_UNLOAD_IN_PROGRESS] = True
     loaded = _platforms_to_unload(entry_data)
