@@ -470,6 +470,8 @@ async def test_reconfigure_step_success(hass: HomeAssistant, mock_config_entry: 
     flow = config_flow.KostalPlenticoreConfigFlow()
     flow.hass = hass
     mock_config_entry.add_to_hass(hass)
+    # _get_reconfigure_entry() was inlined; set context so the inlined lookup finds the entry.
+    flow.context = {"entry_id": mock_config_entry.entry_id}
     with patch(
         "custom_components.kostal_kore.config_flow.resolve_connection_safe",
         AsyncMock(
@@ -480,7 +482,7 @@ async def test_reconfigure_step_success(hass: HomeAssistant, mock_config_entry: 
                 installer_access=False,
             )
         ),
-    ), patch.object(flow, "_get_reconfigure_entry", return_value=mock_config_entry):
+    ):
         result = await flow.async_step_reconfigure({CONF_HOST: "1.2.3.4", CONF_PASSWORD: "pw"})
     assert result["type"] == "abort"
 

@@ -513,6 +513,7 @@ class TestAdditionalClientCoverage:
 
         c = KostalModbusClient("127.0.0.1")
         await c.disconnect()  # no client branch
+        c._closing = False  # reset so reconnect() is not blocked by shutdown guard
 
         with patch.object(c, "disconnect", AsyncMock()) as disconnect_mock, patch.object(
             c,

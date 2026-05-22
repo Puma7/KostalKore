@@ -55,6 +55,7 @@ def _modbus_client() -> MagicMock:
     client.port = 1502
     client.unit_id = 71
     client.connected = True
+    client.closing = False
     client.connect = AsyncMock()
     client.detect_endianness = AsyncMock()
     client.disconnect = AsyncMock()

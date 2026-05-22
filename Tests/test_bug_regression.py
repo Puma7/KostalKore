@@ -1801,6 +1801,7 @@ async def test_audit_modbus_slow_poll_cache_preserves_slow_registers(
     client.port = 1502
     client.unit_id = 1
     client.connected = True
+    client.closing = False
     client.connect = AsyncMock()
     client.detect_endianness = AsyncMock()
     client.unavailable_registers = set()

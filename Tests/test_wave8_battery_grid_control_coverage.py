@@ -23,7 +23,7 @@ from custom_components.kostal_kore.grid_charge_limiter import (
 
 
 def _coord_stub() -> SimpleNamespace:
-    client = SimpleNamespace(read_register=AsyncMock())
+    client = SimpleNamespace(read_register=AsyncMock(), closing=False, connected=True)
     return SimpleNamespace(client=client, async_write_register=AsyncMock())
 
 
