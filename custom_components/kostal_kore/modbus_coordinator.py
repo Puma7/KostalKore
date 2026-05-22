@@ -139,7 +139,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # AFTER _health_monitor is injected, not here.
 
     async def async_shutdown(self) -> None:
-        """Disconnect from the inverter."""
+        """Stop polling and disconnect from the inverter."""
+        await super().async_shutdown()
         await self._client.disconnect()
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -150,6 +151,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         - Permanent errors (illegal address) → register skipped permanently
         - If ALL fast-poll registers fail → raise UpdateFailed
         """
+        if self._client.closing:
+            raise UpdateFailed("Modbus coordinator is shutting down")
         if not self._client.connected:
             try:
                 await self._client.connect()

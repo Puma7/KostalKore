@@ -529,6 +529,27 @@ async def test_options_updated_ignored_when_entry_not_loaded(
     mock_reload.assert_not_awaited()
 
 
+async def test_options_updated_ignored_when_entry_not_loaded_state(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Options updates while HA is loading/reloading the entry must not reload."""
+    from homeassistant.config_entries import ConfigEntryState
+
+    mock_config_entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        kp_init.KEY_SETUP_IN_PROGRESS: False,
+    }
+    mock_config_entry.mock_state(hass, state=ConfigEntryState.SETUP_RETRY)
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_not_awaited()
+
+
 async def test_options_updated_ignored_during_setup_in_progress(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,

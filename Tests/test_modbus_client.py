@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pymodbus.exceptions import ConnectionException as PyConnectionException
 
 from kostal_plenticore.modbus_client import (
     KostalModbusClient,
@@ -240,6 +241,23 @@ class TestConnectionLifecycle:
         c._client = MagicMock()
         await c.disconnect()
         assert c._client is None
+        assert c.closing is True
+
+    @pytest.mark.asyncio
+    async def test_read_skips_reconnect_when_closing(self) -> None:
+        """During unload, connection-loss must not spawn a reconnect race."""
+        c = KostalModbusClient("192.168.1.100")
+        c._closing = True
+        mock_client = AsyncMock()
+        mock_client.connected = True
+        mock_client.read_holding_registers = AsyncMock(
+            side_effect=PyConnectionException("lost")
+        )
+        c._client = mock_client
+        with patch.object(c, "reconnect", new_callable=AsyncMock) as reconnect_mock:
+            with pytest.raises(ModbusConnectionError, match="aborted during shutdown"):
+                await c.read_register(REG_TOTAL_DC_POWER)
+        reconnect_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_read_when_disconnected_raises(self) -> None:

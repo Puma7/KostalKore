@@ -383,6 +383,11 @@ class BatterySocController:
 
     async def _write_normal(self) -> None:
         """Reset to automatic mode, restoring original limits if available."""
+        if self._coord.client.closing or not self._coord.client.connected:
+            _LOGGER.debug(
+                "SoC Controller: skip register restore (Modbus unavailable)"
+            )
+            return
         fallback = self._device_power_limit_w
         charge_limit = self._original_charge_limit if self._original_charge_limit is not None else fallback
         discharge_limit = self._original_discharge_limit if self._original_discharge_limit is not None else fallback

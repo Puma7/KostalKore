@@ -24,6 +24,7 @@ from typing import Final
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -578,9 +579,6 @@ async def _rollback_setup(
     loaded = _platforms_to_unload(entry_data)
     if loaded:
         await _async_unload_loaded_platforms(hass, entry, loaded)
-    soc_ctrl = entry_data.get("soc_controller")
-    if soc_ctrl:
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     proxy = entry_data.get("modbus_proxy")
     if proxy:
         await _await_cleanup_step("Modbus proxy stop", proxy.stop())
@@ -596,6 +594,9 @@ async def _rollback_setup(
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator is not None:
         await _await_cleanup_step(
@@ -635,6 +636,13 @@ async def _async_options_updated(
         _LOGGER.debug(
             "Options update for %s ignored (setup still in progress)",
             entry.entry_id,
+        )
+        return
+    if entry.state is not ConfigEntryState.LOADED:
+        _LOGGER.debug(
+            "Options update for %s ignored (entry state=%s)",
+            entry.entry_id,
+            entry.state,
         )
         return
 
@@ -684,9 +692,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     # entities call coordinator.async_remove_listener during their teardown.
     unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)
 
-    soc_ctrl = entry_data.get("soc_controller")
-    if soc_ctrl:  # pragma: no cover
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
         await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
@@ -698,6 +703,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:  # pragma: no cover
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator:  # pragma: no cover
         await _await_cleanup_step(
