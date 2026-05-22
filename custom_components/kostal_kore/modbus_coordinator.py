@@ -104,6 +104,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             f"kostal_kore_isolation_{client.host}_{client.port}",
         )
         self._health_monitor: Any | None = None  # injected after init if available
+        self._last_persisted_isolation_ohm: float | None = None
 
     @property
     def client(self) -> KostalModbusClient:
@@ -139,9 +140,16 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # AFTER _health_monitor is injected, not here.
 
     async def async_shutdown(self) -> None:
-        """Stop polling and permanently close the Modbus client."""
-        await super().async_shutdown()
+        """Stop polling and permanently close the Modbus client.
+
+        Client shutdown runs FIRST so that any in-progress TCP read sees a
+        closed transport immediately when HA cancels the refresh task.
+        Without this ordering, the pending asyncio.wait_for() inside
+        _handle_refresh_interval can outlive HA's unload timeout, causing
+        repeated FAILED_UNLOAD → setup-retry loops.
+        """
         await self._client.async_shutdown()
+        await super().async_shutdown()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll monitoring registers with per-register error handling.
@@ -306,6 +314,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # safe even on older stores that pre-date the in-line filter.
         if iso_ohm == ISOLATION_SENTINEL_OHM:
             return
+        if self._last_persisted_isolation_ohm == iso_ohm:
+            return
+        self._last_persisted_isolation_ohm = iso_ohm
         try:
             await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
         except Exception as err:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -327,6 +328,55 @@ async def test_save_writes_all_state():
     assert len(saved["samples"]) == 1
     # Only discharge counts on the throughput axis (400/1000 = 0.4)
     assert saved["samples"][0][:2] == [pytest.approx(0.4), 35000.0]
+
+
+@pytest.mark.asyncio
+async def test_schedule_save_coalesces_concurrent_calls(hass):
+    """schedule_save must not spawn unbounded save tasks during baseline calibration."""
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(return_value=None)
+        calc = BatterySohCalculator(hass, "k")
+        calc.schedule_save()
+        first_task = calc._save_task
+        assert first_task is not None
+        # Second call while first task is still pending must be a no-op.
+        calc.schedule_save()
+        assert calc._save_task is first_task
+        first_task.cancel()
+        try:
+            await first_task
+        except asyncio.CancelledError:
+            pass
+        # After cancellation the task is done; a new call must create a fresh task.
+        calc.schedule_save()
+        assert calc._save_task is not None
+        assert calc._save_task is not first_task
+        calc._save_task.cancel()
+        try:
+            await calc._save_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_debounced_save_completes(hass):
+    """_debounced_save actually calls async_save after the sleep."""
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(return_value=None)
+        calc = BatterySohCalculator(hass, "k")
+        with patch(
+            "custom_components.kostal_kore.battery_soh_calculator.asyncio.sleep",
+            new=AsyncMock(return_value=None),
+        ):
+            await calc._debounced_save()
+        store_cls.return_value.async_save.assert_awaited_once()
+        assert calc._save_task is None
 
 
 @pytest.mark.asyncio
