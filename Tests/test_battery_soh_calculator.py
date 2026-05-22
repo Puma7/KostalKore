@@ -380,6 +380,29 @@ async def test_debounced_save_completes(hass):
 
 
 @pytest.mark.asyncio
+async def test_cancel_pending_save(hass):
+    """cancel_pending_save cancels the in-flight task; no-op when no task."""
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(return_value=None)
+        calc = BatterySohCalculator(hass, "k")
+        # No-op when no task pending.
+        calc.cancel_pending_save()
+        assert calc._save_task is None
+        calc.schedule_save()
+        task = calc._save_task
+        assert task is not None and not task.done()
+        calc.cancel_pending_save()
+        assert task.cancelled() or task.cancelling() > 0
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_save_failure_is_swallowed():
     """Storage write errors must not crash the calculator (line 139-140)."""
     hass = MagicMock()

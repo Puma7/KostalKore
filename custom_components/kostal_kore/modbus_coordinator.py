@@ -316,9 +316,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._last_persisted_isolation_ohm == iso_ohm:
             return
-        self._last_persisted_isolation_ohm = iso_ohm
         try:
             await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
+            self._last_persisted_isolation_ohm = iso_ohm
         except Exception as err:
             _LOGGER.debug("Could not persist isolation resistance: %s", err)
 

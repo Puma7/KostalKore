@@ -476,6 +476,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "write_audit": write_audit,
     }
     entry_store = hass.data[DOMAIN][entry.entry_id]
+    if battery_soh_calc is not None:
+        entry.async_on_unload(battery_soh_calc.cancel_pending_save)
 
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

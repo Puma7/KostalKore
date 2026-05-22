@@ -152,6 +152,11 @@ class BatterySohCalculator:
             return
         self._save_task = self._hass.async_create_task(self._debounced_save())
 
+    def cancel_pending_save(self) -> None:
+        """Cancel any in-flight debounced save (call on entry unload)."""
+        if self._save_task is not None and not self._save_task.done():
+            self._save_task.cancel()
+
     async def _debounced_save(self) -> None:
         try:
             await asyncio.sleep(_SAVE_DEBOUNCE_S)
