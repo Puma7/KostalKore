@@ -388,7 +388,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 health_monitor.update_from_modbus(data)
                 degradation_tracker.update_from_modbus(data)
                 if battery_soh_calc.update_from_modbus(data):
-                    hass.async_create_task(battery_soh_calc.async_save())
+                    battery_soh_calc.schedule_save()
                 iso_current = health_monitor.isolation.current
                 if iso_current is not None:
                     hass.async_create_task(
@@ -413,14 +413,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                         from .notifications import notify_safety_clear
                         hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
-        # Capture the unsubscribe handle and tie it to entry-unload so a
-        # reload does not leak a stale closure into the next setup cycle.
-        # The closure references the OLD health_monitor / battery_soh_calc /
-        # fire_safety; without an explicit unsub the next reload would have
-        # two listeners firing on every coordinator update.
-        _unsub_health = modbus_coordinator.async_add_listener(_feed_health_data)
-        entry.async_on_unload(_unsub_health)
+        # Defer subscription until platform setup succeeds (below) so a
+        # ConfigEntryNotReady rollback does not leave a listener firing on a
+        # coordinator that is being shut down.
+        _feed_health_listener = _feed_health_data
         fire_safety._total_polls = 0
+    else:
+        _feed_health_listener = None
 
     diagnostics_engine = None
     longevity_advisor = None
@@ -477,6 +476,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "write_audit": write_audit,
     }
     entry_store = hass.data[DOMAIN][entry.entry_id]
+    if battery_soh_calc is not None:
+        entry.async_on_unload(battery_soh_calc.cancel_pending_save)
 
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -508,6 +509,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         await _rollback_setup(hass, entry, plenticore)
         _log_setup_metrics(start_time, False)
         return False
+
+    if _feed_health_listener is not None and modbus_coordinator is not None:
+        _unsub_health = modbus_coordinator.async_add_listener(_feed_health_listener)
+        entry.async_on_unload(_unsub_health)
 
     async_register_migration_services(hass)
     async_register_orphan_history_services(hass)
@@ -589,14 +594,14 @@ async def _rollback_setup(
     # before the platform forward failed must be shut down too — leaving them
     # running creates zombie tasks that keep talking to the inverter until
     # HA is restarted.
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator is not None:
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
-    soc_ctrl = entry_data.get("soc_controller")
-    if soc_ctrl:
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator is not None:
         await _await_cleanup_step(
@@ -688,10 +693,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     entry_data = domain_store.get(entry.entry_id, {})
     loaded = _platforms_to_unload(entry_data)
 
-    # Tear down entity platforms first, while coordinators are still alive —
-    # entities call coordinator.async_remove_listener during their teardown.
-    unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)
-
+    # Stop Modbus consumers before tearing down the shared client/coordinator.
+    # SoC/grid limiter may still write registers; stopping them first prevents
+    # write attempts against a half-closed client.  Then shut the coordinator
+    # down (closes TCP) so HA does not log "refresh did not complete in time"
+    # while the platform entities unload.
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:  # pragma: no cover
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
         await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
@@ -703,9 +712,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
-    soc_ctrl = entry_data.get("soc_controller")
-    if soc_ctrl:  # pragma: no cover
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
+
+    # Tear down entity platforms while coordinators are stopped or idle —
+    # entities call coordinator.async_remove_listener during their teardown.
+    unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator:  # pragma: no cover
         await _await_cleanup_step(

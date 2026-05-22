@@ -595,6 +595,8 @@ class KostalModbusClient:
         result: dict[str, Any] = {}
 
         for group in groups:
+            if self._closing:
+                raise ModbusConnectionError("Modbus client is shutting down")
             if len(group) == 1:
                 try:
                     result[group[0].name] = await self.read_register(group[0])
@@ -652,7 +654,11 @@ class KostalModbusClient:
         return await self._raw_read_inner(address, count)
 
     async def _raw_read_inner(self, address: int, count: int) -> bytes:
+        if self._closing:
+            raise ModbusConnectionError("Modbus client is shutting down")
         async with self._lock:
+            if self._closing:
+                raise ModbusConnectionError("Modbus client is shutting down")
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             assert self._client is not None
@@ -716,7 +722,11 @@ class KostalModbusClient:
     async def _raw_write_inner(
         self, address: int, data: bytes, count: int
     ) -> None:
+        if self._closing:
+            raise ModbusConnectionError("Modbus client is shutting down")
         async with self._lock:
+            if self._closing:
+                raise ModbusConnectionError("Modbus client is shutting down")
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             assert self._client is not None

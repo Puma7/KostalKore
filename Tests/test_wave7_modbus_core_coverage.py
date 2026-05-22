@@ -89,8 +89,20 @@ async def test_modbus_coordinator_setup_shutdown_and_capability_cache(hass) -> N
     read_info.assert_awaited_once()
     load_caps.assert_awaited_once()
 
-    await coordinator.async_shutdown()
-    client.async_shutdown.assert_awaited_once()
+    shutdown_order: list[str] = []
+
+    async def _mark_client_shutdown() -> None:
+        shutdown_order.append("client")
+
+    client.async_shutdown = AsyncMock(side_effect=_mark_client_shutdown)
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.async_shutdown",
+        new=AsyncMock(side_effect=lambda: shutdown_order.append("super")),
+    ):
+        await coordinator.async_shutdown()
+
+    assert shutdown_order == ["client", "super"]
 
     coordinator._device_info = {"sw_version": "1.2.3"}
     assert coordinator._capability_signature() == "1.2.3.4:1502:71:1.2.3"
