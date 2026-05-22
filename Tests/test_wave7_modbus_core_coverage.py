@@ -55,9 +55,11 @@ def _modbus_client() -> MagicMock:
     client.port = 1502
     client.unit_id = 71
     client.connected = True
+    client.closing = False
     client.connect = AsyncMock()
     client.detect_endianness = AsyncMock()
     client.disconnect = AsyncMock()
+    client.async_shutdown = AsyncMock()
     client.read_register = AsyncMock()
     client.read_registers_batch = AsyncMock(return_value={})
     client.write_register = AsyncMock()
@@ -88,7 +90,7 @@ async def test_modbus_coordinator_setup_shutdown_and_capability_cache(hass) -> N
     load_caps.assert_awaited_once()
 
     await coordinator.async_shutdown()
-    client.disconnect.assert_awaited_once()
+    client.async_shutdown.assert_awaited_once()
 
     coordinator._device_info = {"sw_version": "1.2.3"}
     assert coordinator._capability_signature() == "1.2.3.4:1502:71:1.2.3"

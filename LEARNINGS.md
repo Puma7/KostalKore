@@ -1191,3 +1191,187 @@ Three things actually protect against the loop:
 
 Documentation that explains a past mistake does not, on its own, prevent
 the next one. Build the prevention into the source files that get touched.
+
+---
+
+## 48) Modbus isolation resistance sentinel = 0xFFFF × 1000
+
+### The value
+
+`65_535_000 Ω` (= 0xFFFF × 1000). Not a coincidence: the inverter internally
+measures isolation in kΩ as a UINT16. When the measurement is unavailable
+(night, standby, measurement circuit not yet stabilised) it returns 0xFFFF
+(65,535 kΩ) which the driver multiplies by 1,000 to convert to Ω. The result
+looks like a plausible very-high resistance but it is a sentinel, not a
+measurement.
+
+### Impact if not filtered
+
+Persisting this value as a data point (in `health_monitor`, `degradation_tracker`,
+or the coordinator restore path) causes:
+- The isolation history graph to be flat at the maximum (looks "healthy")
+- Any subsequent real reading to look like a sudden drop (triggers false alarms)
+- The degradation tracker's trend line to be biased toward "improving isolation"
+
+### Fix
+
+Central constant in `helper.py`:
+```python
+ISOLATION_SENTINEL_OHM: Final[float] = 65_535_000.0
+```
+Filter applied at every ingestion point: health_monitor update, degradation
+tracker update, coordinator restore-from-store, coordinator save-to-store.
+
+### Test
+
+`test_isolation_sentinel_65535000_skipped` in `test_health_monitor.py` verifies
+the filter at the health_monitor layer. If you add a new ingestion point for
+isolation resistance, add a corresponding test that feeds in `65_535_000.0` and
+asserts it produces no sample.
+
+---
+
+## 49) OLS battery SoH projection: use discharge-only throughput axis
+
+### The correct axis
+
+Battery capacity degradation is conventionally plotted and specified against
+**discharge throughput in kWh**, not `charge + discharge`. Reasons:
+1. Summing both double-counts each cycle (charge ≈ discharge + losses)
+2. Manufacturer cycle-life specs (Wh-lifetime, equivalent full cycles) use
+   discharge only
+3. `degradation_per_kwh` (Wh capacity lost per kWh discharged) is directly
+   comparable to spec-sheet numbers when the axis is discharge-only
+
+### Schema migration requirement
+
+If the X-axis semantics change (e.g., from v1's charge+discharge to v2's
+discharge-only), the `Store` version MUST be bumped. Mixing samples from both
+formats in a single OLS regression mis-attributes degradation: a v1 sample at
+`throughput=100 kWh` and a v2 sample at `throughput=55 kWh` (same physical
+state) make the regression look like capacity *improved* between those points.
+
+The `_BatterySohStore._async_migrate_func` in `battery_soh_calculator.py`
+handles v1→v2 by dropping samples but keeping the baseline (capacity reading,
+axis-independent). The baseline is never dropped across versions.
+
+### Operational note
+
+Do not change the throughput axis again without bumping `_STORE_VERSION` and
+updating the migration function. The comment in the module explains the history.
+
+---
+
+## 50) pytest --cov-fail-under=100 is enforced in CI but silently hidden when running with --no-cov locally
+
+### What happened
+
+`pytest.ini` contains `addopts = --cov-fail-under=100`. When running tests
+locally with `pytest --no-cov` (or without coverage set up), this threshold is
+not checked and tests appear to pass. CI runs without `--no-cov`, hits the
+threshold, and fails.
+
+### How it surfaced here
+
+New files `battery_soh_entities.py` and `battery_soh_calculator.py` were added
+with 0% and 93% coverage respectively. Local tests (run with `--no-cov`) passed.
+CI failed with `FAIL Required test coverage of 100% not reached. Total: 96.93%`.
+
+### Fix
+
+Always set up a mirroring Python 3.12 venv and run:
+```
+pytest Tests/ --timeout=60 -q
+```
+(without `--no-cov`) before pushing to confirm coverage. Alternatively, just
+always write tests for every new file immediately — don't ship a new module
+without a corresponding test file.
+
+### Rule
+
+Every new `.py` file under `custom_components/kostal_kore/` needs a
+`Tests/test_<filename>.py` before the PR is pushed.
+
+---
+
+## 51) HA platform setup order is NOT guaranteed even within async_forward_entry_setups
+
+### The problem
+
+`GridFeedInLimiterSwitch` (in `switch.py`) needed to know the initial feed-in
+limit (set by `GridFeedInLimiterNumber`, in `number.py`). The platforms were
+listed as `["number", "switch"]` in `async_forward_entry_setups`, but HA runs
+them concurrently — "number first in the list" does not mean "number setup
+completes before switch setup starts".
+
+This caused the switch to be registered before the number had set the limit,
+so the first switch write used a stale/None value.
+
+### Fix pattern
+
+Pre-instantiate shared objects in `__init__.py` (the integration setup), before
+`async_forward_entry_setups` is called. Store them in `hass.data[DOMAIN][entry_id]`.
+The platform modules then read the pre-built instance from `entry_data` rather
+than constructing a new one.
+
+Applied to `GridFeedInLimiterSwitch`:
+- `__init__.py`: instantiates `GridFeedInLimiterSwitch` and stores in `entry_store`
+- `switch.py`: reads `entry_data.get("grid_feedin_limiter")` instead of `GridFeedInLimiterSwitch(...)`
+
+This pattern is safe even if the entity is never registered (returns `None` from
+`entry_data.get`) — the `switch` platform simply skips it.
+
+---
+
+## 52) mypy loses stub typing when you alias an imported decorator
+
+### What happened
+
+```python
+from homeassistant.core import callback as _callback
+```
+
+Using `_callback` as a decorator caused mypy to emit `untyped-decorator` errors
+because the alias breaks mypy's ability to resolve the stub annotation on
+`callback`. The original import (`from homeassistant.core import callback`) does
+not trigger this.
+
+### Fix
+
+Either keep the canonical import name (`callback`), or simply remove the
+decorator if it is optional (as it is for listener functions — it is a
+performance hint, not required for correctness).
+
+Do not alias imported decorators. Import them under their original name or not
+at all.
+
+---
+
+## 53) Deferred HA diagnostic logging via async_call_later causes test teardown failures
+
+### What happened
+
+A `hass.async_call_later(3.0, _check_obs_registry)` call was used to log a
+diagnostic 3 seconds after entity registration. In the HA test framework, any
+pending timer registered via `async_call_later` that has not fired by the end
+of the test causes the teardown assertion `PendingTimersError` to fail.
+
+### Fix
+
+Remove the deferred call entirely if it is only for debugging. If a deferred
+diagnostic is genuinely needed, always cancel the timer handle on integration
+unload:
+
+```python
+# In setup:
+cancel = hass.async_call_later(3.0, _check_obs_registry)
+entry_store["_diag_cancel"] = cancel
+
+# In async_unload_entry:
+if cancel := entry_store.pop("_diag_cancel", None):
+    cancel()
+```
+
+The safest approach for diagnostic logging that doesn't need to be deferred is
+to move it into the `async_added_to_hass` callback of the entity, which fires
+synchronously during setup.

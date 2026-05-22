@@ -56,6 +56,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apply path reaching the copy engine, backend/recording guards, notification
   formatters, and service registration idempotence.
 
+## [2.16.10-rc.6] — 2026-05-22 — Reload-Loop Hotfix (b8→b9)
+
+### Fixed
+- **Modbus shutdown race during reload** (Cursor PR #35). After upgrading to
+  v2.16.12b8, some installations showed a slow/messy reload sequence that
+  looked like an initialization loop, with `SoC controller stop timed out
+  after 5.0s during unload`, `Connection lost reading … reconnecting` *during*
+  the unload, and `pymodbus: transaction_id mismatch` errors. Root causes:
+  1. `ModbusDataUpdateCoordinator.async_shutdown()` did not call
+     `super().async_shutdown()`, so the DataUpdateCoordinator's scheduled
+     polls kept firing while the TCP client was being disconnected.
+  2. Unload order stopped the SoC controller **before** shutting down Modbus,
+     so `_write_normal()` (the safe-default restore) held the connection busy
+     while background reads tried to use the same socket — 5s timeout.
+  3. `read_register()` attempted a reconnect after `disconnect()` had already
+     started, racing with the teardown.
+  4. The options-update listener fired during the reload window (entry state
+     `SETUP_RETRY` / `SETUP_IN_PROGRESS`) which could cascade into a second
+     reload.
+- **Fixes applied:**
+  - `modbus_coordinator.async_shutdown()` now calls
+    `super().async_shutdown()` first to stop scheduled polls before the TCP
+    disconnect runs. `_async_update_data` raises `UpdateFailed` when the
+    client is closing.
+  - `modbus_client._closing` flag suppresses reconnect attempts during
+    shutdown. `connect()`, `reconnect()`, and the `read_register()` exception
+    path all check this flag.
+  - Unload order changed to **Proxy/MQTT → Modbus shutdown → SoC stop** in
+    both `async_unload_entry` and `_rollback_setup`.
+  - `BatterySocController._write_normal()` skips the register restore if the
+    Modbus client is closing or disconnected (prevents the 5s timeout).
+  - `_async_options_updated` ignores updates unless
+    `entry.state is ConfigEntryState.LOADED` — eliminates the reload-during-
+    setup-retry cascade.
+- **Listener cleanup** (orthogonal): `_feed_health_data` (`__init__.py`) and
+  `_feed_rest_soh` (`sensor.py`) listener subscriptions now capture their
+  unsubscribe handles and tie them to `entry.async_on_unload`. Without this,
+  reloads left stale closures bound to the previous cycle's
+  `health_monitor` / `degradation_tracker` / `battery_soh_calc` objects.
+
+### Tests
+- `Tests/test_modbus_client.py::test_read_skips_reconnect_when_closing` —
+  verifies `read_register` aborts with `ModbusConnectionError("aborted
+  during shutdown")` and does not call `reconnect()` when `_closing=True`.
+- `Tests/test_modbus_integration.py::test_options_updated_ignored_when_entry_not_loaded_state`
+  — verifies the `ConfigEntryState.LOADED` guard.
+
+### Mitigation note for affected users
+- Users who upgraded directly from b7→b8 and experienced the slow setup/loop
+  can downgrade to b7 via HACS as an immediate workaround, then update to
+  b9 once tagged.
+- Running `kostal_plenticore` (legacy) alongside `kostal_kore` increases the
+  chance of seeing the symptom because both clients share the inverter's
+  modest concurrent-connection budget. Disable the legacy integration if
+  only KORE is in use.
+
+---
+
+## [2.16.10-rc.5] — 2026-05-22 — Battery SoH Calculator, Sentinel Filters, Race Condition Fixes
+
+### Added
+- **Battery SoH Calculator** — New module `battery_soh_calculator.py` derives
+  State-of-Health from Modbus telemetry without relying on the inverter's own
+  (often unreliable) SoH register. Two complementary methods:
+  - *Capacity-ratio SoH*: baseline = highest work-capacity ever observed
+    (persisted across restarts via `Store`). Current SoH = current / baseline × 100.
+    Baseline self-calibrates upward during early commissioning cycles (0.5 % threshold),
+    protected by a 10 MWh sanity ceiling against corrupted Modbus frames.
+  - *5-year OLS projection*: linear regression of `capacity_wh` vs `discharge_kwh`
+    (industry-standard axis, discharge only). Extrapolates 5 years using observed
+    annual throughput rate. Requires ≥ 30 samples AND ≥ 30 days observation window
+    before reporting (gate prevents spurious early projections). Minimum 3-hour
+    sampling interval, rolling 500-sample window.
+  - Store schema versioned at **v2**: v1 used `charge + discharge` as throughput
+    axis (double-counting); v2 uses discharge only. Migration drops v1 samples
+    but preserves baseline (capacity reading, axis-independent).
+- **Battery SoH Entities** — Two new diagnostic sensors backed by the calculator:
+  - `sensor.*_battery_soh_calculated` — live capacity-ratio SoH in %. Attributes:
+    `source`, `baseline_wh`, `current_wh`, `baseline_age_days`, `total_discharge_kwh`,
+    `total_charge_kwh`, `cycles_observed`, `samples`.
+  - `sensor.*_battery_soh_projection_5y` — 5-year OLS extrapolation in %. Attributes:
+    `source`, `degradation_per_kwh`, `annual_discharge_kwh`, `samples`,
+    `projection_reliable` (False until 30 samples / 30 days met).
+  Both are `EntityCategory.DIAGNOSTIC`, unavailable until sufficient data exists.
+- **REST SoH listener** — `sensor.py` now feeds the inverter's own REST-reported
+  battery SoH into `health_monitor` and `degradation_tracker` via
+  `process_data_update_coordinator.async_add_listener`. NaN/Infinity guard applied
+  before forwarding. Fixes "Unknown" state on `Battery Health (SoH Trend)` and
+  `Battery Health Warning` entities that previously never received data.
+- **Isolation resistance sentinel filter** — Central constant
+  `ISOLATION_SENTINEL_OHM = 65_535_000.0` (`= 0xFFFF × 1000`, UINT16-max
+  multiplied by the inverter's kΩ→Ω scale factor) added to `helper.py`.
+  The sentinel value is now rejected in `health_monitor.py`, `degradation_tracker.py`,
+  and the Modbus coordinator's isolation restore/save path, preventing a spurious
+  maximum reading from being persisted and flattening the isolation history graph.
+- **Orphan-history `wr_`/`wr2_` prefix support** — `orphan_history.py` now
+  recognises legacy entity IDs containing `.wr_` and `.wr2_` (dot-anchored to
+  prevent substring false positives). Suffix-stripping also extended for `wr_` /
+  `wr2_` prefixes. Covers WR2 (second inverter) legacy Plenticore naming.
+- **Grid Feed-In Limiter race condition fix** — `GridFeedInLimiterSwitch` is now
+  pre-instantiated in `__init__.py` before `async_forward_entry_setups` runs.
+  The `switch` platform reads the pre-built instance from `entry_data` rather
+  than constructing a new one. Eliminates the NUMBER/SWITCH platform setup race
+  where the switch entity could be registered before the number entity had set
+  the initial limit, causing the first write to use a stale value.
+
+### Fixed
+- **Worktime outlier false-positive** — Modbus register 144 (`worktime`, lifetime
+  counter in seconds) triggered the global absolute-limit outlier guard at ~4
+  months uptime. Added register-specific override in `OUTLIER_ABS_LIMIT_OVERRIDES`
+  (`144: 10_000_000_000.0`, i.e. > 300 years headroom) so the counter is never
+  rejected as an outlier.
+
+### Tests
+- `Tests/test_battery_soh_calculator.py` — 38 tests: baseline raise threshold,
+  sentinel rejection, OLS accuracy, `denom == 0` edge case, `d_sec <= 0` edge
+  case, store migration v1→v2 (samples dropped, baseline kept), save-failure
+  swallowing, partial-None attribute paths, discharge-only axis verification,
+  projection gate (samples + time window both required), `_opt_float` edge cases.
+- `Tests/test_battery_soh_entities.py` — 8 tests: availability gating on both
+  sensors, value rounding (2 decimal places), `source` attribute propagation,
+  partial-None attribute passthrough, `projection_reliable` flag, factory
+  `create_battery_soh_sensors` unique-ID and coordinator wiring.
+- `Tests/test_health_monitor.py` — added `test_isolation_sentinel_65535000_skipped`.
+- `Tests/test_orphan_history.py` — added `test_scan_orphans_sync_recognizes_wr_prefix`
+  and `test_scan_orphans_sync_wr_anchor_avoids_substring_false_positives`.
+- `Tests/test_modbus_client.py` — added worktime outlier coverage test.
+
+---
+
 ## [2.16.10-rc.4] — 2026-05-19 — 100% Branch Coverage
 
 Final push to reach enforced 100% branch + statement coverage on all measured

@@ -49,6 +49,8 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - **Total Battery Discharge**: Comprehensive `Battery to Home + Battery to Grid` tracking
 - **Battery Efficiency**: Real-time efficiency monitoring (`Output / Input`) in %
 - **Dashboard Ready**: Fully compatible with Home Assistant Energy Dashboard
+- **Battery SoH (Calculated)**: Capacity-ratio State-of-Health derived from Modbus telemetry — independent of the inverter's own SoH register. Baseline self-calibrates to the highest observed work-capacity. Available from the first data point.
+- **Battery SoH 5-Year Projection**: OLS linear regression of battery capacity vs discharge throughput, extrapolated 5 years. Requires ≥ 30 samples over ≥ 30 days before reporting (prevents early noise from looking authoritative). Both sensors are `EntityCategory.DIAGNOSTIC`.
 
 ### 🎛️ **Controls**
 - **Number Entities**: Adjustable power limits and installer settings

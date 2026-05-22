@@ -209,7 +209,29 @@ Hinweis: Verfügbarkeit einzelner Entities hängt von Inverter-Generation/Firmwa
 
 ---
 
-## 5. Diagnose-Entities
+## 5. Berechnete Batterie-SoH-Entities
+
+Diese Entitäten berechnen den Batterie-State-of-Health (SoH) direkt aus
+Modbus-Telemetrie — unabhängig vom inverterinternen SoH-Register, das bei
+manchen Firmware-Versionen unzuverlässig ist. Alle Werte werden lokal persistiert
+und überleben HA-Neustarts. Die Entitäten sind unter `EntityCategory.DIAGNOSTIC`
+eingestuft.
+
+| Entity | Einheit | Beschreibung |
+|---|---|---|
+| **Battery SoH (Calculated)** | % | Aktueller State-of-Health als Verhältnis: `current_capacity_wh / baseline_capacity_wh × 100`. Baseline = höchste je gemessene `battery_work_capacity` (steigt nur, nie fällt). Schutzmechanismen: 0.5 %-Rauschen-Schwelle für Baseline-Anhebung, 10 MWh Sanity-Ceiling gegen Modbus-Ausreißer. Unavailable bis erste Baseline ermittelt ist. Attribute: `source`, `baseline_wh`, `current_wh`, `baseline_age_days`, `total_discharge_kwh`, `total_charge_kwh`, `cycles_observed`, `samples`. |
+| **Battery SoH 5-Year Projection** | % | 5-Jahres-Projektion via OLS-Regression: lineare Steigung von `capacity_wh` über `discharge_kwh` (Industrie-Standard-Achse), hochgerechnet auf 5 Jahre mit der beobachteten jährlichen Durchsatzrate. Unavailable bis Mindestanforderungen erfüllt: ≥ 30 Samples UND ≥ 30 Tage Beobachtungszeitraum zwischen ältestem und neuestem Sample. Attribute: `source`, `degradation_per_kwh` (Wh Kapazitätsverlust pro kWh Entladung), `annual_discharge_kwh`, `samples`, `projection_reliable`. |
+
+### Wichtige Hinweise zur Inbetriebnahme
+
+- **Battery SoH (Calculated)** ist nach dem ersten HA-Start sofort verfügbar (sobald ein gültiger `battery_work_capacity`-Wert empfangen wird).
+- **Battery SoH 5-Year Projection** benötigt ~30 Tage Datensammlung. Das Attribut `projection_reliable = False` zeigt an, dass noch nicht genug Daten vorliegen.
+- Sampling-Intervall: mindestens 3 Stunden zwischen zwei Samples, max. 500 Samples (Rolling Window ≈ 62 Tage).
+- Store-Schema V2: Frühere Installationen mit V1-Schema (charge+discharge als Durchsatz-Achse) verlieren beim Upgrade die Regression-Samples — die Baseline bleibt erhalten.
+
+---
+
+## 6. Diagnose-Entities
 
 | Entity | Werte | Beschreibung |
 |---|---|---|

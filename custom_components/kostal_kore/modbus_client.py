@@ -191,6 +191,12 @@ class KostalModbusClient:
         self._last_exc_code: int | None = None
         self._last_good_values: dict[int, Any] = {}
         self._outlier_policy = outlier_policy
+        self._closing = False
+
+    @property
+    def closing(self) -> bool:
+        """True while disconnect/shutdown is in progress; blocks reconnect."""
+        return self._closing
 
     @property
     def host(self) -> str:
@@ -286,6 +292,10 @@ class KostalModbusClient:
     async def connect(self) -> bool:
         """Establish TCP connection to the inverter."""
         async with self._lock:
+            if self._closing:
+                raise ModbusConnectionError(
+                    f"Modbus client for {self._host} is shutting down"
+                )
             if self.connected:
                 return True
             try:
@@ -311,15 +321,32 @@ class KostalModbusClient:
                 ) from err
 
     async def disconnect(self) -> None:
-        """Close the TCP connection."""
+        """Close the TCP connection (transient — reconnect is still allowed)."""
         async with self._lock:
             if self._client is not None:
                 self._client.close()
                 self._client = None
                 _LOGGER.debug("Modbus TCP disconnected from %s", self._host)
 
+    async def async_shutdown(self) -> None:
+        """Permanently close the client — no further reconnect attempts allowed.
+
+        Use this from coordinator unload/shutdown paths. ``disconnect()`` is the
+        transient variant used internally by ``reconnect()``.
+        """
+        async with self._lock:
+            self._closing = True
+            if self._client is not None:
+                self._client.close()
+                self._client = None
+                _LOGGER.debug("Modbus TCP shut down for %s", self._host)
+
     async def reconnect(self) -> bool:
         """Force-close and re-establish the connection."""
+        if self._closing:
+            raise ModbusConnectionError(
+                f"Modbus client for {self._host} is shutting down"
+            )
         await self.disconnect()
         return await self.connect()
 
@@ -383,6 +410,10 @@ class KostalModbusClient:
                         f"Read failed after {MAX_RETRIES} retries for {register.name}: {err}"
                     ) from err
             except (ModbusConnectionError, PyConnectionException) as err:
+                if self._closing:
+                    raise ModbusConnectionError(
+                        f"Read of {register.name} aborted during shutdown"
+                    ) from err
                 if attempt < MAX_RETRIES:
                     _LOGGER.warning(
                         "Connection lost reading %s, reconnecting (attempt %d/%d)",

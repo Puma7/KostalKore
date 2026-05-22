@@ -1550,7 +1550,14 @@ async def async_setup_entry(
             if _degradation_tracker_obj is not None and soh_val > 0:
                 _degradation_tracker_obj.update_battery_soh(soh_val)
 
-        process_data_update_coordinator.async_add_listener(_feed_rest_soh)
+        # Capture the unsubscribe handle so reloads do not leave a stale
+        # closure listening on the (zombie) coordinator. The closure binds
+        # _health_monitor_obj / _degradation_tracker_obj which belong to
+        # the OLD setup cycle — letting it survive into the next cycle
+        # produced double-feeding (and on slow reloads, log spam from
+        # methods firing on already-torn-down trackers).
+        _unsub_soh = process_data_update_coordinator.async_add_listener(_feed_rest_soh)
+        entry.async_on_unload(_unsub_soh)
 
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(

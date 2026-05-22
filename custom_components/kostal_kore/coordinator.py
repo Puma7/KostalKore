@@ -656,10 +656,10 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         super().__init__(
             hass=hass,
             logger=logger,
-            config_entry=config_entry,
             name=name,
             update_interval=update_interval,
         )
+        self.config_entry = config_entry
         # data ids to poll
         self._fetch: dict[str, list[str]] = defaultdict(list)
         self._fetch_refcount: dict[tuple[str, str], int] = defaultdict(int)
@@ -1230,10 +1230,10 @@ class PlenticoreSelectUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         super().__init__(
             hass=hass,
             logger=logger,
-            config_entry=config_entry,
             name=name,
             update_interval=update_interval,
         )
+        self.config_entry = config_entry
         # CHANGELOG (Codex, 2026-02-05):
         # Fix review finding #1 (select fetch overwrite). Store multiple select
         # entities per module to avoid overwriting previously registered entries.

@@ -38,7 +38,6 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=config_entry,
             name="Kostal KSEM",
             update_interval=update_interval,
         )
