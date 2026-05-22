@@ -412,7 +412,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                         from .notifications import notify_safety_clear
                         hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
-        modbus_coordinator.async_add_listener(_feed_health_data)
+        # Capture the unsubscribe handle and tie it to entry-unload so a
+        # reload does not leak a stale closure into the next setup cycle.
+        # The closure references the OLD health_monitor / battery_soh_calc /
+        # fire_safety; without an explicit unsub the next reload would have
+        # two listeners firing on every coordinator update.
+        _unsub_health = modbus_coordinator.async_add_listener(_feed_health_data)
+        entry.async_on_unload(_unsub_health)
         fire_safety._total_polls = 0
 
     diagnostics_engine = None
