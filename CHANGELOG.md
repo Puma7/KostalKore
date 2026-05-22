@@ -56,6 +56,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apply path reaching the copy engine, backend/recording guards, notification
   formatters, and service registration idempotence.
 
+## [2.16.10-rc.6] — 2026-05-22 — Reload-Loop Hotfix (b8→b9)
+
+### Fixed
+- **Modbus shutdown race during reload** (Cursor PR #35). After upgrading to
+  v2.16.12b8, some installations showed a slow/messy reload sequence that
+  looked like an initialization loop, with `SoC controller stop timed out
+  after 5.0s during unload`, `Connection lost reading … reconnecting` *during*
+  the unload, and `pymodbus: transaction_id mismatch` errors. Root causes:
+  1. `ModbusDataUpdateCoordinator.async_shutdown()` did not call
+     `super().async_shutdown()`, so the DataUpdateCoordinator's scheduled
+     polls kept firing while the TCP client was being disconnected.
+  2. Unload order stopped the SoC controller **before** shutting down Modbus,
+     so `_write_normal()` (the safe-default restore) held the connection busy
+     while background reads tried to use the same socket — 5s timeout.
+  3. `read_register()` attempted a reconnect after `disconnect()` had already
+     started, racing with the teardown.
+  4. The options-update listener fired during the reload window (entry state
+     `SETUP_RETRY` / `SETUP_IN_PROGRESS`) which could cascade into a second
+     reload.
+- **Fixes applied:**
+  - `modbus_coordinator.async_shutdown()` now calls
+    `super().async_shutdown()` first to stop scheduled polls before the TCP
+    disconnect runs. `_async_update_data` raises `UpdateFailed` when the
+    client is closing.
+  - `modbus_client._closing` flag suppresses reconnect attempts during
+    shutdown. `connect()`, `reconnect()`, and the `read_register()` exception
+    path all check this flag.
+  - Unload order changed to **Proxy/MQTT → Modbus shutdown → SoC stop** in
+    both `async_unload_entry` and `_rollback_setup`.
+  - `BatterySocController._write_normal()` skips the register restore if the
+    Modbus client is closing or disconnected (prevents the 5s timeout).
+  - `_async_options_updated` ignores updates unless
+    `entry.state is ConfigEntryState.LOADED` — eliminates the reload-during-
+    setup-retry cascade.
+- **Listener cleanup** (orthogonal): `_feed_health_data` (`__init__.py`) and
+  `_feed_rest_soh` (`sensor.py`) listener subscriptions now capture their
+  unsubscribe handles and tie them to `entry.async_on_unload`. Without this,
+  reloads left stale closures bound to the previous cycle's
+  `health_monitor` / `degradation_tracker` / `battery_soh_calc` objects.
+
+### Tests
+- `Tests/test_modbus_client.py::test_read_skips_reconnect_when_closing` —
+  verifies `read_register` aborts with `ModbusConnectionError("aborted
+  during shutdown")` and does not call `reconnect()` when `_closing=True`.
+- `Tests/test_modbus_integration.py::test_options_updated_ignored_when_entry_not_loaded_state`
+  — verifies the `ConfigEntryState.LOADED` guard.
+
+### Mitigation note for affected users
+- Users who upgraded directly from b7→b8 and experienced the slow setup/loop
+  can downgrade to b7 via HACS as an immediate workaround, then update to
+  b9 once tagged.
+- Running `kostal_plenticore` (legacy) alongside `kostal_kore` increases the
+  chance of seeing the symptom because both clients share the inverter's
+  modest concurrent-connection budget. Disable the legacy integration if
+  only KORE is in use.
+
+---
+
 ## [2.16.10-rc.5] — 2026-05-22 — Battery SoH Calculator, Sentinel Filters, Race Condition Fixes
 
 ### Added
