@@ -124,6 +124,14 @@ class ModbusConnectionError(ModbusClientError):
     """Raised when the Modbus TCP connection fails."""
 
 
+class ModbusShutdownAbort(ModbusConnectionError):
+    """Raised when I/O is cancelled because the client is shutting down.
+
+    Not a real connection failure — coordinators must treat this as a clean
+    stop (return cached data) rather than raising UpdateFailed.
+    """
+
+
 class ModbusReadError(ModbusClientError):
     """Raised when a register read fails."""
 
@@ -411,7 +419,7 @@ class KostalModbusClient:
                     ) from err
             except (ModbusConnectionError, PyConnectionException) as err:
                 if self._closing:
-                    raise ModbusConnectionError(
+                    raise ModbusShutdownAbort(
                         f"Read of {register.name} aborted during shutdown"
                     ) from err
                 if attempt < MAX_RETRIES:
@@ -596,7 +604,7 @@ class KostalModbusClient:
 
         for group in groups:
             if self._closing:
-                raise ModbusConnectionError("Modbus client is shutting down")
+                raise ModbusShutdownAbort("Modbus client is shutting down")
             if len(group) == 1:
                 try:
                     result[group[0].name] = await self.read_register(group[0])
@@ -655,10 +663,10 @@ class KostalModbusClient:
 
     async def _raw_read_inner(self, address: int, count: int) -> bytes:
         if self._closing:
-            raise ModbusConnectionError("Modbus client is shutting down")
+            raise ModbusShutdownAbort("Modbus client is shutting down")
         async with self._lock:
             if self._closing:
-                raise ModbusConnectionError("Modbus client is shutting down")
+                raise ModbusShutdownAbort("Modbus client is shutting down")
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             assert self._client is not None
@@ -723,10 +731,10 @@ class KostalModbusClient:
         self, address: int, data: bytes, count: int
     ) -> None:
         if self._closing:
-            raise ModbusConnectionError("Modbus client is shutting down")
+            raise ModbusShutdownAbort("Modbus client is shutting down")
         async with self._lock:
             if self._closing:
-                raise ModbusConnectionError("Modbus client is shutting down")
+                raise ModbusShutdownAbort("Modbus client is shutting down")
             if not self.connected:
                 raise ModbusConnectionError("Not connected")
             assert self._client is not None

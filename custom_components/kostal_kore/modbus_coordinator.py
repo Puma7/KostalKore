@@ -22,6 +22,7 @@ from .modbus_client import (
     ModbusClientError,
     ModbusConnectionError,
     ModbusPermanentError,
+    ModbusShutdownAbort,
     ModbusTransientError,
 )
 from .modbus_registers import (
@@ -105,6 +106,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._health_monitor: Any | None = None  # injected after init if available
         self._last_persisted_isolation_ohm: float | None = None
+        self._shutting_down = False
 
     @property
     def client(self) -> KostalModbusClient:
@@ -141,12 +143,21 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Stop polling and permanently close the Modbus client."""
+        self._shutting_down = True
         # Close the socket and set _closing BEFORE super().async_shutdown().
         # super() waits for the in-flight refresh task to finish; if we close
         # the client first, blocked pymodbus reads fail fast instead of hitting
         # HA's "Task … refresh … did not complete in time" unload warning.
         await self._client.async_shutdown()
         await super().async_shutdown()
+
+    def _cached_poll_data(self) -> dict[str, Any]:
+        """Return last good poll data for graceful shutdown (no UpdateFailed)."""
+        cached: dict[str, Any] = {}
+        if self.data:
+            cached.update(self.data)
+        cached.update(self._last_slow_data)
+        return cached
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll monitoring registers with per-register error handling.
@@ -156,8 +167,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         - Permanent errors (illegal address) → register skipped permanently
         - If ALL fast-poll registers fail → raise UpdateFailed
         """
-        if self._client.closing:
-            raise UpdateFailed("Modbus coordinator is shutting down")
+        if self._shutting_down or self._client.closing:
+            return self._cached_poll_data()
         if not self._client.connected:
             try:
                 await self._client.connect()
@@ -190,7 +201,11 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             permanent_skip = sum(
                 1 for r in fast_regs if r.address in suppressed_snapshot
             )
+        except ModbusShutdownAbort:
+            return self._cached_poll_data()
         except ModbusConnectionError as err:
+            if self._shutting_down or self._client.closing:
+                return self._cached_poll_data()
             raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
         if fast_errors > 0:

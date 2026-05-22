@@ -94,6 +94,7 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 # Platforms that completed async_forward_entry_setups for this entry.
 KEY_LOADED_PLATFORMS: Final[str] = "_loaded_platforms"
 KEY_SETUP_IN_PROGRESS: Final[str] = "_setup_in_progress"
+KEY_UNLOAD_IN_PROGRESS: Final[str] = "_unload_in_progress"
 
 # Performance constants
 SETUP_TIMEOUT_SECONDS: Final[float] = 90.0
@@ -641,6 +642,12 @@ async def _async_options_updated(
             entry.entry_id,
         )
         return
+    if entry_data.get(KEY_UNLOAD_IN_PROGRESS):
+        _LOGGER.debug(
+            "Options update for %s ignored (unload in progress)",
+            entry.entry_id,
+        )
+        return
     if entry.state is not ConfigEntryState.LOADED:
         _LOGGER.debug(
             "Options update for %s ignored (entry state=%s)",
@@ -689,6 +696,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     # zombies on top of half-stopped ones.
     domain_store = hass.data.get(DOMAIN, {})
     entry_data = domain_store.get(entry.entry_id, {})
+    entry_data[KEY_UNLOAD_IN_PROGRESS] = True
     loaded = _platforms_to_unload(entry_data)
 
     # Stop Modbus consumers before tearing down the shared client/coordinator.
@@ -706,6 +714,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
+        modbus_coordinator._shutting_down = True
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Shutdown poll no longer logged as coordinator error** — During reload,
+  `Read of … aborted during shutdown` was wrapped in `UpdateFailed` and surfaced
+  as `Error fetching Kostal Modbus data` in the UI. Shutdown I/O now raises
+  `ModbusShutdownAbort`; the coordinator returns cached data instead of
+  `UpdateFailed`. Options reloads are ignored while `KEY_UNLOAD_IN_PROGRESS`.
 - **Modbus refresh task unload timeout** — HA logged
   `Task 'Kostal Modbus - WR - refresh' did not complete in time` during
   config-entry unload when a poll was blocked in pymodbus. Shutdown now closes

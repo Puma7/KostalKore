@@ -568,6 +568,24 @@ async def test_options_updated_ignored_during_setup_in_progress(
     mock_reload.assert_not_awaited()
 
 
+async def test_options_updated_ignored_during_unload_in_progress(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Options updates during unload must not trigger another reload."""
+    mock_config_entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        kp_init.KEY_UNLOAD_IN_PROGRESS: True,
+    }
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_not_awaited()
+
+
 async def test_options_updated_skips_reload_when_normalized_options_unchanged(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
