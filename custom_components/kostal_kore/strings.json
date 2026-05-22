@@ -17,8 +17,8 @@
           "ksem_host": "KSEM Host/IP (empty = inverter host)",
           "ksem_port": "KSEM Modbus TCP Port",
           "ksem_unit_id": "KSEM Modbus Unit ID",
-          "lifecycle_file_log_enabled": "Persistent lifecycle log file (survives reload)",
-          "lifecycle_file_log_verbose": "Verbose lifecycle log (setup phases + reload stack traces)"
+          "lifecycle_file_log_enabled": "Persistent lifecycle log on disk (max. 5 days, off by default — saves SD wear)",
+          "lifecycle_file_log_verbose": "Verbose lifecycle log (setup phases + reload stack traces; only when disk log is enabled)"
         }
       },
       "modbus_test": {
@@ -87,8 +87,8 @@
           "ksem_host": "KSEM Host/IP (empty = inverter host)",
           "ksem_port": "KSEM Modbus TCP Port",
           "ksem_unit_id": "KSEM Modbus Unit ID",
-          "lifecycle_file_log_enabled": "Persistent lifecycle log file (survives reload)",
-          "lifecycle_file_log_verbose": "Verbose lifecycle log (setup phases + reload stack traces)"
+          "lifecycle_file_log_enabled": "Persistent lifecycle log on disk (max. 5 days, off by default — saves SD wear)",
+          "lifecycle_file_log_verbose": "Verbose lifecycle log (setup phases + reload stack traces; only when disk log is enabled)"
         }
       },
       "setup_modbus_test": {
