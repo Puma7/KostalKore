@@ -388,7 +388,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 health_monitor.update_from_modbus(data)
                 degradation_tracker.update_from_modbus(data)
                 if battery_soh_calc.update_from_modbus(data):
-                    hass.async_create_task(battery_soh_calc.async_save())
+                    battery_soh_calc.schedule_save()
                 iso_current = health_monitor.isolation.current
                 if iso_current is not None:
                     hass.async_create_task(
@@ -413,14 +413,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                         from .notifications import notify_safety_clear
                         hass.async_create_task(notify_safety_clear(hass, entry_id=entry.entry_id))
 
-        # Capture the unsubscribe handle and tie it to entry-unload so a
-        # reload does not leak a stale closure into the next setup cycle.
-        # The closure references the OLD health_monitor / battery_soh_calc /
-        # fire_safety; without an explicit unsub the next reload would have
-        # two listeners firing on every coordinator update.
-        _unsub_health = modbus_coordinator.async_add_listener(_feed_health_data)
-        entry.async_on_unload(_unsub_health)
+        # Defer subscription until platform setup succeeds (below) so a
+        # ConfigEntryNotReady rollback does not leave a listener firing on a
+        # coordinator that is being shut down.
+        _feed_health_listener = _feed_health_data
         fire_safety._total_polls = 0
+    else:
+        _feed_health_listener = None
 
     diagnostics_engine = None
     longevity_advisor = None
@@ -508,6 +507,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         await _rollback_setup(hass, entry, plenticore)
         _log_setup_metrics(start_time, False)
         return False
+
+    if _feed_health_listener is not None and modbus_coordinator is not None:
+        _unsub_health = modbus_coordinator.async_add_listener(_feed_health_listener)
+        entry.async_on_unload(_unsub_health)
 
     async_register_migration_services(hass)
     async_register_orphan_history_services(hass)

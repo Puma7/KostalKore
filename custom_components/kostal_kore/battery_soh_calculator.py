@@ -15,6 +15,7 @@ own SoH register. Two derived values:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
@@ -49,6 +50,10 @@ _MIN_SAMPLES_FOR_SLOPE: Final = 30
 # look authoritative while being meaningless.
 _MIN_PROJECTION_AGE_S: Final = 30 * 86400.0
 _SECONDS_PER_YEAR: Final = 365.25 * 86400.0
+# Debounce disk writes: baseline calibration can return changed=True on
+# several consecutive Modbus polls; firing async_save() each time adds
+# I/O load during the already-busy reload/setup window.
+_SAVE_DEBOUNCE_S: Final = 60.0
 # Hard sanity ceiling on capacity readings. The Modbus outlier limit lets
 # values up to 10 GWh through (default for FLOAT32 telemetry), but no
 # real home battery is bigger than a few MWh. Without this guard, a one-off
@@ -90,10 +95,12 @@ class BatterySohCalculator:
     """Track battery SoH and degradation slope from Modbus telemetry."""
 
     def __init__(self, hass: HomeAssistant, store_key: str) -> None:
+        self._hass = hass
         self._store: Store[dict[str, Any]] = _BatterySohStore(
             hass, _STORE_VERSION, store_key
         )
         self._loaded: bool = False
+        self._save_task: asyncio.Task[None] | None = None
         self._baseline_capacity_wh: float | None = None
         self._baseline_set_at: float | None = None  # unix ts
         self._current_capacity_wh: float | None = None
@@ -138,6 +145,19 @@ class BatterySohCalculator:
             })
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator save failed: %s", e)
+
+    def schedule_save(self) -> None:
+        """Persist state with debounce (at most one save task in flight)."""
+        if self._save_task is not None and not self._save_task.done():
+            return
+        self._save_task = self._hass.async_create_task(self._debounced_save())
+
+    async def _debounced_save(self) -> None:
+        try:
+            await asyncio.sleep(_SAVE_DEBOUNCE_S)
+            await self.async_save()
+        finally:
+            self._save_task = None
 
     # ---------- Update path ----------
 

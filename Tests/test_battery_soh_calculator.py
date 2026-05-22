@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -302,6 +303,25 @@ async def test_load_handles_corrupt_samples():
         await c.async_load()
 
     assert c.sample_count == 1
+
+
+@pytest.mark.asyncio
+async def test_schedule_save_coalesces_concurrent_calls(hass):
+    """schedule_save must not spawn unbounded save tasks during baseline calibration."""
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(return_value=None)
+        calc = BatterySohCalculator(hass, "k")
+        calc.schedule_save()
+        calc.schedule_save()
+        assert calc._save_task is not None
+        calc._save_task.cancel()
+        try:
+            await calc._save_task
+        except asyncio.CancelledError:
+            pass
 
 
 @pytest.mark.asyncio
