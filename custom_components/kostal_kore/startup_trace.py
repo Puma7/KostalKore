@@ -48,9 +48,15 @@ def entity_unique_id(entity: object) -> str:
 class SetupTrace:
     """Phase-oriented setup logger tied to one config entry."""
 
-    def __init__(self, entry_id: str, title: str) -> None:
+    def __init__(
+        self,
+        entry_id: str,
+        title: str,
+        hass: HomeAssistant | None = None,
+    ) -> None:
         self.entry_id = entry_id
         self.title = title
+        self._hass = hass
         self._t0 = time.monotonic()
         self.current_phase: str | None = None
         self.current_platform: Platform | None = None
@@ -60,6 +66,18 @@ class SetupTrace:
 
     def _prefix(self) -> str:
         return f"{LOG_PREFIX} [{self.title}]"
+
+    def _file_log(self, message: str, *, verbose_only: bool = True) -> None:
+        if self._hass is None:
+            return
+        from .lifecycle_persistent_log import schedule_lifecycle_file_log
+
+        schedule_lifecycle_file_log(
+            self._hass,
+            self.entry_id,
+            f"{self._prefix()} {message}",
+            verbose_only=verbose_only,
+        )
 
     def phase_begin(self, phase: str, **details: object) -> None:
         """Log the start of a setup phase (login, modbus, platform forward, …)."""
@@ -72,6 +90,7 @@ class SetupTrace:
             self._elapsed(),
             extra,
         )
+        self._file_log(f"phase BEGIN {phase}{extra}")
 
     def phase_end(self, phase: str, **details: object) -> None:
         """Log successful completion of a setup phase."""
@@ -85,6 +104,7 @@ class SetupTrace:
         )
         if self.current_phase == phase:
             self.current_phase = None
+        self._file_log(f"phase END {phase}{extra}")
 
     def info(self, msg: str, *args: object) -> None:
         _LOGGER.info("%s " + msg, self._prefix(), *args)
@@ -114,9 +134,16 @@ class SetupTrace:
             self.current_phase,
             self.current_platform,
         )
+        self._file_log(
+            f"reload trigger: {reason} entry_state={entry_state} "
+            f"setup_in_progress={setup_in_progress} unload_in_progress={unload_in_progress} "
+            f"phase={self.current_phase} platform={self.current_platform}",
+            verbose_only=False,
+        )
 
     def log_reload_skipped(self, reason: str) -> None:
         _LOGGER.info("%s reload skipped: %s", self._prefix(), reason)
+        self._file_log(f"reload skipped: {reason}", verbose_only=False)
 
     def log_unload_phase(self, phase: str, *, ok: bool | None = None) -> None:
         suffix = ""
@@ -129,6 +156,26 @@ class SetupTrace:
             self._elapsed(),
             suffix,
         )
+        self._file_log(f"unload {phase}{suffix}", verbose_only=False)
+
+
+def _persist_lifecycle_line(
+    hass: HomeAssistant,
+    entry_id: str,
+    message: str,
+    *,
+    verbose_only: bool = False,
+    include_stack: bool = False,
+) -> None:
+    from .lifecycle_persistent_log import schedule_lifecycle_file_log
+
+    schedule_lifecycle_file_log(
+        hass,
+        entry_id,
+        message,
+        verbose_only=verbose_only,
+        include_stack=include_stack,
+    )
 
 
 def _format_details(details: dict[str, object]) -> str:
@@ -202,6 +249,31 @@ def log_setup_entry_lifecycle(
             unload_n,
             RAPID_CYCLE_THRESHOLD_S,
         )
+    from .lifecycle_persistent_log import log_session_banner
+
+    if setup_n == 1:
+        log_session_banner(
+            hass,
+            entry_id=entry_id,
+            title=title,
+            event="SETUP",
+            detail=f"setup #{setup_n} unload_count={unload_n} entry_state={entry_state}",
+        )
+    else:
+        _persist_lifecycle_line(
+            hass,
+            entry_id,
+            f"========== SETUP #{setup_n} ========== unload_count={unload_n} "
+            f"entry_state={entry_state}",
+        )
+    _persist_lifecycle_line(
+        hass,
+        entry_id,
+        f"[{title}] setup BEGIN #{setup_n} unload_count={unload_n} "
+        f"entry_state={entry_state} secs_since_last_unload="
+        f"{f'{secs_since_unload:.1f}' if secs_since_unload is not None else None} "
+        f"last_reload_source={stats['last_reload_source']!r}",
+    )
 
 
 def log_unload_entry_lifecycle(
@@ -225,6 +297,25 @@ def log_unload_entry_lifecycle(
         entry_state,
         stats["last_reload_source"],
     )
+    from .lifecycle_persistent_log import log_session_banner
+
+    log_session_banner(
+        hass,
+        entry_id=entry_id,
+        title=title,
+        event="UNLOAD",
+        detail=(
+            f"unload #{stats['unload_count']} setup_count={stats['setup_count']} "
+            f"entry_state={entry_state}"
+        ),
+        log_path_info=False,
+    )
+    _persist_lifecycle_line(
+        hass,
+        entry_id,
+        f"[{title}] unload BEGIN #{stats['unload_count']} setup_count={stats['setup_count']} "
+        f"entry_state={entry_state} last_reload_source={stats['last_reload_source']!r}",
+    )
 
 
 def log_reload_skipped_lifecycle(
@@ -247,6 +338,13 @@ def log_reload_skipped_lifecycle(
         stats["setup_count"],
         stats["unload_count"],
         stats["last_reload_source"],
+    )
+    _persist_lifecycle_line(
+        hass,
+        entry_id,
+        f"[{title}] reload SKIPPED: {reason} entry_state={entry_state} "
+        f"setup_count={stats['setup_count']} unload_count={stats['unload_count']} "
+        f"last_reload_source={stats['last_reload_source']!r}",
     )
 
 
@@ -272,6 +370,13 @@ async def async_request_config_reload(
         entry_state,
         stats["setup_count"],
         stats["unload_count"],
+    )
+    _persist_lifecycle_line(
+        hass,
+        entry_id,
+        f"[{display}] reload REQUEST source={source!r} entry_state={entry_state} "
+        f"setup_count={stats['setup_count']} unload_count={stats['unload_count']}",
+        include_stack=True,
     )
     return await hass.config_entries.async_reload(entry_id)
 

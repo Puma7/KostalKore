@@ -288,6 +288,14 @@ async def _export_bundle_for_entry(
         "ha_version": ha_info.get("version", "unknown"),
     }
 
+    from .lifecycle_persistent_log import (
+        lifecycle_log_path,
+        read_lifecycle_log_tail,
+    )
+
+    bundle["lifecycle_log_path"] = str(lifecycle_log_path(hass, entry_id))
+    bundle["lifecycle_log_tail"] = read_lifecycle_log_tail(hass, entry_id)
+
     if health_mon is not None and hasattr(health_mon, "get_health_summary"):
         try:
             bundle["health_summary"] = health_mon.get_health_summary()

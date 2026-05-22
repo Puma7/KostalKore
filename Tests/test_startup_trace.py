@@ -153,6 +153,22 @@ async def test_lifecycle_unload_and_reload_request(
     assert "reload REQUEST source='test:manual'" in caplog.text
 
 
+def test_log_setup_second_cycle_writes_separator(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    from custom_components.kostal_kore.startup_trace import log_setup_entry_lifecycle
+
+    entry_id = "cycle2"
+    with caplog.at_level(logging.INFO):
+        log_setup_entry_lifecycle(
+            hass, entry_id=entry_id, title="WR", entry_state="loaded"
+        )
+        log_setup_entry_lifecycle(
+            hass, entry_id=entry_id, title="WR", entry_state="loaded"
+        )
+    assert "setup BEGIN #2" in caplog.text
+
+
 def test_lifecycle_stats_recovers_from_invalid_store(hass: HomeAssistant) -> None:
     hass.data[DOMAIN] = {"_entry_lifecycle": "not-a-dict"}
     log_unload_entry_lifecycle(

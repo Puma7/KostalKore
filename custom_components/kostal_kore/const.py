@@ -27,6 +27,10 @@ CONF_KSEM_HOST: Final[str] = "ksem_host"
 CONF_KSEM_PORT: Final[str] = "ksem_port"
 CONF_KSEM_UNIT_ID: Final[str] = "ksem_unit_id"
 
+# Persistent lifecycle file log (survives integration reload; under /config/.../logs/)
+CONF_LIFECYCLE_FILE_LOG: Final[str] = "lifecycle_file_log_enabled"
+CONF_LIFECYCLE_FILE_VERBOSE: Final[str] = "lifecycle_file_log_verbose"
+
 DEFAULT_MODBUS_PORT: Final[int] = 1502
 DEFAULT_MODBUS_UNIT_ID: Final[int] = 71
 DEFAULT_MODBUS_PROXY_BIND: Final[str] = "127.0.0.1"
@@ -78,6 +82,8 @@ __all__ = [
     "CONF_KSEM_HOST",
     "CONF_KSEM_PORT",
     "CONF_KSEM_UNIT_ID",
+    "CONF_LIFECYCLE_FILE_LOG",
+    "CONF_LIFECYCLE_FILE_VERBOSE",
     "CONF_MODBUS_ENABLED",
     "CONF_MODBUS_ENDIANNESS",
     "CONF_MODBUS_PORT",

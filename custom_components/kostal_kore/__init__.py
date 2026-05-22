@@ -205,7 +205,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         title=entry.title,
         entry_state=entry.state,
     )
-    trace = SetupTrace(entry.entry_id, entry.title)
+    trace = SetupTrace(entry.entry_id, entry.title, hass)
     trace.phase_begin("setup_entry")
 
     request_scheduler = RequestScheduler()
@@ -830,7 +830,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     entry_data = domain_store.get(entry.entry_id, {})
     trace_obj = entry_data.get("_setup_trace")
     trace = trace_obj if isinstance(trace_obj, SetupTrace) else SetupTrace(
-        entry.entry_id, entry.title
+        entry.entry_id, entry.title, hass
     )
     trace.phase_begin("unload_entry")
     entry_data[KEY_UNLOAD_IN_PROGRESS] = True

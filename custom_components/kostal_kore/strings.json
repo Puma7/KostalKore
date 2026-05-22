@@ -16,7 +16,9 @@
           "ksem_enabled": "Enable external KSEM source",
           "ksem_host": "KSEM Host/IP (empty = inverter host)",
           "ksem_port": "KSEM Modbus TCP Port",
-          "ksem_unit_id": "KSEM Modbus Unit ID"
+          "ksem_unit_id": "KSEM Modbus Unit ID",
+          "lifecycle_file_log_enabled": "Persistent lifecycle log file (survives reload)",
+          "lifecycle_file_log_verbose": "Verbose lifecycle log (setup phases + reload stack traces)"
         }
       },
       "modbus_test": {
@@ -84,7 +86,9 @@
           "ksem_enabled": "Enable external KSEM source",
           "ksem_host": "KSEM Host/IP (empty = inverter host)",
           "ksem_port": "KSEM Modbus TCP Port",
-          "ksem_unit_id": "KSEM Modbus Unit ID"
+          "ksem_unit_id": "KSEM Modbus Unit ID",
+          "lifecycle_file_log_enabled": "Persistent lifecycle log file (survives reload)",
+          "lifecycle_file_log_verbose": "Verbose lifecycle log (setup phases + reload stack traces)"
         }
       },
       "setup_modbus_test": {

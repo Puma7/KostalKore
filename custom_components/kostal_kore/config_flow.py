@@ -25,6 +25,8 @@ from .const import (
     CONF_KSEM_HOST,
     CONF_KSEM_PORT,
     CONF_KSEM_UNIT_ID,
+    CONF_LIFECYCLE_FILE_LOG,
+    CONF_LIFECYCLE_FILE_VERBOSE,
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
@@ -204,6 +206,14 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_KSEM_UNIT_ID,
                 default=defaults.get(CONF_KSEM_UNIT_ID, DEFAULT_KSEM_UNIT_ID),
             ): int,
+            vol.Optional(
+                CONF_LIFECYCLE_FILE_LOG,
+                default=defaults.get(CONF_LIFECYCLE_FILE_LOG, True),
+            ): bool,
+            vol.Optional(
+                CONF_LIFECYCLE_FILE_VERBOSE,
+                default=defaults.get(CONF_LIFECYCLE_FILE_VERBOSE, False),
+            ): bool,
         }
     )
 
@@ -239,6 +249,12 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_KSEM_PORT: int(user_input.get(CONF_KSEM_PORT, DEFAULT_KSEM_PORT)),
         CONF_KSEM_UNIT_ID: int(
             user_input.get(CONF_KSEM_UNIT_ID, DEFAULT_KSEM_UNIT_ID)
+        ),
+        CONF_LIFECYCLE_FILE_LOG: bool(
+            user_input.get(CONF_LIFECYCLE_FILE_LOG, True)
+        ),
+        CONF_LIFECYCLE_FILE_VERBOSE: bool(
+            user_input.get(CONF_LIFECYCLE_FILE_VERBOSE, False)
         ),
     }
 
