@@ -73,6 +73,7 @@ OUTLIER_ABS_LIMIT_OVERRIDES: Final[dict[int, float]] = {
     120: 500_000_000.0,    # isolation_resistance – healthy systems read 50-100 MΩ (up to 500 MΩ)
     577: 100_000_000_000.0,  # generation_energy – lifetime Wh can reach GWh range
     104: 100_000_000.0,    # em_state – status register, not a measurement
+    144: 10_000_000_000.0, # worktime – lifetime counter in seconds (>300 years headroom)
 }
 
 

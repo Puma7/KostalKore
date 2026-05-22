@@ -185,6 +185,9 @@ class BatteryHealthSensor(SensorEntity):
         soh = self._monitor.battery_soh
         cycles = self._monitor.battery_cycles
         return {
+            # The value comes from the REST devices:local:battery[SoH]
+            # register (= BMS-reported SoH); the trend math is local.
+            "source": "bms_via_rest",
             "soh_trend": soh.trend,
             "soh_level": soh.level.value,
             "soh_min": soh.min_value,

@@ -85,7 +85,7 @@ class RequestSchedulerSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], Sen
     """Diagnostic sensor: REST request-scheduler statistics."""
 
     _attr_icon = "mdi:timer-cog-outline"
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_name = "Request Scheduler Requests"
@@ -121,7 +121,7 @@ class ModbusCoordinatorSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], Se
     """Diagnostic sensor: Modbus coordinator poll-phase and error counts."""
 
     _attr_icon = "mdi:lan-pending"
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_name = "Modbus Coordinator Updates"
@@ -164,7 +164,7 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
     _attr_icon = "mdi:scale-balance"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "REST↔Modbus Consistency"
+    _attr_name = "REST/Modbus Consistency"
 
     def __init__(
         self,

@@ -1514,6 +1514,44 @@ async def async_setup_entry(
     if isinstance(_entry_store_pc, dict):
         _entry_store_pc["process_coordinator"] = process_data_update_coordinator
 
+    # Feed REST battery SoH into the health monitor and degradation tracker.
+    # The Modbus path does not expose SoH (no register), so without this
+    # listener the battery_soh trackers stay empty and "Battery Health
+    # (SoH Trend)" / "Battery Health Warning" / "Degradation: Batterie SoH"
+    # remain in state "unknown".
+    _health_monitor_obj = (
+        _entry_store_pc.get("health_monitor")
+        if isinstance(_entry_store_pc, dict) else None
+    )
+    _degradation_tracker_obj = (
+        _entry_store_pc.get("degradation_tracker")
+        if isinstance(_entry_store_pc, dict) else None
+    )
+    if _health_monitor_obj is not None or _degradation_tracker_obj is not None:
+        def _feed_rest_soh() -> None:
+            data = process_data_update_coordinator.data
+            if not data:
+                return
+            battery = data.get("devices:local:battery") or {}
+            soh_raw = battery.get("SoH")
+            if soh_raw is None:
+                return
+            try:
+                soh_val = float(soh_raw)
+            except (TypeError, ValueError):
+                return
+            # NaN/Inf protection: inverter has been seen to emit "nan" on
+            # some firmware versions before the battery is fully calibrated.
+            # Recording NaN into a ParameterTracker poisons trend math.
+            if soh_val != soh_val or soh_val in (float("inf"), float("-inf")):
+                return
+            if _health_monitor_obj is not None:
+                _health_monitor_obj.update_battery_soh(soh_val)
+            if _degradation_tracker_obj is not None and soh_val > 0:
+                _degradation_tracker_obj.update_battery_soh(soh_val)
+
+        process_data_update_coordinator.async_add_listener(_feed_rest_soh)
+
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(
         process_data_update_coordinator: ProcessDataUpdateCoordinator,
@@ -1822,6 +1860,19 @@ async def async_setup_entry(
                 len(obs_entities),
                 [getattr(e, "_attr_unique_id", "?") for e in obs_entities],
             )
+
+    battery_soh_calc = entry_store.get("battery_soh_calc") if entry_store else None
+    if modbus_coordinator is not None and battery_soh_calc is not None:
+        from .battery_soh_entities import create_battery_soh_sensors
+        soh_entities = create_battery_soh_sensors(
+            modbus_coordinator,
+            battery_soh_calc,
+            entry.entry_id,
+            plenticore.device_info,
+        )
+        if soh_entities:
+            async_add_entities(soh_entities)
+            _LOGGER.info("Added %d battery SoH sensors", len(soh_entities))
 
 
 class PlenticoreCalculatedSensor(
