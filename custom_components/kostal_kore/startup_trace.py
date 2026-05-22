@@ -1,7 +1,9 @@
 """Structured logging for config-entry setup, unload, and entity registration.
 
-Filter Home Assistant logs with ``Kostal setup trace`` to follow startup phases,
-per-platform timing, and entity batches during reload loops.
+Filter Home Assistant logs with:
+
+- ``Kostal setup trace`` — startup phases, per-platform timing, entity batches
+- ``Kostal lifecycle`` — setup/unload counts, reload requests, and skip reasons
 """
 
 from __future__ import annotations
@@ -9,14 +11,27 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
+
 LOG_PREFIX: str = "Kostal setup trace"
+LIFECYCLE_PREFIX: str = "Kostal lifecycle"
+KEY_ENTRY_LIFECYCLE: str = "_entry_lifecycle"
+RAPID_CYCLE_THRESHOLD_S: float = 45.0
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class EntryLifecycleStats(TypedDict):
+    setup_count: int
+    unload_count: int
+    last_unload_mono: float | None
+    last_reload_source: str | None
 
 
 def entity_unique_id(entity: object) -> str:
@@ -101,7 +116,7 @@ class SetupTrace:
         )
 
     def log_reload_skipped(self, reason: str) -> None:
-        _LOGGER.debug("%s reload skipped: %s", self._prefix(), reason)
+        _LOGGER.info("%s reload skipped: %s", self._prefix(), reason)
 
     def log_unload_phase(self, phase: str, *, ok: bool | None = None) -> None:
         suffix = ""
@@ -121,6 +136,144 @@ def _format_details(details: dict[str, object]) -> str:
         return ""
     parts = [f"{key}={value!r}" for key, value in details.items()]
     return " (" + ", ".join(parts) + ")"
+
+
+def _lifecycle_stats(hass: HomeAssistant, entry_id: str) -> EntryLifecycleStats:
+    """Persistent per-entry counters (survive unload; keyed under DOMAIN)."""
+    from .const import DOMAIN
+
+    root = hass.data.setdefault(DOMAIN, {})
+    store_raw = root.setdefault(KEY_ENTRY_LIFECYCLE, {})
+    if not isinstance(store_raw, dict):
+        store_raw = {}
+        root[KEY_ENTRY_LIFECYCLE] = store_raw
+    store = cast(dict[str, EntryLifecycleStats], store_raw)
+    stats = store.get(entry_id)
+    if stats is None:
+        stats = EntryLifecycleStats(
+            setup_count=0,
+            unload_count=0,
+            last_unload_mono=None,
+            last_reload_source=None,
+        )
+        store[entry_id] = stats
+    return stats
+
+
+def log_setup_entry_lifecycle(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    title: str,
+    entry_state: object,
+) -> None:
+    """Log setup begin with cycle counters (filter: ``Kostal lifecycle``)."""
+    stats = _lifecycle_stats(hass, entry_id)
+    stats["setup_count"] = stats["setup_count"] + 1
+    setup_n = stats["setup_count"]
+    unload_n = stats["unload_count"]
+    last_unload = stats["last_unload_mono"]
+    secs_since_unload: float | None = None
+    if isinstance(last_unload, (int, float)):
+        secs_since_unload = time.monotonic() - float(last_unload)
+    _LOGGER.info(
+        "%s [%s] setup BEGIN #%d (unload_count=%d, entry_state=%s, "
+        "secs_since_last_unload=%s, last_reload_source=%r)",
+        LIFECYCLE_PREFIX,
+        title,
+        setup_n,
+        unload_n,
+        entry_state,
+        f"{secs_since_unload:.1f}" if secs_since_unload is not None else None,
+        stats["last_reload_source"],
+    )
+    if (
+        secs_since_unload is not None
+        and secs_since_unload < RAPID_CYCLE_THRESHOLD_S
+        and unload_n > 0
+    ):
+        _LOGGER.warning(
+            "%s [%s] RAPID RELOAD CYCLE: setup #%d started %.1fs after unload #%d "
+            "(threshold=%.0fs) — check logs for 'reload REQUEST' or HA/core reload",
+            LIFECYCLE_PREFIX,
+            title,
+            setup_n,
+            secs_since_unload,
+            unload_n,
+            RAPID_CYCLE_THRESHOLD_S,
+        )
+
+
+def log_unload_entry_lifecycle(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    title: str,
+    entry_state: object,
+) -> None:
+    """Log unload begin and stamp time for rapid-cycle detection."""
+    stats = _lifecycle_stats(hass, entry_id)
+    stats["unload_count"] = stats["unload_count"] + 1
+    stats["last_unload_mono"] = time.monotonic()
+    _LOGGER.info(
+        "%s [%s] unload BEGIN #%d (setup_count=%d, entry_state=%s, "
+        "last_reload_source=%r)",
+        LIFECYCLE_PREFIX,
+        title,
+        stats["unload_count"],
+        stats["setup_count"],
+        entry_state,
+        stats["last_reload_source"],
+    )
+
+
+def log_reload_skipped_lifecycle(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    title: str,
+    reason: str,
+    entry_state: object | None = None,
+) -> None:
+    """Log why a reload was not triggered (always INFO)."""
+    stats = _lifecycle_stats(hass, entry_id)
+    _LOGGER.info(
+        "%s [%s] reload SKIPPED: %s (entry_state=%s, setup_count=%d, "
+        "unload_count=%d, last_reload_source=%r)",
+        LIFECYCLE_PREFIX,
+        title,
+        reason,
+        entry_state,
+        stats["setup_count"],
+        stats["unload_count"],
+        stats["last_reload_source"],
+    )
+
+
+async def async_request_config_reload(
+    hass: HomeAssistant,
+    entry_id: str,
+    *,
+    source: str,
+    title: str | None = None,
+) -> bool:
+    """Request a config-entry reload with an explicit, grep-friendly source tag."""
+    stats = _lifecycle_stats(hass, entry_id)
+    stats["last_reload_source"] = source
+    display = title or entry_id
+    entry = hass.config_entries.async_get_entry(entry_id)
+    entry_state = entry.state if entry is not None else "missing"
+    _LOGGER.info(
+        "%s [%s] reload REQUEST source=%r (entry_state=%s, setup_count=%d, "
+        "unload_count=%d)",
+        LIFECYCLE_PREFIX,
+        display,
+        source,
+        entry_state,
+        stats["setup_count"],
+        stats["unload_count"],
+    )
+    return await hass.config_entries.async_reload(entry_id)
 
 
 def log_entity_batch(

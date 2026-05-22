@@ -726,7 +726,14 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
                         title=connection_result.hostname,
                         data=_build_entry_data(auth_input, connection_result),
                     )
-                    await self.hass.config_entries.async_reload(existing_entry.entry_id)
+                    from .startup_trace import async_request_config_reload
+
+                    await async_request_config_reload(
+                        self.hass,
+                        existing_entry.entry_id,
+                        source="config_flow:reauth_successful",
+                        title=existing_entry.title,
+                    )
                 return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
