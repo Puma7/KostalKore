@@ -131,21 +131,17 @@ If you previously used the `kostal_plenticore` integration:
 
 This split flow lets you migrate first, test in production for a few weeks, and only then finalize cleanup.
 
-Detailed step-by-step guide: see `migration.md`.
+Detailed guides:
 
-### Advanced migration services (optional)
+| Document | Audience |
+|----------|----------|
+| [docs/MIGRATION_LEITFADEN.md](docs/MIGRATION_LEITFADEN.md) | **Complete guide (DE)** — buttons, services, orphan history, checklists |
+| [docs/MIGRATION_COMPLETE_EN.md](docs/MIGRATION_COMPLETE_EN.md) | **Complete guide (EN)** |
+| [migration.md](migration.md) | Short step-by-step (EN) |
 
-For users who need additional control from Developer Tools -> Services:
+**Two ways to migrate:** (1) **Device page** — buttons *Import Legacy Plenticore Data* / *Finalize Legacy Cleanup* (beginners). (2) **Developer Tools → Services** — `adopt_legacy_entity_ids`, `copy_legacy_history` (pros, dry-run). The import **button** also merges config/options; the **adopt** service does not — see the full guides before picking a path.
 
-- `kostal_kore.adopt_legacy_entity_ids` (recommended)
-  - Safe registry rebind to keep old/canonical entity IDs.
-  - Supports `dry_run: true` preview before apply.
-- `kostal_kore.copy_legacy_history` (advanced)
-  - Recorder metadata/history merge for old -> new entity IDs.
-  - Supports auto-mapping and optional manual `entity_map`.
-
-Both services are guarded in apply mode with a two-step confirmation code flow
-(persistent notification challenge + final confirmation call).
+Orphan recorder history (long-time KORE users without legacy entry): [docs/migration_orphan_history.md](docs/migration_orphan_history.md).
 
 ## Development
 
@@ -159,7 +155,10 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 
 ### Documentation map
 - `README.md`: User-facing install/setup/operations overview.
-- `migration.md`: Step-by-step migration guide from `kostal_plenticore` to `kostal_kore`.
+- `docs/MIGRATION_LEITFADEN.md` / `docs/MIGRATION_COMPLETE_EN.md`: Full migration paths (UI + services + orphan).
+- `migration.md`: Compact step-by-step migration (EN).
+- `docs/migration_orphan_history.md`: Orphan recorder history (DE).
+- `MIGRATION_ARCHITECTURE.md`: Technical migration limits (maintainers).
 - `PROXY_SETUP.md`: Modbus proxy + MQTT bridge integration examples (evcc/iobroker).
 - `ENTITY_REFERENCE.md`: Entity/register and threshold reference.
 - `LEARNINGS.md`: Consolidated implementation learnings and policy decisions.
