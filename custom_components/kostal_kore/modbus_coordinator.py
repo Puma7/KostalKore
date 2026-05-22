@@ -142,12 +142,15 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # AFTER _health_monitor is injected, not here.
 
     async def async_shutdown(self) -> None:
-        """Stop polling and permanently close the Modbus client."""
+        """Stop polling and permanently close the Modbus client.
+
+        Client shutdown runs FIRST so that any in-progress TCP read sees a
+        closed transport immediately when HA cancels the refresh task.
+        Without this ordering, the pending asyncio.wait_for() inside
+        _handle_refresh_interval can outlive HA's unload timeout, causing
+        repeated FAILED_UNLOAD → setup-retry loops.
+        """
         self._shutting_down = True
-        # Close the socket and set _closing BEFORE super().async_shutdown().
-        # super() waits for the in-flight refresh task to finish; if we close
-        # the client first, blocked pymodbus reads fail fast instead of hitting
-        # HA's "Task … refresh … did not complete in time" unload warning.
         await self._client.async_shutdown()
         await super().async_shutdown()
 
@@ -328,9 +331,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._last_persisted_isolation_ohm == iso_ohm:
             return
-        self._last_persisted_isolation_ohm = iso_ohm
         try:
             await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
+            self._last_persisted_isolation_ohm = iso_ohm
         except Exception as err:
             _LOGGER.debug("Could not persist isolation resistance: %s", err)
 

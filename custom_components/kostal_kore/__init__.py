@@ -534,6 +534,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         "write_audit": write_audit,
     }
     entry_store = hass.data[DOMAIN][entry.entry_id]
+    if battery_soh_calc is not None:
+        entry.async_on_unload(battery_soh_calc.cancel_pending_save)
 
     trace.phase_begin("platform_forward", platforms=[p.value for p in PLATFORMS])
     try:
@@ -810,9 +812,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     trace.info("unload platforms: %s", [p.value for p in loaded])
 
     # Stop Modbus consumers before tearing down the shared client/coordinator.
-    # Order matters: SoC/grid limiter may still write registers; then halt the
-    # coordinator refresh task so HA does not log "refresh did not complete
-    # in time" while platform entities unload.
+    # SoC/grid limiter may still write registers; stopping them first prevents
+    # write attempts against a half-closed client. Then shut the coordinator
+    # down (closes TCP) so HA does not log "refresh did not complete in time"
+    # while platform entities unload.
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
         await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
