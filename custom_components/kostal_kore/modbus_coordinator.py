@@ -104,6 +104,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             f"kostal_kore_isolation_{client.host}_{client.port}",
         )
         self._health_monitor: Any | None = None  # injected after init if available
+        self._last_persisted_isolation_ohm: float | None = None
 
     @property
     def client(self) -> KostalModbusClient:
@@ -306,6 +307,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # safe even on older stores that pre-date the in-line filter.
         if iso_ohm == ISOLATION_SENTINEL_OHM:
             return
+        if self._last_persisted_isolation_ohm == iso_ohm:
+            return
+        self._last_persisted_isolation_ohm = iso_ohm
         try:
             await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
         except Exception as err:

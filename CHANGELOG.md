@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **b9 reload pressure (blind follow-up, PR #37)** — After b9 still showed
+  init-loop-like behaviour on some systems without a fresh log. Likely causes
+  beyond the b8→b9 shutdown fixes: (1) `_feed_health_data` registered before
+  platform setup could fire during `ConfigEntryNotReady` rollback; (2) SoH
+  baseline calibration called `async_save()` on every changed Modbus poll.
+  Fixes: defer health listener until platforms are loaded; debounce SoH store
+  writes (60s); skip redundant isolation-resistance persistence when the
+  value is unchanged.
 - **Bug #11** — PV per-string energy statistics
   (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`) were hardcoded for PV1–PV3
   only. 1-string inverters saw permanent `unavailable` PV2/PV3 entries;
