@@ -198,6 +198,14 @@ async def async_setup_entry(
             )
         )
 
+    from .startup_trace import log_entity_batch
+
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="select",
+        batch="rest_settings",
+        entities=entities,
+    )
     async_add_entities(entities)
 
     # Migrate legacy unique_id format (entry_id + module_id) to the new

@@ -43,5 +43,12 @@ async def async_setup_entry(
         ))
 
     if entities:
+        from .startup_trace import log_entity_batch
+
+        log_entity_batch(
+            entry_title=entry.title,
+            platform="binary_sensor",
+            batch="health_and_fire_safety",
+            entities=entities,
+        )
         async_add_entities(entities)
-        _LOGGER.debug("Added %d health + safety binary sensor entities", len(entities))

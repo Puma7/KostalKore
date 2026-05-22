@@ -16,6 +16,7 @@ from kostal_plenticore.modbus_client import (
     ModbusConnectionError,
     ModbusPermanentError,
     ModbusReadError,
+    ModbusShutdownAbort,
     ModbusTransientError,
     ModbusWriteError,
     _classify_exception_response,
@@ -285,7 +286,7 @@ class TestConnectionLifecycle:
         )
         c._client = mock_client
         with patch.object(c, "reconnect", new_callable=AsyncMock) as reconnect_mock:
-            with pytest.raises(ModbusConnectionError, match="aborted during shutdown"):
+            with pytest.raises(ModbusShutdownAbort, match="aborted during shutdown"):
                 await c.read_register(REG_TOTAL_DC_POWER)
         reconnect_mock.assert_not_awaited()
 

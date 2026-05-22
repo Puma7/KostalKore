@@ -62,4 +62,13 @@ async def async_setup_entry(
     """Set up text entities for the integration."""
     entry_store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     entry_store.setdefault(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, "")
-    async_add_entities([LegacyCleanupConfirmationCodeText(entry)])
+    from .startup_trace import log_entity_batch
+
+    text_entities = [LegacyCleanupConfirmationCodeText(entry)]
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="text",
+        batch="legacy_cleanup",
+        entities=text_entities,
+    )
+    async_add_entities(text_entities)

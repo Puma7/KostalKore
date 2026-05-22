@@ -50,16 +50,16 @@ _MIN_SAMPLES_FOR_SLOPE: Final = 30
 # look authoritative while being meaningless.
 _MIN_PROJECTION_AGE_S: Final = 30 * 86400.0
 _SECONDS_PER_YEAR: Final = 365.25 * 86400.0
+# Debounce disk writes: baseline calibration can return changed=True on
+# several consecutive Modbus polls; firing async_save() each time adds
+# I/O load during the already-busy reload/setup window.
+_SAVE_DEBOUNCE_S: Final = 60.0
 # Hard sanity ceiling on capacity readings. The Modbus outlier limit lets
 # values up to 10 GWh through (default for FLOAT32 telemetry), but no
 # real home battery is bigger than a few MWh. Without this guard, a one-off
 # corrupted Modbus frame could lock in a baseline that no future reading
 # can match, pinning the calculated SoH near zero forever.
 _MAX_PLAUSIBLE_CAPACITY_WH: Final = 10_000_000.0
-# Debounce disk writes: baseline calibration can return changed=True on
-# several consecutive Modbus polls; firing async_save() each time adds
-# I/O load during the already-busy reload/setup window.
-_SAVE_DEBOUNCE_S: Final = 60.0
 
 
 class _BatterySohStore(Store[dict[str, Any]]):

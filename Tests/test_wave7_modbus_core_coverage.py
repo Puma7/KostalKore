@@ -104,6 +104,13 @@ async def test_modbus_coordinator_setup_shutdown_and_capability_cache(hass) -> N
 
     assert shutdown_order == ["client", "super"]
 
+    coordinator._shutting_down = True
+    client.closing = True
+    coordinator.async_set_updated_data({"fast_ok": 10.0})
+    coordinator._last_slow_data = {"slow_ok": 20.0}
+    data = await coordinator._async_update_data()
+    assert data == {"fast_ok": 10.0, "slow_ok": 20.0}
+
     coordinator._device_info = {"sw_version": "1.2.3"}
     assert coordinator._capability_signature() == "1.2.3.4:1502:71:1.2.3"
 

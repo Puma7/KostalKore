@@ -306,6 +306,46 @@ async def test_load_handles_corrupt_samples():
 
 
 @pytest.mark.asyncio
+async def test_debounced_save_calls_async_save(hass):
+    """Debounced save task must eventually persist after the sleep window."""
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        save_mock = AsyncMock(return_value=None)
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = save_mock
+        calc = BatterySohCalculator(hass, "k")
+        with patch(
+            "custom_components.kostal_kore.battery_soh_calculator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            calc.schedule_save()
+            task = calc._save_task
+            assert task is not None
+            await task
+    save_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_schedule_save_coalesces_concurrent_calls(hass):
+    """schedule_save must not spawn unbounded save tasks during baseline calibration."""
+    with patch(
+        "custom_components.kostal_kore.battery_soh_calculator._BatterySohStore"
+    ) as store_cls:
+        store_cls.return_value.async_load = AsyncMock(return_value=None)
+        store_cls.return_value.async_save = AsyncMock(return_value=None)
+        calc = BatterySohCalculator(hass, "k")
+        calc.schedule_save()
+        calc.schedule_save()
+        assert calc._save_task is not None
+        calc._save_task.cancel()
+        try:
+            await calc._save_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
 async def test_save_writes_all_state():
     hass = MagicMock()
     with patch(

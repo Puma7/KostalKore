@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Startup setup trace logging** — Filter logs with `Kostal setup trace` to
+  follow config-entry phases (login, Modbus, KSEM, each platform one-by-one
+  with timing), entity registration batches (process sensors, SoH, health,
+  …) with counts and sample `unique_id`s, reload triggers, and unload steps.
+  Helps pinpoint which platform or entity group correlates with reload loops.
+
 ### Fixed
+- **Shutdown poll no longer logged as coordinator error** — During reload,
+  `Read of … aborted during shutdown` was wrapped in `UpdateFailed` and surfaced
+  as `Error fetching Kostal Modbus data` in the UI. Shutdown I/O now raises
+  `ModbusShutdownAbort`; the coordinator returns cached data instead of
+  `UpdateFailed`. Options reloads are ignored while `KEY_UNLOAD_IN_PROGRESS`.
+- **Modbus refresh task unload timeout** — HA logged
+  `Task 'Kostal Modbus - WR - refresh' did not complete in time` during
+  config-entry unload when a poll was blocked in pymodbus. Shutdown now closes
+  the client (sets `_closing`) before `DataUpdateCoordinator.async_shutdown()`,
+  aborts reads/writes while closing, and stops SoC/proxy/MQTT before platform
+  unload so the refresh task is gone before HA's unload deadline.
+- **b9 reload pressure (blind follow-up, PR #37)** — After b9 still showed
+  init-loop-like behaviour on some systems without a fresh log. Likely causes
+  beyond the b8→b9 shutdown fixes: (1) `_feed_health_data` registered before
+  platform setup could fire during `ConfigEntryNotReady` rollback; (2) SoH
+  baseline calibration called `async_save()` on every changed Modbus poll.
+  Fixes: defer health listener until platforms are loaded; debounce SoH store
+  writes (60s); skip redundant isolation-resistance persistence when the
+  value is unchanged.
 - **Bug #11** — PV per-string energy statistics
   (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`) were hardcoded for PV1–PV3
   only. 1-string inverters saw permanent `unavailable` PV2/PV3 entries;

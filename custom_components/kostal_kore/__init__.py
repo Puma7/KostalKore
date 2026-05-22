@@ -74,6 +74,7 @@ from .orphan_history import (
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
 from .write_audit import WriteAuditLog
+from .startup_trace import SetupTrace
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 # Platforms that completed async_forward_entry_setups for this entry.
 KEY_LOADED_PLATFORMS: Final[str] = "_loaded_platforms"
 KEY_SETUP_IN_PROGRESS: Final[str] = "_setup_in_progress"
+KEY_UNLOAD_IN_PROGRESS: Final[str] = "_unload_in_progress"
 
 # Performance constants
 SETUP_TIMEOUT_SECONDS: Final[float] = 90.0
@@ -128,19 +130,60 @@ def _handle_init_error(err: Exception, operation: str) -> bool:
     return False
 
 
-def _log_setup_metrics(start_time: float, setup_success: bool) -> None:
+def _log_setup_metrics(
+    start_time: float,
+    setup_success: bool,
+    trace: SetupTrace | None = None,
+) -> None:
     """
     Log setup performance metrics.
 
     Args:
         start_time: Setup start time
         setup_success: Whether setup was successful
+        trace: Optional structured trace for correlated log lines
     """
     setup_time = time.time() - start_time
     if setup_success:
-        _LOGGER.info("Kostal Plenticore setup completed in %.2fs", setup_time)
+        if trace is not None:
+            trace.info("setup completed in %.2fs", setup_time)
+        else:
+            _LOGGER.info("Kostal Plenticore setup completed in %.2fs", setup_time)
     else:
-        _LOGGER.warning("Kostal Plenticore setup failed after %.2fs", setup_time)
+        if trace is not None:
+            trace.warning("setup failed after %.2fs", setup_time)
+        else:
+            _LOGGER.warning("Kostal Plenticore setup failed after %.2fs", setup_time)
+
+
+async def _async_forward_platforms_traced(
+    hass: HomeAssistant,
+    entry: PlenticoreConfigEntry,
+    platforms: list[Platform],
+    trace: SetupTrace,
+    *,
+    label: str,
+) -> None:
+    """Forward platforms one at a time so logs show which platform is slow."""
+    for platform in platforms:
+        trace.current_platform = platform
+        platform_t0 = time.monotonic()
+        trace.phase_begin(f"platform:{platform.value}", group=label)
+        try:
+            await hass.config_entries.async_forward_entry_setups(entry, [platform])
+        except Exception:
+            trace.warning(
+                "platform %s failed after %.2fs (phase=%s)",
+                platform.value,
+                time.monotonic() - platform_t0,
+                trace.current_phase,
+            )
+            raise
+        trace.phase_end(
+            f"platform:{platform.value}",
+            duration_s=round(time.monotonic() - platform_t0, 2),
+        )
+        trace.current_platform = None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -> bool:
@@ -150,21 +193,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     and forwards platform setup (sensors, switches, numbers, selects).
     """
     start_time = time.time()
+    trace = SetupTrace(entry.entry_id, entry.title)
+    trace.phase_begin("setup_entry")
 
     request_scheduler = RequestScheduler()
     plenticore = Plenticore(hass, entry)
     plenticore._request_scheduler = request_scheduler
 
+    trace.phase_begin("login")
     try:
         setup_success = await asyncio.wait_for(
             plenticore.async_setup(), timeout=SETUP_TIMEOUT_SECONDS
         )
     except Exception as err:
         setup_success = _handle_init_error(err, "setup")
+    trace.phase_end("login", success=setup_success)
 
     if not setup_success:
         await plenticore.async_unload()
-        _log_setup_metrics(start_time, False)
+        trace.phase_end("setup_entry", success=False)
+        _log_setup_metrics(start_time, False, trace)
         return False
 
     # Clear both legacy (unscoped) and new (entry-scoped) issue IDs so that
@@ -209,10 +257,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         update_interval=timedelta(seconds=EVENT_POLL_INTERVAL_SECONDS),
         plenticore=plenticore,
     )
+    trace.phase_begin("event_coordinator_first_refresh")
     try:
         await event_coordinator.async_config_entry_first_refresh()
     except Exception as event_err:
         _LOGGER.debug("Initial event refresh failed (non-fatal): %s", event_err)
+    trace.phase_end("event_coordinator_first_refresh")
 
     # Optional Modbus TCP setup
     modbus_coordinator = None
@@ -234,6 +284,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         installer_access,
     )
     if entry.options.get(CONF_MODBUS_ENABLED, False):
+        trace.phase_begin("modbus")
         host = entry.data[CONF_HOST]
         port = entry.options.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT)
         unit_id = entry.options.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID)
@@ -257,6 +308,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 "Modbus TCP setup failed: %s (REST API still active)", err
             )
             modbus_coordinator = None
+        trace.phase_end(
+            "modbus",
+            connected=modbus_coordinator is not None,
+        )
 
         # SoC Controller (must be created before MQTT bridge + proxy for arbitration)
         if modbus_coordinator is not None:  # pragma: no cover
@@ -310,6 +365,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
 
     # Optional standalone KSEM source (separate failure domain).
     if entry.options.get(CONF_KSEM_ENABLED, False):  # pragma: no cover
+        trace.phase_begin("ksem")
         ksem_host = str(entry.options.get(CONF_KSEM_HOST, "")).strip() or str(
             entry.data[CONF_HOST]
         )
@@ -349,6 +405,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 ksem_err,
             )
             ksem_coordinator = None
+        trace.phase_end("ksem", active=ksem_coordinator is not None)
 
     # Health + Fire Safety + Degradation monitors
     health_monitor = None
@@ -458,6 +515,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         KEY_SETUP_IN_PROGRESS: True,
         KEY_LOADED_PLATFORMS: [],
+        "_setup_trace": trace,
         "modbus_coordinator": modbus_coordinator,
         "ksem_coordinator": ksem_coordinator,
         "event_coordinator": event_coordinator,
@@ -479,8 +537,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     if battery_soh_calc is not None:
         entry.async_on_unload(battery_soh_calc.cancel_pending_save)
 
+    trace.phase_begin("platform_forward", platforms=[p.value for p in PLATFORMS])
     try:
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        await _async_forward_platforms_traced(
+            hass, entry, list(PLATFORMS), trace, label="main"
+        )
         entry_store[KEY_LOADED_PLATFORMS].extend(PLATFORMS)
         if modbus_coordinator is not None:
             # Modbus platforms expose fire-safety and health binary sensors,
@@ -488,9 +549,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             # the failure as ConfigEntryNotReady so HA can retry, instead of
             # returning True with the binary-sensor platform missing.
             try:
-                await hass.config_entries.async_forward_entry_setups(entry, MODBUS_PLATFORMS)
+                await _async_forward_platforms_traced(
+                    hass, entry, list(MODBUS_PLATFORMS), trace, label="modbus"
+                )
                 entry_store[KEY_LOADED_PLATFORMS].extend(MODBUS_PLATFORMS)
             except Exception as modbus_err:
+                trace.warning(
+                    "Modbus platform setup failed - safety binary sensors missing: %s",
+                    modbus_err,
+                )
                 _LOGGER.error(
                     "Modbus platform setup failed - safety binary sensors will be missing: %s",
                     modbus_err,
@@ -498,16 +565,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 raise ConfigEntryNotReady(
                     f"Modbus platform setup failed: {modbus_err}"
                 ) from modbus_err
+        trace.phase_end("platform_forward")
     except ConfigEntryNotReady:
+        trace.warning(
+            "ConfigEntryNotReady during platform forward (last_platform=%s, phase=%s)",
+            trace.current_platform,
+            trace.current_phase,
+        )
         # Let HA retry; still roll back the runtime objects we started.
         await _rollback_setup(hass, entry, plenticore)
-        _log_setup_metrics(start_time, False)
+        trace.phase_end("setup_entry", success=False, reason="ConfigEntryNotReady")
+        _log_setup_metrics(start_time, False, trace)
         raise
     except Exception as err:
+        trace.warning(
+            "platform forward failed (last_platform=%s): %s",
+            trace.current_platform,
+            err,
+        )
         _handle_init_error(err, "platform setup")
         # Rollback runtime objects that were started before platform forwarding
         await _rollback_setup(hass, entry, plenticore)
-        _log_setup_metrics(start_time, False)
+        trace.phase_end("setup_entry", success=False)
+        _log_setup_metrics(start_time, False, trace)
         return False
 
     if _feed_health_listener is not None and modbus_coordinator is not None:
@@ -524,7 +604,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     from .config_flow import _normalize_options
     entry_store[KEY_SETUP_IN_PROGRESS] = False
     entry_store["_setup_options"] = _normalize_options(entry.options)
-    _log_setup_metrics(start_time, True)
+    trace.phase_end("setup_entry", success=True)
+    _log_setup_metrics(start_time, True, trace)
     return True
 
 
@@ -630,6 +711,7 @@ async def _async_options_updated(
     """
     domain_data = hass.data.get(DOMAIN, {})
     entry_data = domain_data.get(entry.entry_id)
+
     if entry_data is None:
         # Unload/reload gap: hass.data was popped but HA may still emit updates.
         _LOGGER.debug(
@@ -637,18 +719,36 @@ async def _async_options_updated(
             entry.entry_id,
         )
         return
+
+    trace_obj = entry_data.get("_setup_trace")
+    trace = trace_obj if isinstance(trace_obj, SetupTrace) else None
     if entry_data.get(KEY_SETUP_IN_PROGRESS):
-        _LOGGER.debug(
-            "Options update for %s ignored (setup still in progress)",
-            entry.entry_id,
-        )
+        if trace is not None:
+            trace.log_reload_skipped("setup still in progress")
+        else:
+            _LOGGER.debug(
+                "Options update for %s ignored (setup still in progress)",
+                entry.entry_id,
+            )
+        return
+    if entry_data.get(KEY_UNLOAD_IN_PROGRESS):
+        if trace is not None:
+            trace.log_reload_skipped("unload in progress")
+        else:
+            _LOGGER.debug(
+                "Options update for %s ignored (unload in progress)",
+                entry.entry_id,
+            )
         return
     if entry.state is not ConfigEntryState.LOADED:
-        _LOGGER.debug(
-            "Options update for %s ignored (entry state=%s)",
-            entry.entry_id,
-            entry.state,
-        )
+        if trace is not None:
+            trace.log_reload_skipped(f"entry state={entry.state}")
+        else:
+            _LOGGER.debug(
+                "Options update for %s ignored (entry state=%s)",
+                entry.entry_id,
+                entry.state,
+            )
         return
 
     from .config_flow import _normalize_options
@@ -656,12 +756,23 @@ async def _async_options_updated(
     new_options = _normalize_options(entry.options)
     prev = entry_data.get("_setup_options")
     if prev is not None and new_options == prev:
-        _LOGGER.debug(
-            "Config entry %s updated but options unchanged – skipping reload",
-            entry.entry_id,
-        )
+        if trace is not None:
+            trace.log_reload_skipped("options unchanged after normalize")
+        else:
+            _LOGGER.debug(
+                "Config entry %s updated but options unchanged – skipping reload",
+                entry.entry_id,
+            )
         return
-    _LOGGER.info("Options changed for %s, reloading integration", entry.title)
+    if trace is not None:
+        trace.log_reload_trigger(
+            reason="options changed",
+            entry_state=entry.state,
+            setup_in_progress=bool(entry_data.get(KEY_SETUP_IN_PROGRESS)),
+            unload_in_progress=bool(entry_data.get(KEY_UNLOAD_IN_PROGRESS)),
+        )
+    else:
+        _LOGGER.info("Options changed for %s, reloading integration", entry.title)
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -691,13 +802,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     # zombies on top of half-stopped ones.
     domain_store = hass.data.get(DOMAIN, {})
     entry_data = domain_store.get(entry.entry_id, {})
+    trace_obj = entry_data.get("_setup_trace")
+    trace = trace_obj if isinstance(trace_obj, SetupTrace) else SetupTrace(
+        entry.entry_id, entry.title
+    )
+    trace.phase_begin("unload_entry")
+    entry_data[KEY_UNLOAD_IN_PROGRESS] = True
     loaded = _platforms_to_unload(entry_data)
+    trace.info("unload platforms: %s", [p.value for p in loaded])
 
     # Stop Modbus consumers before tearing down the shared client/coordinator.
     # SoC/grid limiter may still write registers; stopping them first prevents
-    # write attempts against a half-closed client.  Then shut the coordinator
+    # write attempts against a half-closed client. Then shut the coordinator
     # down (closes TCP) so HA does not log "refresh did not complete in time"
-    # while the platform entities unload.
+    # while platform entities unload.
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
         await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
@@ -709,13 +827,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step("MQTT bridge stop", mqtt_bridge.async_stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator:
+        modbus_coordinator._shutting_down = True
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
 
     # Tear down entity platforms while coordinators are stopped or idle —
     # entities call coordinator.async_remove_listener during their teardown.
+    trace.log_unload_phase("entity_platforms")
     unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)
+    trace.log_unload_phase("entity_platforms", ok=unload_ok)
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator:  # pragma: no cover
         await _await_cleanup_step(
@@ -763,6 +884,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     )
     from .diagnostics import async_unregister_debug_bundle_service_if_unused
     async_unregister_debug_bundle_service_if_unused(hass)
+    trace.phase_end("unload_entry", success=unload_ok, duration_s=round(time.time() - start_time, 2))
     return unload_ok
 
 

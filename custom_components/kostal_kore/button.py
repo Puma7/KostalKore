@@ -428,5 +428,12 @@ async def async_setup_entry(
                 )
             )
 
+    from .startup_trace import log_entity_batch
+
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="button",
+        batch="all",
+        entities=buttons,
+    )
     async_add_entities(buttons)
-    _LOGGER.debug("Added %d button entities", len(buttons))

@@ -39,6 +39,7 @@ from .coordinator import (
 from .helper import PlenticoreDataFormatter, parse_modbus_exception
 from .ksem_coordinator import KsemDataUpdateCoordinator
 from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .startup_trace import log_entity_batch
 
 from pykoplenti import ApiException
 
@@ -1695,6 +1696,12 @@ async def async_setup_entry(
         dc_string_count,  # Pass discovered string count
     ))
 
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="sensor",
+        batch="process_data",
+        entities=entities,
+    )
     async_add_entities(entities)
 
     # Add calculated sensors
@@ -1711,6 +1718,12 @@ async def async_setup_entry(
         for description in CALCULATED_SENSORS
     ]
     
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="sensor",
+        batch="calculated",
+        entities=calc_entities,
+    )
     async_add_entities(calc_entities)
 
     # Event snapshot sensors (REST /events/latest intelligence)
@@ -1753,8 +1766,13 @@ async def async_setup_entry(
                 icon="mdi:alert-octagon",
             ),
         ]
+        log_entity_batch(
+            entry_title=entry.title,
+            platform="sensor",
+            batch="event_snapshot",
+            entities=event_entities,
+        )
         async_add_entities(event_entities)
-        _LOGGER.info("Added %d event snapshot sensors", len(event_entities))
 
     modbus_coordinator = entry_store.get("modbus_coordinator") if entry_store else None
     if modbus_coordinator is not None:
@@ -1769,10 +1787,13 @@ async def async_setup_entry(
             )
             for key, name, unit in MODBUS_DIAGNOSTIC_SENSORS
         ]
-        async_add_entities(modbus_diag_entities)
-        _LOGGER.info(
-            "Added %d Modbus diagnostics sensors", len(modbus_diag_entities)
+        log_entity_batch(
+            entry_title=entry.title,
+            platform="sensor",
+            batch="modbus_diagnostic",
+            entities=modbus_diag_entities,
         )
+        async_add_entities(modbus_diag_entities)
 
     ksem_coordinator = entry_store.get("ksem_coordinator") if entry_store else None
     if ksem_coordinator is not None:
@@ -1796,8 +1817,13 @@ async def async_setup_entry(
                 process_data_update_coordinator,
             )
         )
+        log_entity_batch(
+            entry_title=entry.title,
+            platform="sensor",
+            batch="ksem",
+            entities=ksem_diag_entities,
+        )
         async_add_entities(ksem_diag_entities)
-        _LOGGER.info("Added %d KSEM sensors", len(ksem_diag_entities))
 
     # Health + Fire Safety monitoring sensors (only when Modbus is active)
     health_monitor = entry_store.get("health_monitor") if entry_store else None
@@ -1808,16 +1834,26 @@ async def async_setup_entry(
             health_monitor, entry.entry_id, plenticore.device_info
         )
         if health_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="health",
+                entities=health_entities,
+            )
             async_add_entities(health_entities)
-            _LOGGER.info("Added %d health monitoring sensors", len(health_entities))
     if fire_safety is not None:
         from .fire_safety_entities import create_fire_safety_sensors
         fire_entities = create_fire_safety_sensors(
             fire_safety, entry.entry_id, plenticore.device_info
         )
         if fire_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="fire_safety",
+                entities=fire_entities,
+            )
             async_add_entities(fire_entities)
-            _LOGGER.info("Added %d fire safety sensors", len(fire_entities))
     diag_engine = entry_store.get("diagnostics_engine") if entry_store else None
     if diag_engine is not None:
         from .diagnostic_entities import create_diagnostic_sensors
@@ -1825,8 +1861,13 @@ async def async_setup_entry(
             diag_engine, entry.entry_id, plenticore.device_info
         )
         if diag_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="diagnostics_engine",
+                entities=diag_entities,
+            )
             async_add_entities(diag_entities)
-            _LOGGER.info("Added %d diagnostic sensors", len(diag_entities))
     degradation = entry_store.get("degradation_tracker") if entry_store else None
     if degradation is not None:
         from .degradation_entities import create_degradation_sensors
@@ -1834,8 +1875,13 @@ async def async_setup_entry(
             degradation, entry.entry_id, plenticore.device_info
         )
         if degrad_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="degradation",
+                entities=degrad_entities,
+            )
             async_add_entities(degrad_entities)
-            _LOGGER.info("Added %d degradation tracking sensors", len(degrad_entities))
 
     longevity = entry_store.get("longevity_advisor") if entry_store else None
     if longevity is not None:
@@ -1844,8 +1890,13 @@ async def async_setup_entry(
             longevity, entry.entry_id, plenticore.device_info
         )
         if longevity_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="longevity",
+                entities=longevity_entities,
+            )
             async_add_entities(longevity_entities)
-            _LOGGER.info("Added %d longevity sensors", len(longevity_entities))
 
     # Observability sensors (write audit, scheduler, coordinator health, consistency)
     write_audit_obj = entry_store.get("write_audit") if entry_store else None
@@ -1861,12 +1912,13 @@ async def async_setup_entry(
             device_info=plenticore.device_info,
         )
         if obs_entities:
-            async_add_entities(obs_entities)
-            _LOGGER.info(
-                "Added %d observability sensors: %s",
-                len(obs_entities),
-                [getattr(e, "_attr_unique_id", "?") for e in obs_entities],
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="observability",
+                entities=obs_entities,
             )
+            async_add_entities(obs_entities)
 
     battery_soh_calc = entry_store.get("battery_soh_calc") if entry_store else None
     if modbus_coordinator is not None and battery_soh_calc is not None:
@@ -1878,8 +1930,13 @@ async def async_setup_entry(
             plenticore.device_info,
         )
         if soh_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="sensor",
+                batch="battery_soh",
+                entities=soh_entities,
+            )
             async_add_entities(soh_entities)
-            _LOGGER.info("Added %d battery SoH sensors", len(soh_entities))
 
 
 class PlenticoreCalculatedSensor(

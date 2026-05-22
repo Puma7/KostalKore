@@ -1550,7 +1550,14 @@ async def async_setup_entry(
     except Exception as registry_err:
         _LOGGER.debug("Entity registry migration skipped: %s", registry_err)
 
-    _LOGGER.debug("About to add %d number entities to Home Assistant", len(entities))
+    from .startup_trace import log_entity_batch
+
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="number",
+        batch="rest_settings",
+        entities=entities,
+    )
     async_add_entities(entities)
     _LOGGER.debug("async_add_entities completed for %d entities", len(entities))
 
@@ -1625,8 +1632,13 @@ async def async_setup_entry(
             modbus_coordinator, entry.entry_id, plenticore.device_info
         )
         if modbus_entities:
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="number",
+                batch="modbus",
+                entities=modbus_entities,
+            )
             async_add_entities(modbus_entities)
-            _LOGGER.info("Added %d Modbus number entities", len(modbus_entities))
 
         # SoC Controller entities (Target SoC, Max Charge/Discharge Power)
         soc_ctrl = modbus_data.get("soc_controller")
@@ -1637,18 +1649,29 @@ async def async_setup_entry(
                 soc_ctrl, entry.entry_id, plenticore.device_info
             )
             if soc_entities:
+                log_entity_batch(
+                    entry_title=entry.title,
+                    platform="number",
+                    batch="soc_controller",
+                    entities=soc_entities,
+                )
                 async_add_entities(soc_entities)
-                _LOGGER.info("Added %d SoC controller entities", len(soc_entities))
 
         # Grid Feed-In Limit number entity
         limiter = modbus_data.get("grid_feedin_limiter")
         if limiter is not None:  # pragma: no cover
             from .grid_charge_limiter import FeedInLimitNumber
 
-            async_add_entities([
+            feedin_entities = [
                 FeedInLimitNumber(limiter, entry.entry_id, plenticore.device_info),
-            ])
-            _LOGGER.info("Added Grid Feed-In Limit number entity")
+            ]
+            log_entity_batch(
+                entry_title=entry.title,
+                platform="number",
+                batch="grid_feedin_limit",
+                entities=feedin_entities,
+            )
+            async_add_entities(feedin_entities)
 
 
 class PlenticoreDataNumber(
