@@ -997,6 +997,14 @@ async def async_setup_entry(
     except Exception as err:
         _LOGGER.error("Failed to create Modbus control entities: %s", err, exc_info=True)
 
+    from .startup_trace import log_entity_batch
+
+    log_entity_batch(
+        entry_title=entry.title,
+        platform="switch",
+        batch="all",
+        entities=entities,
+    )
     # New entities are created with entity_registry_enabled_default=False.
     # Users who deliberately enable entities keep their choice across restarts.
     async_add_entities(entities)

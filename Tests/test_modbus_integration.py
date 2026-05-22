@@ -550,6 +550,64 @@ async def test_options_updated_ignored_when_entry_not_loaded_state(
     mock_reload.assert_not_awaited()
 
 
+async def test_options_updated_skipped_paths_with_setup_trace(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """SetupTrace reload-skip logging (setup/unload/state/unchanged guards)."""
+    from homeassistant.config_entries import ConfigEntryState
+    from custom_components.kostal_kore.config_flow import _normalize_options
+    from custom_components.kostal_kore.startup_trace import SetupTrace
+
+    trace = SetupTrace(mock_config_entry.entry_id, mock_config_entry.title)
+    mock_config_entry.add_to_hass(hass)
+
+    for entry_data in (
+        {kp_init.KEY_SETUP_IN_PROGRESS: True},
+        {kp_init.KEY_UNLOAD_IN_PROGRESS: True},
+        {kp_init.KEY_SETUP_IN_PROGRESS: False},
+        {
+            "_setup_options": _normalize_options(mock_config_entry.options),
+            kp_init.KEY_SETUP_IN_PROGRESS: False,
+        },
+    ):
+        hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+            **entry_data,
+            "_setup_trace": trace,
+        }
+        if kp_init.KEY_SETUP_IN_PROGRESS not in entry_data or not entry_data.get(
+            kp_init.KEY_SETUP_IN_PROGRESS
+        ):
+            mock_config_entry.mock_state(hass, state=ConfigEntryState.SETUP_RETRY)
+        with patch.object(
+            hass.config_entries, "async_reload", AsyncMock(return_value=True)
+        ) as mock_reload:
+            await kp_init._async_options_updated(hass, mock_config_entry)
+        mock_reload.assert_not_awaited()
+
+
+async def test_options_updated_reload_without_trace_uses_legacy_log(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Reload logging falls back when no SetupTrace is stored (upgrade path)."""
+    from homeassistant.config_entries import ConfigEntryState
+
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.mock_state(hass, state=ConfigEntryState.LOADED)
+    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
+        "_setup_options": {"stale": True},
+        kp_init.KEY_SETUP_IN_PROGRESS: False,
+    }
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ) as mock_reload:
+        await kp_init._async_options_updated(hass, mock_config_entry)
+
+    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+
+
 async def test_options_updated_ignored_during_setup_in_progress(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -592,9 +650,11 @@ async def test_options_updated_skips_reload_when_normalized_options_unchanged(
 ) -> None:
     """Normalized option snapshot must match the options-flow output exactly so
     HA-side dict reshuffles don't masquerade as actual user changes."""
+    from homeassistant.config_entries import ConfigEntryState
     from custom_components.kostal_kore.config_flow import _normalize_options
 
     mock_config_entry.add_to_hass(hass)
+    mock_config_entry.mock_state(hass, state=ConfigEntryState.LOADED)
     hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
         "_setup_options": _normalize_options(mock_config_entry.options),
         kp_init.KEY_SETUP_IN_PROGRESS: False,

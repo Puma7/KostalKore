@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Startup setup trace logging** — Filter logs with `Kostal setup trace` to
+  follow config-entry phases (login, Modbus, KSEM, each platform one-by-one
+  with timing), entity registration batches (process sensors, SoH, health,
+  …) with counts and sample `unique_id`s, reload triggers, and unload steps.
+  Helps pinpoint which platform or entity group correlates with reload loops.
+
 ### Fixed
 - **Shutdown poll no longer logged as coordinator error** — During reload,
   `Read of … aborted during shutdown` was wrapped in `UpdateFailed` and surfaced

@@ -205,7 +205,8 @@ async def test_async_unload_entry_cleanup_warning(
         "homeassistant.config_entries.ConfigEntries.async_unload_platforms",
         AsyncMock(return_value=True),
     ), patch(
-        "custom_components.kostal_kore.__init__.time.time", side_effect=[0.0, 10.0, 10.0, 10.0]
+        "custom_components.kostal_kore.__init__.time.time",
+        side_effect=[0.0] + [10.0] * 20,
     ):
         assert await kp_init.async_unload_entry(hass, mock_config_entry) is True
 
