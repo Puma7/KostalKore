@@ -791,10 +791,11 @@ def _log_unload_caller(trace: SetupTrace, entry: PlenticoreConfigEntry) -> None:
         task_name = task.get_name() if task is not None else "?"
     except RuntimeError:  # pragma: no cover - no running loop
         task_name = "?"
+    frames: list[traceback.FrameSummary] = []
     try:
-        frames = traceback.extract_stack()
+        frames = list(traceback.extract_stack())
     except Exception:  # pragma: no cover - defensive
-        frames = []
+        pass
     # Skip our own frame and frames inside this module; keep the next ~10 outer
     # frames so HA's call-chain (config_entries.async_unload → reload → …) is
     # visible. Skip stdlib asyncio internals to keep the log readable.
