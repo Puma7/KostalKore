@@ -141,8 +141,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Stop polling and permanently close the Modbus client."""
-        await super().async_shutdown()
+        # Close the socket and set _closing BEFORE super().async_shutdown().
+        # super() waits for the in-flight refresh task to finish; if we close
+        # the client first, blocked pymodbus reads fail fast instead of hitting
+        # HA's "Task … refresh … did not complete in time" unload warning.
         await self._client.async_shutdown()
+        await super().async_shutdown()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll monitoring registers with per-register error handling.

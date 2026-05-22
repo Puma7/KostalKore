@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Modbus refresh task unload timeout** — HA logged
+  `Task 'Kostal Modbus - WR - refresh' did not complete in time` during
+  config-entry unload when a poll was blocked in pymodbus. Shutdown now closes
+  the client (sets `_closing`) before `DataUpdateCoordinator.async_shutdown()`,
+  aborts reads/writes while closing, and stops SoC/proxy/MQTT before platform
+  unload so the refresh task is gone before HA's unload deadline.
 - **b9 reload pressure (blind follow-up, PR #37)** — After b9 still showed
   init-loop-like behaviour on some systems without a fresh log. Likely causes
   beyond the b8→b9 shutdown fixes: (1) `_feed_health_data` registered before

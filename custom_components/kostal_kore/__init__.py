@@ -592,14 +592,14 @@ async def _rollback_setup(
     # before the platform forward failed must be shut down too — leaving them
     # running creates zombie tasks that keep talking to the inverter until
     # HA is restarted.
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_coordinator = entry_data.get("modbus_coordinator")
     if modbus_coordinator is not None:
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
-    soc_ctrl = entry_data.get("soc_controller")
-    if soc_ctrl:
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator is not None:
         await _await_cleanup_step(
@@ -691,10 +691,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     entry_data = domain_store.get(entry.entry_id, {})
     loaded = _platforms_to_unload(entry_data)
 
-    # Tear down entity platforms first, while coordinators are still alive —
-    # entities call coordinator.async_remove_listener during their teardown.
-    unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)
-
+    # Stop Modbus consumers before tearing down the shared client/coordinator.
+    # Order matters: SoC/grid limiter may still write registers; then halt the
+    # coordinator refresh task so HA does not log "refresh did not complete
+    # in time" while platform entities unload.
+    soc_ctrl = entry_data.get("soc_controller")
+    if soc_ctrl:  # pragma: no cover
+        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
         await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())
@@ -706,9 +709,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
         await _await_cleanup_step(
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
-    soc_ctrl = entry_data.get("soc_controller")
-    if soc_ctrl:  # pragma: no cover
-        await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
+
+    # Tear down entity platforms while coordinators are stopped or idle —
+    # entities call coordinator.async_remove_listener during their teardown.
+    unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)
     ksem_coordinator = entry_data.get("ksem_coordinator")
     if ksem_coordinator:  # pragma: no cover
         await _await_cleanup_step(
