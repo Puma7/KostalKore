@@ -319,7 +319,14 @@ async def adopt_legacy_entity_ids(
     if not dry_run:
         await hass.config_entries.async_unload(source_entry.entry_id)
         result.unloaded_source_entry = True
-        await hass.config_entries.async_reload(target_entry.entry_id)
+        from .startup_trace import async_request_config_reload
+
+        await async_request_config_reload(
+            hass,
+            target_entry.entry_id,
+            source="legacy_migration:adopt_legacy_entity_ids",
+            title=target_entry.title,
+        )
 
     _LOGGER.info(
         "Legacy entity-id adopt %s: source=%s target=%s entities=%d devices=%d duplicates_removed=%d",
@@ -441,7 +448,14 @@ async def migrate_legacy_plenticore_entry(
     else:
         await hass.config_entries.async_unload(source_entry.entry_id)
         result.unloaded_source_entry = True
-    await hass.config_entries.async_reload(target_entry.entry_id)
+    from .startup_trace import async_request_config_reload
+
+    await async_request_config_reload(
+        hass,
+        target_entry.entry_id,
+        source="legacy_migration:migrate_legacy_plenticore_entry",
+        title=target_entry.title,
+    )
 
     if result.migrated_entities == 0:
         _LOGGER.warning(
@@ -515,7 +529,14 @@ async def finalize_legacy_cleanup(
     result.removed_source_entry = (
         hass.config_entries.async_get_entry(source_entry.entry_id) is None
     )
-    await hass.config_entries.async_reload(target_entry.entry_id)
+    from .startup_trace import async_request_config_reload
+
+    await async_request_config_reload(
+        hass,
+        target_entry.entry_id,
+        source="legacy_migration:finalize_legacy_cleanup",
+        title=target_entry.title,
+    )
 
     _LOGGER.info(
         "Legacy cleanup complete: source=%s target=%s removed_entities=%d detached_devices=%d removed_source=%s",

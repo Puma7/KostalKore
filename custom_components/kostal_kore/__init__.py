@@ -75,7 +75,13 @@ from .orphan_history import (
 from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
 from .write_audit import WriteAuditLog
-from .startup_trace import SetupTrace
+from .startup_trace import (
+    SetupTrace,
+    async_request_config_reload,
+    log_reload_skipped_lifecycle,
+    log_setup_entry_lifecycle,
+    log_unload_entry_lifecycle,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,6 +200,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     and forwards platform setup (sensors, switches, numbers, selects).
     """
     start_time = time.time()
+    log_setup_entry_lifecycle(
+        hass,
+        entry_id=entry.entry_id,
+        title=entry.title,
+        entry_state=entry.state,
+    )
     trace = SetupTrace(entry.entry_id, entry.title)
     trace.phase_begin("setup_entry")
 
@@ -715,9 +727,12 @@ async def _async_options_updated(
 
     if entry_data is None:
         # Unload/reload gap: hass.data was popped but HA may still emit updates.
-        _LOGGER.debug(
-            "Options update for %s ignored (integration not loaded)",
-            entry.entry_id,
+        log_reload_skipped_lifecycle(
+            hass,
+            entry_id=entry.entry_id,
+            title=entry.title,
+            reason="integration not loaded (unload/reload gap)",
+            entry_state=entry.state,
         )
         return
 
@@ -774,7 +789,12 @@ async def _async_options_updated(
         )
     else:
         _LOGGER.info("Options changed for %s, reloading integration", entry.title)
-    await hass.config_entries.async_reload(entry.entry_id)
+    await async_request_config_reload(
+        hass,
+        entry.entry_id,
+        source="options_listener:options changed",
+        title=entry.title,
+    )
 
 
 def _log_unload_caller(trace: SetupTrace, entry: PlenticoreConfigEntry) -> None:
@@ -840,6 +860,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     # if platform unload fails HA will retry — leaving the store intact lets
     # the retry find the same coordinator instances instead of building new
     # zombies on top of half-stopped ones.
+    log_unload_entry_lifecycle(
+        hass,
+        entry_id=entry.entry_id,
+        title=entry.title,
+        entry_state=entry.state,
+    )
     domain_store = hass.data.get(DOMAIN, {})
     entry_data = domain_store.get(entry.entry_id, {})
     trace_obj = entry_data.get("_setup_trace")
