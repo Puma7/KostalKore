@@ -139,9 +139,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # AFTER _health_monitor is injected, not here.
 
     async def async_shutdown(self) -> None:
-        """Stop polling and disconnect from the inverter."""
+        """Stop polling and permanently close the Modbus client."""
         await super().async_shutdown()
-        await self._client.disconnect()
+        await self._client.async_shutdown()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll monitoring registers with per-register error handling.

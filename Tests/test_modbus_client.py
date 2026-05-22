@@ -237,11 +237,41 @@ class TestConnectionLifecycle:
 
     @pytest.mark.asyncio
     async def test_disconnect(self) -> None:
+        # disconnect() is transient — it must NOT set _closing, otherwise
+        # reconnect() (which calls disconnect+connect) would deadlock itself.
         c = KostalModbusClient("192.168.1.100")
         c._client = MagicMock()
         await c.disconnect()
         assert c._client is None
+        assert c.closing is False
+
+    @pytest.mark.asyncio
+    async def test_async_shutdown_sets_closing(self) -> None:
+        c = KostalModbusClient("192.168.1.100")
+        c._client = MagicMock()
+        await c.async_shutdown()
+        assert c._client is None
         assert c.closing is True
+
+    @pytest.mark.asyncio
+    async def test_reconnect_after_transient_disconnect_succeeds(self) -> None:
+        """Regression: reconnect() must not deadlock via the _closing flag.
+
+        Previously disconnect() set _closing=True, so the subsequent connect()
+        inside reconnect() raised ModbusConnectionError — permanently breaking
+        the Modbus client after any transient network blip.
+        """
+        c = KostalModbusClient("192.168.1.100")
+        c._client = MagicMock()
+        with patch(
+            "custom_components.kostal_kore.modbus_client.AsyncModbusTcpClient"
+        ) as client_cls:
+            new_client = AsyncMock()
+            new_client.connected = True
+            new_client.connect = AsyncMock(return_value=True)
+            client_cls.return_value = new_client
+            assert await c.reconnect() is True
+        assert c.closing is False
 
     @pytest.mark.asyncio
     async def test_read_skips_reconnect_when_closing(self) -> None:
@@ -513,7 +543,6 @@ class TestAdditionalClientCoverage:
 
         c = KostalModbusClient("127.0.0.1")
         await c.disconnect()  # no client branch
-        c._closing = False  # reset so reconnect() is not blocked by shutdown guard
 
         with patch.object(c, "disconnect", AsyncMock()) as disconnect_mock, patch.object(
             c,

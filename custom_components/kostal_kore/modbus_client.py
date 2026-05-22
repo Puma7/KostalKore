@@ -298,7 +298,6 @@ class KostalModbusClient:
                 )
             if self.connected:
                 return True
-            self._closing = False
             try:
                 self._client = AsyncModbusTcpClient(
                     host=self._host,
@@ -322,13 +321,25 @@ class KostalModbusClient:
                 ) from err
 
     async def disconnect(self) -> None:
-        """Close the TCP connection."""
+        """Close the TCP connection (transient — reconnect is still allowed)."""
+        async with self._lock:
+            if self._client is not None:
+                self._client.close()
+                self._client = None
+                _LOGGER.debug("Modbus TCP disconnected from %s", self._host)
+
+    async def async_shutdown(self) -> None:
+        """Permanently close the client — no further reconnect attempts allowed.
+
+        Use this from coordinator unload/shutdown paths. ``disconnect()`` is the
+        transient variant used internally by ``reconnect()``.
+        """
         async with self._lock:
             self._closing = True
             if self._client is not None:
                 self._client.close()
                 self._client = None
-                _LOGGER.debug("Modbus TCP disconnected from %s", self._host)
+                _LOGGER.debug("Modbus TCP shut down for %s", self._host)
 
     async def reconnect(self) -> bool:
         """Force-close and re-establish the connection."""
