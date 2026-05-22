@@ -60,10 +60,6 @@ _SAVE_DEBOUNCE_S: Final = 60.0
 # corrupted Modbus frame could lock in a baseline that no future reading
 # can match, pinning the calculated SoH near zero forever.
 _MAX_PLAUSIBLE_CAPACITY_WH: Final = 10_000_000.0
-# Debounce disk writes: baseline calibration can return changed=True on
-# several consecutive Modbus polls; firing async_save() each time adds
-# I/O load during the already-busy reload/setup window.
-_SAVE_DEBOUNCE_S: Final = 60.0
 
 
 class _BatterySohStore(Store[dict[str, Any]]):
