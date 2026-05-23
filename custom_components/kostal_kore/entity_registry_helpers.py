@@ -24,6 +24,26 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def _resolve_expected_registry_entry(
+    entries_by_unique_id: dict[str, RegistryEntry],
+    canonical_uid: str,
+    fallback_unique_ids: set[str],
+) -> RegistryEntry | None:
+    """Return the registry row to treat as canonical for a critical number.
+
+    Prefer ``canonical_uid``; otherwise the first match among legacy or forced
+    unique IDs in sorted order so selection is stable across restarts.
+    """
+    entry = entries_by_unique_id.get(canonical_uid)
+    if entry is not None:
+        return entry
+    for uid in sorted(fallback_unique_ids - {canonical_uid}):
+        entry = entries_by_unique_id.get(uid)
+        if entry is not None:
+            return entry
+    return None
+
+
 def update_disabled_by_if_changed(
     entity_registry: er.EntityRegistry,
     entity_id: str,
@@ -68,20 +88,17 @@ def migrate_number_registry_before_add(
             canonical_uid = (
                 f"{entry.entry_id}_{description.module_id}_{description.data_id}"
             )
-            expected_unique_ids_set = {
-                canonical_uid,
+            fallback_unique_ids = {
                 f"{entry.entry_id}_{description.module_id}_"
                 f"{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
             }
-            expected_unique_ids_set.update(
-                forced_map.get(description.data_id, set())
-            )
+            fallback_unique_ids.update(forced_map.get(description.data_id, set()))
 
-            expected_entry: RegistryEntry | None = None
-            for uid in expected_unique_ids_set:
-                if uid in entries_by_unique_id:
-                    expected_entry = entries_by_unique_id[uid]
-                    break
+            expected_entry = _resolve_expected_registry_entry(
+                entries_by_unique_id,
+                canonical_uid,
+                fallback_unique_ids,
+            )
 
             if expected_entry is not None:
                 update_disabled_by_if_changed(
@@ -154,18 +171,20 @@ def ensure_critical_numbers_enabled(
             if description.data_id not in FORCE_CREATE_KEYS:
                 continue
 
-            expected_unique_ids = {
-                f"{entry.entry_id}_{description.module_id}_{description.data_id}",
+            canonical_uid = (
+                f"{entry.entry_id}_{description.module_id}_{description.data_id}"
+            )
+            fallback_unique_ids = {
                 f"{entry.entry_id}_{description.module_id}_"
                 f"{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
             }
-            expected_unique_ids.update(forced_map.get(description.data_id, set()))
+            fallback_unique_ids.update(forced_map.get(description.data_id, set()))
 
-            expected_entry: RegistryEntry | None = None
-            for uid in expected_unique_ids:
-                if uid in entries_by_unique_id:
-                    expected_entry = entries_by_unique_id[uid]
-                    break
+            expected_entry = _resolve_expected_registry_entry(
+                entries_by_unique_id,
+                canonical_uid,
+                fallback_unique_ids,
+            )
 
             if expected_entry is not None:
                 update_disabled_by_if_changed(

@@ -15,6 +15,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.kostal_kore import entity_registry_helpers as erh
 from dataclasses import replace
 
+from custom_components.kostal_kore.const_ids import ModuleId, SettingId
 from custom_components.kostal_kore.number import FORCE_CREATE_KEYS, NUMBER_SETTINGS_DATA
 from custom_components.kostal_kore.select import SELECT_SETTINGS_DATA
 
@@ -46,6 +47,39 @@ def test_update_disabled_by_if_changed_unchanged() -> None:
         is False
     )
     registry.async_update_entity.assert_not_called()
+
+
+def test_resolve_expected_registry_entry_prefers_canonical() -> None:
+    canonical = MagicMock(entity_id="number.canonical")
+    legacy = MagicMock(entity_id="number.legacy")
+    by_uid = {
+        "entry_mod_Battery:MinSoc": legacy,
+        "entry_mod_Battery:MinSocRel": canonical,
+    }
+    resolved = erh._resolve_expected_registry_entry(
+        by_uid,
+        "entry_mod_Battery:MinSocRel",
+        {"entry_mod_Battery:MinSoc"},
+    )
+    assert resolved is canonical
+
+
+def test_resolve_expected_registry_entry_sorted_fallback() -> None:
+    first = MagicMock(entity_id="number.first")
+    by_uid = {"uid_a": first}
+    resolved = erh._resolve_expected_registry_entry(
+        by_uid,
+        "uid_missing",
+        {"uid_b", "uid_a"},
+    )
+    assert resolved is first
+
+
+def test_resolve_expected_registry_entry_none() -> None:
+    assert (
+        erh._resolve_expected_registry_entry({}, "missing", {"also_missing"})
+        is None
+    )
 
 
 def test_update_disabled_by_if_changed_updates() -> None:
@@ -133,6 +167,52 @@ async def test_migrate_number_registry_exception(hass: HomeAssistant) -> None:
         side_effect=RuntimeError("boom"),
     ):
         erh.migrate_number_registry_before_add(hass, entry)
+
+
+@pytest.mark.asyncio
+async def test_ensure_critical_numbers_prefers_canonical_over_legacy_alias(
+    hass: HomeAssistant,
+) -> None:
+    """Legacy MinSoc sorts before MinSocRel; canonical must still win."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    entity_registry = er.async_get(hass)
+    soc_rel_desc = next(
+        d for d in NUMBER_SETTINGS_DATA if d.data_id == SettingId.BATTERY_MIN_SOC_REL
+    )
+    canonical_uid = (
+        f"{entry.entry_id}_{ModuleId.DEVICES_LOCAL}_{SettingId.BATTERY_MIN_SOC_REL}"
+    )
+    legacy_uid = (
+        f"{entry.entry_id}_{ModuleId.DEVICES_LOCAL}_{SettingId.BATTERY_MIN_SOC}"
+    )
+    assert legacy_uid < canonical_uid
+
+    legacy_entity = entity_registry.async_get_or_create(
+        "number",
+        "kostal_kore",
+        legacy_uid,
+        config_entry=entry,
+        original_name=f"scb {soc_rel_desc.name}",
+        disabled_by=None,
+    )
+    canonical_entity = entity_registry.async_get_or_create(
+        "number",
+        "kostal_kore",
+        canonical_uid,
+        config_entry=entry,
+        original_name=f"scb {soc_rel_desc.name}",
+        disabled_by=None,
+    )
+
+    erh.ensure_critical_numbers_enabled(hass, entry)
+
+    legacy_entry = entity_registry.async_get(legacy_entity.entity_id)
+    canonical_entry = entity_registry.async_get(canonical_entity.entity_id)
+    assert legacy_entry is not None
+    assert canonical_entry is not None
+    assert legacy_entry.disabled_by == RegistryEntryDisabler.INTEGRATION
+    assert canonical_entry.disabled_by is None
 
 
 @pytest.mark.asyncio
