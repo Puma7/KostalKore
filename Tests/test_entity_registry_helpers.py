@@ -516,10 +516,7 @@ async def test_log_unload_caller_ha_reload_warning(
     ]
     mock_config_entry.add_to_hass(hass)
     with (
-        patch(
-            "custom_components.kostal_kore.__init__.traceback.extract_stack",
-            return_value=frames,
-        ),
+        patch.object(kp_init.traceback, "extract_stack", return_value=frames),
         patch.object(trace, "warning") as warn_mock,
     ):
         kp_init._log_unload_caller(hass, trace, mock_config_entry)
@@ -529,6 +526,46 @@ async def test_log_unload_caller_ha_reload_warning(
 
     stats = _lifecycle_stats(hass, mock_config_entry.entry_id)
     assert stats["last_reload_source"] == "ha_core:entity_registry_disabled_by"
+
+
+@pytest.mark.asyncio
+async def test_log_unload_caller_preserves_kore_reload_source(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    import importlib
+
+    kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
+    from custom_components.kostal_kore.startup_trace import SetupTrace, mark_lifecycle_reload_source
+
+    mock_config_entry.add_to_hass(hass)
+    mark_lifecycle_reload_source(
+        hass,
+        mock_config_entry.entry_id,
+        "options_listener:options changed",
+    )
+    trace = SetupTrace(mock_config_entry.entry_id, mock_config_entry.title)
+    frames = [
+        FrameSummary(
+            "/usr/src/homeassistant/homeassistant/config_entries.py",
+            100,
+            "_async_handle_reload",
+        ),
+        FrameSummary(__file__, 50, "test_log_unload_caller_preserves_kore_reload_source"),
+    ]
+    with (
+        patch.object(kp_init.traceback, "extract_stack", return_value=frames),
+        patch.object(trace, "warning") as warn_mock,
+        patch.object(trace, "info") as info_mock,
+    ):
+        kp_init._log_unload_caller(hass, trace, mock_config_entry)
+    warn_mock.assert_not_called()
+    info_mock.assert_called_once()
+    assert "KORE source already set" in info_mock.call_args[0][0]
+    from custom_components.kostal_kore.startup_trace import _lifecycle_stats
+
+    stats = _lifecycle_stats(hass, mock_config_entry.entry_id)
+    assert stats["last_reload_source"] == "options_listener:options changed"
 
 
 @pytest.mark.asyncio

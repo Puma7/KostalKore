@@ -835,21 +835,33 @@ def _log_unload_caller(
             break
     stack_text = " <- ".join(interesting) if interesting else "<empty>"
     if "_async_handle_reload" in stack_text or "async_schedule_reload" in stack_text:
-        from .startup_trace import mark_lifecycle_reload_source
+        from .startup_trace import _lifecycle_stats, mark_lifecycle_reload_source
 
-        mark_lifecycle_reload_source(
-            hass,
-            entry.entry_id,
-            "ha_core:entity_registry_disabled_by",
-        )
-        trace.warning(
-            "unload triggered by HA Core reload (not KORE): task=%s, "
-            "entry_state=%s — likely entity_registry disabled_by change "
-            "(30s debounce). caller_stack=%s",
-            task_name,
-            entry.state,
-            stack_text,
-        )
+        stats = _lifecycle_stats(hass, entry.entry_id)
+        kore_source = stats.get("last_reload_source")
+        if kore_source is None:
+            mark_lifecycle_reload_source(
+                hass,
+                entry.entry_id,
+                "ha_core:entity_registry_disabled_by",
+            )
+            trace.warning(
+                "unload triggered by HA Core reload (not KORE): task=%s, "
+                "entry_state=%s — likely entity_registry disabled_by change "
+                "(30s debounce). caller_stack=%s",
+                task_name,
+                entry.state,
+                stack_text,
+            )
+        else:
+            trace.info(
+                "unload via HA Core reload chain (KORE source already set): "
+                "task=%s, entry_state=%s, reload_source=%r, caller_stack=%s",
+                task_name,
+                entry.state,
+                kore_source,
+                stack_text,
+            )
     else:
         trace.info(
             "unload triggered (task=%s, entry_state=%s, caller_stack=%s)",

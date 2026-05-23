@@ -84,7 +84,7 @@ def _resolve_expected_registry_entry(
     entry = entries_by_unique_id.get(canonical_uid)
     if entry is not None:
         return entry
-    for uid in sorted(fallback_unique_ids - {canonical_uid}):
+    for uid in sorted(fallback_unique_ids):
         entry = entries_by_unique_id.get(uid)
         if entry is not None:
             return entry

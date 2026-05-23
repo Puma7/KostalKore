@@ -240,10 +240,7 @@ async def test_log_unload_caller_with_short_stack(
     trace = SetupTrace(mock_config_entry.entry_id, mock_config_entry.title)
     # extract_stack returns the real stack (deep in pytest), but with a tiny
     # synthetic stack the helper must still produce a log line and not break.
-    with patch(
-        "custom_components.kostal_kore.__init__.traceback.extract_stack",
-        return_value=[],
-    ):
+    with patch.object(kp_init.traceback, "extract_stack", return_value=[]):
         kp_init._log_unload_caller(hass, trace, mock_config_entry)
 
 

@@ -218,11 +218,22 @@ def log_setup_entry_lifecycle(
 
 
 def mark_lifecycle_reload_source(
-    hass: HomeAssistant, entry_id: str, source: str
-) -> None:
-    """Record who triggered the most recent unload/reload (for lifecycle diagnostics)."""
+    hass: HomeAssistant,
+    entry_id: str,
+    source: str,
+    *,
+    only_if_unset: bool = False,
+) -> bool:
+    """Record who triggered the most recent unload/reload (for lifecycle diagnostics).
+
+    Returns True when the source was stored. With ``only_if_unset``, an existing
+    value (e.g. set by ``async_request_config_reload``) is left unchanged.
+    """
     stats = _lifecycle_stats(hass, entry_id)
+    if only_if_unset and stats.get("last_reload_source") is not None:
+        return False
     stats["last_reload_source"] = source
+    return True
 
 
 def log_unload_entry_lifecycle(
