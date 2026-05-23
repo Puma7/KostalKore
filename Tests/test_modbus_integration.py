@@ -498,195 +498,25 @@ async def test_unload_entry_with_modbus_data(
     mock_coord.async_shutdown.assert_called_once()
 
 
-async def test_options_updated_triggers_reload(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_plenticore_client,
-) -> None:
-    """Changing options reloads the config entry."""
-    mock_config_entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-
-    await kp_init._async_options_updated(hass, mock_config_entry)
-    await hass.async_block_till_done()
-
-
-async def test_options_updated_ignored_when_entry_not_loaded(
+async def test_options_flow_schedules_reload_without_modbus(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """Options updates that arrive during the unload/reload gap (no entry_data
-    in hass.data) must NOT trigger another reload — that was the self-sustaining
-    loop behind the "Config entry was never loaded!" binary_sensor errors."""
+    """Options flow (Modbus disabled path) schedules a reload so options take
+    effect immediately on HA versions that do not auto-reload on async_create_entry."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
     mock_config_entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow.hass = hass
 
     with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
+        hass.config_entries, "async_schedule_reload"
+    ) as mock_schedule:
+        result = await flow.async_step_init(user_input={"modbus_enabled": False})
 
-    mock_reload.assert_not_awaited()
-
-
-async def test_options_updated_ignored_when_entry_not_loaded_state(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    """Options updates while HA is loading/reloading the entry must not reload."""
-    from homeassistant.config_entries import ConfigEntryState
-
-    mock_config_entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-        kp_init.KEY_SETUP_IN_PROGRESS: False,
-    }
-    mock_config_entry.mock_state(hass, state=ConfigEntryState.SETUP_RETRY)
-
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
-
-    mock_reload.assert_not_awaited()
-
-
-async def test_options_updated_skipped_paths_with_setup_trace(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    """SetupTrace reload-skip logging (setup/unload/state/unchanged guards)."""
-    from homeassistant.config_entries import ConfigEntryState
-    from custom_components.kostal_kore.config_flow import _normalize_options
-    from custom_components.kostal_kore.startup_trace import SetupTrace
-
-    trace = SetupTrace(mock_config_entry.entry_id, mock_config_entry.title)
-    mock_config_entry.add_to_hass(hass)
-
-    for entry_data in (
-        {kp_init.KEY_SETUP_IN_PROGRESS: True},
-        {kp_init.KEY_UNLOAD_IN_PROGRESS: True},
-        {kp_init.KEY_SETUP_IN_PROGRESS: False},
-        {
-            "_setup_options": _normalize_options(mock_config_entry.options),
-            kp_init.KEY_SETUP_IN_PROGRESS: False,
-        },
-    ):
-        hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-            **entry_data,
-            "_setup_trace": trace,
-        }
-        if kp_init.KEY_SETUP_IN_PROGRESS not in entry_data or not entry_data.get(
-            kp_init.KEY_SETUP_IN_PROGRESS
-        ):
-            mock_config_entry.mock_state(hass, state=ConfigEntryState.SETUP_RETRY)
-        with patch.object(
-            hass.config_entries, "async_reload", AsyncMock(return_value=True)
-        ) as mock_reload:
-            await kp_init._async_options_updated(hass, mock_config_entry)
-        mock_reload.assert_not_awaited()
-
-
-async def test_options_updated_reload_without_trace_uses_legacy_log(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    """Reload logging falls back when no SetupTrace is stored (upgrade path)."""
-    from homeassistant.config_entries import ConfigEntryState
-
-    mock_config_entry.add_to_hass(hass)
-    mock_config_entry.mock_state(hass, state=ConfigEntryState.LOADED)
-    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-        "_setup_options": {"stale": True},
-        kp_init.KEY_SETUP_IN_PROGRESS: False,
-    }
-
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
-
-    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
-
-
-async def test_options_updated_ignored_during_setup_in_progress(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    """Options updates while async_setup_entry is still running must not reload."""
-    mock_config_entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-        kp_init.KEY_SETUP_IN_PROGRESS: True,
-    }
-
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
-
-    mock_reload.assert_not_awaited()
-
-
-async def test_options_updated_ignored_during_unload_in_progress(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    """Options updates during unload must not trigger another reload."""
-    mock_config_entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-        kp_init.KEY_UNLOAD_IN_PROGRESS: True,
-    }
-
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
-
-    mock_reload.assert_not_awaited()
-
-
-async def test_options_updated_skips_reload_when_normalized_options_unchanged(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-) -> None:
-    """Normalized option snapshot must match the options-flow output exactly so
-    HA-side dict reshuffles don't masquerade as actual user changes."""
-    from homeassistant.config_entries import ConfigEntryState
-    from custom_components.kostal_kore.config_flow import _normalize_options
-
-    mock_config_entry.add_to_hass(hass)
-    mock_config_entry.mock_state(hass, state=ConfigEntryState.LOADED)
-    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = {
-        "_setup_options": _normalize_options(mock_config_entry.options),
-        kp_init.KEY_SETUP_IN_PROGRESS: False,
-    }
-
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
-
-    mock_reload.assert_not_awaited()
-
-
-async def test_options_updated_changed_options_triggers_reload(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_plenticore_client,
-) -> None:
-    """_async_options_updated reloads when options actually changed (branch 480→486)."""
-    mock_config_entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
-
-    # Overwrite the saved snapshot so it looks like options changed.
-    hass.data[DOMAIN][mock_config_entry.entry_id]["_setup_options"] = {"stale": True}
-
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as mock_reload:
-        await kp_init._async_options_updated(hass, mock_config_entry)
-
-    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+    mock_schedule.assert_called_once_with(mock_config_entry.entry_id)
+    assert result["type"] == "create_entry"
 
 
 async def test_modbus_platform_setup_fails_raises_config_entry_not_ready(
