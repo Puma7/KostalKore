@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
 from typing import Any, Final
 
@@ -27,12 +27,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity_registry import RegistryEntryDisabler
-from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_INSTALLER_ACCESS,
     CONF_SERVICE_CODE,
+    DATA_KEY_FORCED_NUMBER_UNIQUE_IDS,
     DOMAIN,
     AddConfigEntryEntitiesCallback,
 )
@@ -69,6 +68,16 @@ LEGACY_SETTING_REVERSE: Final[dict[str, str]] = {
 # Number entity constants
 DEFAULT_ENTITY_REGISTRY_ENABLED: Final[bool] = False
 CONFIG_ENTITY_CATEGORY: Final[EntityCategory] = EntityCategory.CONFIG
+
+# Force-created even when settings API omits them (permissions / hidden keys).
+FORCE_CREATE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "Battery:MinHomeConsumption",
+        "Battery:MinHomeComsumption",
+        "Battery:MinSocRel",
+        "Battery:MinSoc",
+    }
+)
 
 
 def _normalize_translation_key(key: str) -> str:
@@ -1319,15 +1328,6 @@ async def async_setup_entry(
     forced_unique_ids_by_data_id: dict[str, set[str]] = {}
     forced_fetch_pairs: set[tuple[str, str]] = set()
 
-    # Special handling: Force create specific battery settings that might be hidden
-    # due to permissions but are accessible if requested directly.
-    FORCE_CREATE_KEYS = {
-        "Battery:MinHomeConsumption",
-        "Battery:MinHomeComsumption",
-        "Battery:MinSocRel",
-        "Battery:MinSoc",
-    }
-
     for description in NUMBER_SETTINGS_DATA:
         setting_data = None
         description_to_use = description
@@ -1443,6 +1443,12 @@ async def async_setup_entry(
             )
             continue
 
+        if description_to_use.data_id in FORCE_CREATE_KEYS:
+            description_to_use = replace(
+                description_to_use,
+                entity_registry_enabled_default=True,
+            )
+
         entities.append(
             PlenticoreDataNumber(
                 settings_data_update_coordinator,
@@ -1479,76 +1485,17 @@ async def async_setup_entry(
             ", ".join(battery_settings_skipped),
         )
 
-    # Re-enable critical battery numbers if they were disabled by earlier versions.
-    try:
-        entity_registry = er.async_get(hass)
-        entries = list(
-            er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-        )
-        entries_by_unique_id = {e.unique_id: e for e in entries if e.unique_id}
+    from .entity_registry_helpers import migrate_number_registry_before_add
 
-        for description in NUMBER_SETTINGS_DATA:
-            if description.data_id not in FORCE_CREATE_KEYS:
-                continue
+    migrate_number_registry_before_add(
+        hass,
+        entry,
+        forced_unique_ids_by_data_id=forced_unique_ids_by_data_id,
+    )
 
-            canonical_uid = f"{entry.entry_id}_{description.module_id}_{description.data_id}"
-            expected_unique_ids_set = {
-                canonical_uid,
-                f"{entry.entry_id}_{description.module_id}_{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
-            }
-            expected_unique_ids_set.update(
-                forced_unique_ids_by_data_id.get(description.data_id, set())
-            )
-            expected_unique_ids = sorted(expected_unique_ids_set)
-
-            expected_entry = None
-            for uid in expected_unique_ids:
-                if uid in entries_by_unique_id:
-                    expected_entry = entries_by_unique_id[uid]
-                    break
-
-            # Always enable the expected entry if it exists.
-            if expected_entry:
-                entity_registry.async_update_entity(
-                    expected_entry.entity_id, disabled_by=None
-                )
-
-            for entity_entry in entries:
-                if entity_entry.domain != "number":
-                    continue
-
-                # Match by original name when possible.
-                original_name = entity_entry.original_name
-                name = description.name
-                if not isinstance(original_name, str) or not isinstance(name, str):
-                    continue
-                name_matches = original_name.endswith(name)
-                if not name_matches:
-                    continue
-
-                if expected_entry:
-                    if entity_entry.entity_id != expected_entry.entity_id:
-                        _LOGGER.debug(
-                            "Found duplicate number entity %s (canonical: %s)",
-                            entity_entry.entity_id,
-                            expected_entry.entity_id,
-                        )
-                    continue
-
-                # No expected entry yet: migrate the matching old entry.
-                _LOGGER.info(
-                    "Migrating number unique_id for %s to %s",
-                    entity_entry.entity_id,
-                    canonical_uid,
-                )
-                entity_registry.async_update_entity(
-                    entity_entry.entity_id,
-                    new_unique_id=canonical_uid,
-                    disabled_by=None,
-                )
-                expected_entry = entity_entry
-    except Exception as registry_err:
-        _LOGGER.debug("Entity registry migration skipped: %s", registry_err)
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        entry_data[DATA_KEY_FORCED_NUMBER_UNIQUE_IDS] = forced_unique_ids_by_data_id
 
     from .startup_trace import log_entity_batch
 
@@ -1561,62 +1508,8 @@ async def async_setup_entry(
     async_add_entities(entities)
     _LOGGER.debug("async_add_entities completed for %d entities", len(entities))
 
-    # Post-registration safety pass to ensure critical battery numbers are enabled.
-    async def _ensure_critical_numbers_enabled(_now: datetime) -> None:
-        try:
-            entity_registry = er.async_get(hass)
-            entries = list(
-                er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-            )
-            entries_by_unique_id = {e.unique_id: e for e in entries if e.unique_id}
-
-            for description in NUMBER_SETTINGS_DATA:
-                if description.data_id not in FORCE_CREATE_KEYS:
-                    continue
-
-                expected_unique_ids = {
-                    f"{entry.entry_id}_{description.module_id}_{description.data_id}",
-                    f"{entry.entry_id}_{description.module_id}_{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
-                }
-                expected_unique_ids.update(
-                    forced_unique_ids_by_data_id.get(description.data_id, set())
-                )
-
-                expected_entry = None
-                for uid in expected_unique_ids:
-                    if uid in entries_by_unique_id:
-                        expected_entry = entries_by_unique_id[uid]
-                        break
-
-                if expected_entry:
-                    entity_registry.async_update_entity(
-                        expected_entry.entity_id, disabled_by=None
-                    )
-
-                for entity_entry in entries:
-                    if entity_entry.domain != "number":
-                        continue
-                    original_name = entity_entry.original_name
-                    name = description.name
-                    if not isinstance(original_name, str) or not isinstance(name, str):
-                        continue
-                    name_matches = original_name.endswith(name)
-                    if not name_matches:
-                        continue
-                    if (
-                        expected_entry
-                        and entity_entry.entity_id != expected_entry.entity_id
-                    ):
-                        entity_registry.async_update_entity(
-                            entity_entry.entity_id,
-                            disabled_by=RegistryEntryDisabler.INTEGRATION,
-                        )
-        except Exception as registry_err:
-            _LOGGER.debug(
-                "Post-registration entity registry update skipped: %s", registry_err
-            )
-
-    async_call_later(hass, 10.0, _ensure_critical_numbers_enabled)
+    # Deferred registry maintenance runs once from async_setup_entry (__init__.py)
+    # after all platforms finish, avoiding HA's 30s entity-registry reload timer.
 
     # Ensure coordinator fetches critical values even if entity is disabled initially.
     for module_id, data_id in forced_fetch_pairs:

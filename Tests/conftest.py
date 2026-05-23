@@ -209,7 +209,6 @@ def immediate_async_call_later(hass: HomeAssistant):
     with (
         patch("homeassistant.helpers.event.async_call_later", side_effect=_immediate_call_later),
         patch("custom_components.kostal_kore.coordinator.async_call_later", side_effect=_immediate_call_later),
-        patch("custom_components.kostal_kore.number.async_call_later", side_effect=_immediate_call_later),
     ):
         yield
 
