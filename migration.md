@@ -2,6 +2,11 @@
 
 This guide explains how to migrate from the old `kostal_plenticore` integration to `kostal_kore` without losing entity history.
 
+> **Full documentation (all paths: device buttons, services, orphan history)**  
+> - English: [docs/MIGRATION_COMPLETE_EN.md](docs/MIGRATION_COMPLETE_EN.md)  
+> - Deutsch: [docs/MIGRATION_LEITFADEN.md](docs/MIGRATION_LEITFADEN.md)  
+> Use the comprehensive guides for beginners through pros; this file is a compact walkthrough.
+
 ## Short answer first
 
 Yes, you can move to KOSTAL KORE now.
@@ -67,6 +72,15 @@ What this does:
 - Removes the old `kostal_plenticore` config entry.
 
 After that, you can remove old repository remnants from HACS if still present.
+
+## Two ways to run migration (quick map)
+
+| If you prefer… | Use… | Covers |
+|----------------|------|--------|
+| **Device UI** (beginners) | Buttons on the KORE device page | Full import + finalize cleanup |
+| **Developer Tools → Services** (pros) | `adopt_legacy_entity_ids`, `copy_legacy_history` | Registry rebind, history merge, dry-run previews |
+
+The **Import Legacy Plenticore Data** button runs a **full** migration (config + registry). The `adopt_legacy_entity_ids` service only touches the **registry** — not the same operation. See [docs/MIGRATION_COMPLETE_EN.md](docs/MIGRATION_COMPLETE_EN.md).
 
 ## Advanced: Recorder history copy/merge
 
