@@ -82,6 +82,29 @@ def test_resolve_expected_registry_entry_none() -> None:
     )
 
 
+def test_collect_related_data_ids_includes_reverse_alias() -> None:
+    related = erh._collect_related_data_ids(SettingId.BATTERY_MIN_SOC)
+    assert SettingId.BATTERY_MIN_SOC_REL in related
+
+
+def test_collect_forced_unique_ids_merges_legacy_map_keys() -> None:
+    typo_uid = "entry_mod_Battery:MinHomeComsumption"
+    canonical_uid = "entry_mod_Battery:MinHomeConsumption"
+    forced_map = {
+        SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY: {typo_uid},
+    }
+    merged = erh._collect_forced_unique_ids(
+        forced_map, SettingId.BATTERY_MIN_HOME_CONSUMPTION
+    )
+    assert merged == {typo_uid}
+
+    fallbacks = erh._collect_fallback_unique_ids(
+        _mock_entry(), ModuleId.DEVICES_LOCAL, SettingId.BATTERY_MIN_HOME_CONSUMPTION, forced_map
+    )
+    assert typo_uid in fallbacks
+    assert canonical_uid not in fallbacks
+
+
 def test_update_disabled_by_if_changed_updates() -> None:
     registry = MagicMock()
     entry = MagicMock(disabled_by=RegistryEntryDisabler.INTEGRATION)
@@ -167,6 +190,55 @@ async def test_migrate_number_registry_exception(hass: HomeAssistant) -> None:
         side_effect=RuntimeError("boom"),
     ):
         erh.migrate_number_registry_before_add(hass, entry)
+
+
+@pytest.mark.asyncio
+async def test_ensure_critical_numbers_uses_forced_map_under_typo_key_only(
+    hass: HomeAssistant,
+) -> None:
+    """Forced IDs stored only under legacy map key still resolve the canonical row."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    entity_registry = er.async_get(hass)
+    typo_uid = (
+        f"{entry.entry_id}_{ModuleId.DEVICES_LOCAL}_"
+        f"{SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY}"
+    )
+    canonical_uid = (
+        f"{entry.entry_id}_{ModuleId.DEVICES_LOCAL}_"
+        f"{SettingId.BATTERY_MIN_HOME_CONSUMPTION}"
+    )
+    home_desc = next(
+        d
+        for d in NUMBER_SETTINGS_DATA
+        if d.data_id == SettingId.BATTERY_MIN_HOME_CONSUMPTION
+    )
+    canonical_entity = entity_registry.async_get_or_create(
+        "number",
+        "kostal_kore",
+        canonical_uid,
+        config_entry=entry,
+        original_name=f"scb {home_desc.name}",
+        disabled_by=None,
+    )
+    typo_entity = entity_registry.async_get_or_create(
+        "number",
+        "kostal_kore",
+        typo_uid,
+        config_entry=entry,
+        original_name=f"scb {home_desc.name}",
+        disabled_by=None,
+    )
+    forced_map = {SettingId.BATTERY_MIN_HOME_CONSUMPTION_LEGACY: {typo_uid}}
+
+    erh.ensure_critical_numbers_enabled(hass, entry, forced_unique_ids_by_data_id=forced_map)
+
+    canonical_entry = entity_registry.async_get(canonical_entity.entity_id)
+    typo_entry = entity_registry.async_get(typo_entity.entity_id)
+    assert canonical_entry is not None
+    assert typo_entry is not None
+    assert canonical_entry.disabled_by is None
+    assert typo_entry.disabled_by == RegistryEntryDisabler.INTEGRATION
 
 
 @pytest.mark.asyncio
@@ -314,7 +386,7 @@ async def test_migrate_select_registry_old_only(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.asyncio
-async def test_migrate_select_update_failure(
+async def test_migrate_select_update_failure_keeps_duplicate_row(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:
     entry = _mock_entry()
@@ -324,15 +396,19 @@ async def test_migrate_select_update_failure(
     old_unique_id = f"{entry.entry_id}_{description.module_id}"
     new_unique_id = f"{entry.entry_id}_{description.module_id}_{description.key}"
 
-    entity_registry.async_get_or_create(
+    old_entity = entity_registry.async_get_or_create(
         "select", "kostal_kore", old_unique_id, config_entry=entry
     )
-    entity_registry.async_get_or_create(
+    new_entity = entity_registry.async_get_or_create(
         "select", "kostal_kore", new_unique_id, config_entry=entry
     )
 
+    call_count = 0
+
     def flaky_update(entity_id: str, **kwargs: object) -> None:
-        if kwargs.get("new_unique_id"):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2 and kwargs.get("new_unique_id") == new_unique_id:
             raise ValueError("cannot migrate")
         er.EntityRegistry.async_update_entity(entity_registry, entity_id, **kwargs)
 
@@ -342,6 +418,8 @@ async def test_migrate_select_update_failure(
     ):
         erh.migrate_select_registry_after_add(hass, entry)
     assert "Select migration: failed to update" in caplog.text
+    assert entity_registry.async_get(old_entity.entity_id) is not None
+    assert entity_registry.async_get(new_entity.entity_id) is not None
 
 
 @pytest.mark.asyncio
@@ -419,6 +497,7 @@ async def test_migrate_number_skips_invalid_name_types(hass: HomeAssistant) -> N
 
 @pytest.mark.asyncio
 async def test_log_unload_caller_ha_reload_warning(
+    hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
     import importlib
@@ -435,6 +514,7 @@ async def test_log_unload_caller_ha_reload_warning(
         ),
         FrameSummary(__file__, 50, "test_log_unload_caller_ha_reload_warning"),
     ]
+    mock_config_entry.add_to_hass(hass)
     with (
         patch(
             "custom_components.kostal_kore.__init__.traceback.extract_stack",
@@ -442,9 +522,13 @@ async def test_log_unload_caller_ha_reload_warning(
         ),
         patch.object(trace, "warning") as warn_mock,
     ):
-        kp_init._log_unload_caller(trace, mock_config_entry)
+        kp_init._log_unload_caller(hass, trace, mock_config_entry)
     warn_mock.assert_called_once()
     assert "HA Core reload" in warn_mock.call_args[0][0]
+    from custom_components.kostal_kore.startup_trace import _lifecycle_stats
+
+    stats = _lifecycle_stats(hass, mock_config_entry.entry_id)
+    assert stats["last_reload_source"] == "ha_core:entity_registry_disabled_by"
 
 
 @pytest.mark.asyncio

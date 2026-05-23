@@ -118,6 +118,29 @@ def test_lifecycle_setup_and_rapid_cycle_warning(
     assert "RAPID RELOAD CYCLE" in caplog.text
 
 
+def test_lifecycle_expected_ha_reload_is_info_not_rapid_warning(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    entry_id = "test_entry_ha_reload"
+    hass.data.setdefault(DOMAIN, {})["_entry_lifecycle"] = {
+        entry_id: {
+            "setup_count": 0,
+            "unload_count": 1,
+            "last_unload_mono": time.monotonic(),
+            "last_reload_source": "ha_core:entity_registry_disabled_by",
+        }
+    }
+    with caplog.at_level(logging.INFO):
+        log_setup_entry_lifecycle(
+            hass,
+            entry_id=entry_id,
+            title="WR",
+            entry_state="loaded",
+        )
+    assert "RAPID RELOAD CYCLE" not in caplog.text
+    assert "expected HA entity-registry reload" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_lifecycle_unload_and_reload_request(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture

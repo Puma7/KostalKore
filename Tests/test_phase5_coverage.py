@@ -231,6 +231,7 @@ async def test_async_unload_entry_unload_platforms_false(
 
 @pytest.mark.asyncio
 async def test_log_unload_caller_with_short_stack(
+    hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
     """_log_unload_caller must not crash when frames are exhausted (< 10 interesting)."""
@@ -243,7 +244,7 @@ async def test_log_unload_caller_with_short_stack(
         "custom_components.kostal_kore.__init__.traceback.extract_stack",
         return_value=[],
     ):
-        kp_init._log_unload_caller(trace, mock_config_entry)
+        kp_init._log_unload_caller(hass, trace, mock_config_entry)
 
 
 @pytest.mark.asyncio

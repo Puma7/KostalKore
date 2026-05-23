@@ -800,7 +800,9 @@ async def _async_options_updated(
     )
 
 
-def _log_unload_caller(trace: SetupTrace, entry: PlenticoreConfigEntry) -> None:
+def _log_unload_caller(
+    hass: HomeAssistant, trace: SetupTrace, entry: PlenticoreConfigEntry
+) -> None:
     """Log who triggered async_unload_entry so reload loops can be diagnosed.
 
     HA does not log who calls async_unload internally — by the time we land
@@ -833,6 +835,13 @@ def _log_unload_caller(trace: SetupTrace, entry: PlenticoreConfigEntry) -> None:
             break
     stack_text = " <- ".join(interesting) if interesting else "<empty>"
     if "_async_handle_reload" in stack_text or "async_schedule_reload" in stack_text:
+        from .startup_trace import mark_lifecycle_reload_source
+
+        mark_lifecycle_reload_source(
+            hass,
+            entry.entry_id,
+            "ha_core:entity_registry_disabled_by",
+        )
         trace.warning(
             "unload triggered by HA Core reload (not KORE): task=%s, "
             "entry_state=%s — likely entity_registry disabled_by change "
@@ -889,7 +898,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     # Capture caller context so the reload loop can be traced back to its
     # actual trigger (options update, entity-registry change, service call,
     # external reload) instead of just seeing "unload begins" every cycle.
-    _log_unload_caller(trace, entry)
+    _log_unload_caller(hass, trace, entry)
     trace.phase_begin("unload_entry")
     entry_data[KEY_UNLOAD_IN_PROGRESS] = True
     loaded = _platforms_to_unload(entry_data)

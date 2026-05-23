@@ -24,6 +24,53 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def _collect_related_data_ids(data_id: str) -> set[str]:
+    """Return canonical and legacy setting IDs for one logical FORCE_CREATE number."""
+    from .number import LEGACY_SETTING_ALIASES, LEGACY_SETTING_REVERSE  # noqa: PLC0415
+
+    related = {data_id}
+    alias = LEGACY_SETTING_ALIASES.get(data_id)
+    if alias is not None:
+        related.add(alias)
+    reverse = LEGACY_SETTING_REVERSE.get(data_id)
+    if reverse is not None:
+        related.add(reverse)
+    return related
+
+
+def _number_unique_id(entry: ConfigEntry, module_id: str, data_id: str) -> str:
+    return f"{entry.entry_id}_{module_id}_{data_id}"
+
+
+def _collect_forced_unique_ids(
+    forced_map: dict[str, set[str]],
+    data_id: str,
+) -> set[str]:
+    """Merge forced unique_ids stored under canonical or legacy map keys."""
+    collected: set[str] = set()
+    for key in _collect_related_data_ids(data_id):
+        collected.update(forced_map.get(key, ()))
+    return collected
+
+
+def _collect_fallback_unique_ids(
+    entry: ConfigEntry,
+    module_id: str,
+    data_id: str,
+    forced_map: dict[str, set[str]],
+) -> set[str]:
+    """Legacy, typo, and runtime forced unique_ids excluding the canonical uid."""
+    canonical_uid = _number_unique_id(entry, module_id, data_id)
+    fallbacks: set[str] = set()
+    for related_id in _collect_related_data_ids(data_id):
+        uid = _number_unique_id(entry, module_id, related_id)
+        if uid != canonical_uid:
+            fallbacks.add(uid)
+    fallbacks.update(_collect_forced_unique_ids(forced_map, data_id))
+    fallbacks.discard(canonical_uid)
+    return fallbacks
+
+
 def _resolve_expected_registry_entry(
     entries_by_unique_id: dict[str, RegistryEntry],
     canonical_uid: str,
@@ -67,11 +114,7 @@ def migrate_number_registry_before_add(
     forced_unique_ids_by_data_id: dict[str, set[str]] | None = None,
 ) -> None:
     """Re-enable / migrate critical number entities before ``async_add_entities``."""
-    from .number import (  # noqa: PLC0415 — avoid import cycle at module load
-        FORCE_CREATE_KEYS,
-        LEGACY_SETTING_ALIASES,
-        NUMBER_SETTINGS_DATA,
-    )
+    from .number import FORCE_CREATE_KEYS, NUMBER_SETTINGS_DATA  # noqa: PLC0415
 
     forced_map = forced_unique_ids_by_data_id or {}
     try:
@@ -85,14 +128,12 @@ def migrate_number_registry_before_add(
             if description.data_id not in FORCE_CREATE_KEYS:
                 continue
 
-            canonical_uid = (
-                f"{entry.entry_id}_{description.module_id}_{description.data_id}"
+            canonical_uid = _number_unique_id(
+                entry, description.module_id, description.data_id
             )
-            fallback_unique_ids = {
-                f"{entry.entry_id}_{description.module_id}_"
-                f"{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
-            }
-            fallback_unique_ids.update(forced_map.get(description.data_id, set()))
+            fallback_unique_ids = _collect_fallback_unique_ids(
+                entry, description.module_id, description.data_id, forced_map
+            )
 
             expected_entry = _resolve_expected_registry_entry(
                 entries_by_unique_id,
@@ -153,11 +194,7 @@ def ensure_critical_numbers_enabled(
     forced_unique_ids_by_data_id: dict[str, set[str]] | None = None,
 ) -> None:
     """Enable critical battery numbers and disable duplicate registry rows."""
-    from .number import (  # noqa: PLC0415
-        FORCE_CREATE_KEYS,
-        LEGACY_SETTING_ALIASES,
-        NUMBER_SETTINGS_DATA,
-    )
+    from .number import FORCE_CREATE_KEYS, NUMBER_SETTINGS_DATA  # noqa: PLC0415
 
     forced_map = forced_unique_ids_by_data_id or {}
     try:
@@ -171,14 +208,12 @@ def ensure_critical_numbers_enabled(
             if description.data_id not in FORCE_CREATE_KEYS:
                 continue
 
-            canonical_uid = (
-                f"{entry.entry_id}_{description.module_id}_{description.data_id}"
+            canonical_uid = _number_unique_id(
+                entry, description.module_id, description.data_id
             )
-            fallback_unique_ids = {
-                f"{entry.entry_id}_{description.module_id}_"
-                f"{LEGACY_SETTING_ALIASES.get(description.data_id, description.data_id)}",
-            }
-            fallback_unique_ids.update(forced_map.get(description.data_id, set()))
+            fallback_unique_ids = _collect_fallback_unique_ids(
+                entry, description.module_id, description.data_id, forced_map
+            )
 
             expected_entry = _resolve_expected_registry_entry(
                 entries_by_unique_id,
@@ -237,12 +272,17 @@ def migrate_select_registry_after_add(hass: HomeAssistant, entry: ConfigEntry) -
             new_entry = entries_by_unique_id.get(new_unique_id)
 
             if old_entry and new_entry:
-                entity_registry.async_remove(new_entry.entity_id)
+                temp_unique_id = f"{new_unique_id}.__kore_migrate__"
                 try:
+                    entity_registry.async_update_entity(
+                        new_entry.entity_id,
+                        new_unique_id=temp_unique_id,
+                    )
                     entity_registry.async_update_entity(
                         old_entry.entity_id,
                         new_unique_id=new_unique_id,
                     )
+                    entity_registry.async_remove(new_entry.entity_id)
                     update_disabled_by_if_changed(
                         entity_registry,
                         old_entry.entity_id,
