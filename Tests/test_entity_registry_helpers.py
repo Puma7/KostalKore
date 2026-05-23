@@ -277,14 +277,42 @@ async def test_migrate_select_registry_exception(hass: HomeAssistant) -> None:
 def test_run_post_setup_entity_registry_maintenance(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:
+    from custom_components.kostal_kore.const import DATA_KEY_FORCED_NUMBER_UNIQUE_IDS, DOMAIN
+
     entry = _mock_entry()
+    entry.add_to_hass(hass)
+    forced = {"Battery:MinSoc": {f"{entry.entry_id}_devices:local_Battery:MinSoc"}}
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        DATA_KEY_FORCED_NUMBER_UNIQUE_IDS: forced,
+    }
     with (
         patch.object(erh, "ensure_critical_numbers_enabled") as ensure_mock,
         caplog.at_level(logging.DEBUG),
     ):
         erh.run_post_setup_entity_registry_maintenance(hass, entry)
-    ensure_mock.assert_called_once_with(hass, entry)
+    ensure_mock.assert_called_once_with(hass, entry, forced_unique_ids_by_data_id=forced)
+    assert DATA_KEY_FORCED_NUMBER_UNIQUE_IDS not in hass.data[DOMAIN][entry.entry_id]
     assert "Post-setup entity registry maintenance completed" in caplog.text
+
+
+def test_run_post_setup_without_entry_data(hass: HomeAssistant) -> None:
+    entry = _mock_entry()
+    with patch.object(erh, "ensure_critical_numbers_enabled") as ensure_mock:
+        erh.run_post_setup_entity_registry_maintenance(hass, entry)
+    ensure_mock.assert_called_once_with(hass, entry, forced_unique_ids_by_data_id=None)
+
+
+def test_run_post_setup_ignores_invalid_stored_forced_map(hass: HomeAssistant) -> None:
+    from custom_components.kostal_kore.const import DATA_KEY_FORCED_NUMBER_UNIQUE_IDS, DOMAIN
+
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        DATA_KEY_FORCED_NUMBER_UNIQUE_IDS: "not-a-dict",
+    }
+    with patch.object(erh, "ensure_critical_numbers_enabled") as ensure_mock:
+        erh.run_post_setup_entity_registry_maintenance(hass, entry)
+    ensure_mock.assert_called_once_with(hass, entry, forced_unique_ids_by_data_id=None)
 
 
 @pytest.mark.asyncio

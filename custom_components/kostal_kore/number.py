@@ -31,6 +31,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_INSTALLER_ACCESS,
     CONF_SERVICE_CODE,
+    DATA_KEY_FORCED_NUMBER_UNIQUE_IDS,
     DOMAIN,
     AddConfigEntryEntitiesCallback,
 )
@@ -1491,6 +1492,10 @@ async def async_setup_entry(
         entry,
         forced_unique_ids_by_data_id=forced_unique_ids_by_data_id,
     )
+
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        entry_data[DATA_KEY_FORCED_NUMBER_UNIQUE_IDS] = forced_unique_ids_by_data_id
 
     from .startup_trace import log_entity_batch
 

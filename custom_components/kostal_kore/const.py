@@ -44,6 +44,8 @@ ADVANCED_WRITE_ARM_TTL_SECONDS: Final[int] = 120
 DATA_KEY_LEGACY_CLEANUP_GUARD: Final[str] = "legacy_cleanup_guard"
 DATA_KEY_LEGACY_CLEANUP_CODE_INPUT: Final[str] = "legacy_cleanup_code_input"
 DATA_KEY_HISTORY_MIGRATION_GUARDS: Final[str] = "history_migration_guards"
+# Populated during number platform setup; consumed once after all platforms load.
+DATA_KEY_FORCED_NUMBER_UNIQUE_IDS: Final[str] = "_forced_number_unique_ids_by_data_id"
 
 # Services
 SERVICE_ADOPT_LEGACY_ENTITY_IDS: Final[str] = "adopt_legacy_entity_ids"

@@ -258,7 +258,18 @@ def run_post_setup_entity_registry_maintenance(
     entry: ConfigEntry,
 ) -> None:
     """Run deferred registry maintenance once after all platforms are loaded."""
-    ensure_critical_numbers_enabled(hass, entry)
+    from .const import DATA_KEY_FORCED_NUMBER_UNIQUE_IDS, DOMAIN  # noqa: PLC0415
+
+    forced_map: dict[str, set[str]] | None = None
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        stored = entry_data.pop(DATA_KEY_FORCED_NUMBER_UNIQUE_IDS, None)
+        if isinstance(stored, dict):
+            forced_map = stored
+
+    ensure_critical_numbers_enabled(
+        hass, entry, forced_unique_ids_by_data_id=forced_map
+    )
     _LOGGER.debug(
         "Post-setup entity registry maintenance completed for %s",
         entry.title,
