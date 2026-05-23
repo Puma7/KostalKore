@@ -208,52 +208,10 @@ async def async_setup_entry(
     )
     async_add_entities(entities)
 
-    # Migrate legacy unique_id format (entry_id + module_id) to the new
-    # stable format (entry_id + module_id + key) so existing entities
-    # don't remain orphaned/grey.
     if entities:
-        try:
-            entity_registry = er.async_get(hass)
-            entries = list(
-                er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-            )
-            entries_by_unique_id = {e.unique_id: e for e in entries if e.unique_id}
+        from .entity_registry_helpers import migrate_select_registry_after_add
 
-            for description in SELECT_SETTINGS_DATA:
-                old_unique_id = f"{entry.entry_id}_{description.module_id}"
-                new_unique_id = (
-                    f"{entry.entry_id}_{description.module_id}_{description.key}"
-                )
-                old_entry = entries_by_unique_id.get(old_unique_id)
-                new_entry = entries_by_unique_id.get(new_unique_id)
-
-                # If both exist, prefer the old entity_id to preserve history.
-                # Remove the new duplicate only after successfully migrating the old one.
-                if old_entry and new_entry:
-                    # Temporarily remove the duplicate so unique_id is free for the update.
-                    entity_registry.async_remove(new_entry.entity_id)
-                    try:
-                        entity_registry.async_update_entity(
-                            old_entry.entity_id,
-                            new_unique_id=new_unique_id,
-                            disabled_by=None,
-                        )
-                    except Exception as update_err:
-                        _LOGGER.warning(
-                            "Select migration: failed to update %s to %s: %s. "
-                            "The duplicate entity will be recreated on next restart.",
-                            old_unique_id, new_unique_id, update_err,
-                        )
-                    continue
-
-                if old_entry:
-                    entity_registry.async_update_entity(
-                        old_entry.entity_id,
-                        new_unique_id=new_unique_id,
-                        disabled_by=None,
-                    )
-        except Exception as err:
-            _LOGGER.debug("Select entity registry migration failed: %s", err)
+        migrate_select_registry_after_add(hass, entry)
 
 
 class PlenticoreDataSelect(

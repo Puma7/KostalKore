@@ -468,7 +468,6 @@ async def test_number_setup_empty_settings_and_modbus_extensions(hass) -> None:
     with (
         patch.object(number_module, "_get_settings_data_safe", AsyncMock(side_effect=[{}, {}])),
         patch.object(number_module.asyncio, "sleep", AsyncMock()),
-        patch.object(number_module, "async_call_later"),
         patch.object(number_module, "SettingDataUpdateCoordinator", return_value=fake_coordinator),
         patch.object(number_module.er, "async_get", return_value=registry),
         patch.object(number_module.er, "async_entries_for_config_entry", return_value=[]),
@@ -651,7 +650,6 @@ async def test_number_setup_nonempty_missing_settings_and_empty_modbus_entities(
     with (
         patch.object(number_module, "_get_settings_data_safe", AsyncMock(return_value=available_settings)),
         patch.object(number_module, "SettingDataUpdateCoordinator", return_value=fake_coordinator),
-        patch.object(number_module, "async_call_later"),
         patch.object(number_module.er, "async_get", return_value=MagicMock()),
         patch.object(number_module.er, "async_entries_for_config_entry", return_value=[]),
         patch("kostal_plenticore.modbus_number.create_modbus_number_entities", AsyncMock(return_value=[])),
@@ -701,7 +699,6 @@ async def test_number_setup_truthy_unrelated_settings_data_silently_skips(hass) 
             AsyncMock(return_value=unrelated_settings),
         ),
         patch.object(number_module, "SettingDataUpdateCoordinator", return_value=fake_coordinator),
-        patch.object(number_module, "async_call_later"),
         patch.object(number_module.er, "async_get", return_value=MagicMock()),
         patch.object(number_module.er, "async_entries_for_config_entry", return_value=[]),
         patch.object(number_module, "NUMBER_SETTINGS_DATA", [number_module.NUMBER_SETTINGS_DATA[2]]),
@@ -752,7 +749,6 @@ async def test_number_setup_creates_non_forced_entity_without_forced_fetch(hass)
             AsyncMock(return_value=available_settings),
         ),
         patch.object(number_module, "SettingDataUpdateCoordinator", return_value=fake_coordinator),
-        patch.object(number_module, "async_call_later"),
         patch.object(number_module.er, "async_get", return_value=MagicMock()),
         patch.object(number_module.er, "async_entries_for_config_entry", return_value=[]),
         patch.object(number_module, "NUMBER_SETTINGS_DATA", [non_forced_description]),

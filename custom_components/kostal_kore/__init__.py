@@ -611,6 +611,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     async_register_orphan_history_services(hass)
     from .diagnostics import async_register_debug_bundle_service
     async_register_debug_bundle_service(hass)
+    from .entity_registry_helpers import run_post_setup_entity_registry_maintenance
+
+    run_post_setup_entity_registry_maintenance(hass, entry)
     # Save normalized options AFTER successful setup so the options-update
     # listener can compare like-for-like and not retrigger reloads when HA
     # canonicalizes the dict between writes.
@@ -828,12 +831,23 @@ def _log_unload_caller(trace: SetupTrace, entry: PlenticoreConfigEntry) -> None:
         interesting.append(f"{frame.filename}:{frame.lineno} in {frame.name}")
         if len(interesting) >= 10:
             break
-    trace.info(
-        "unload triggered (task=%s, entry_state=%s, caller_stack=%s)",
-        task_name,
-        entry.state,
-        " <- ".join(interesting) if interesting else "<empty>",
-    )
+    stack_text = " <- ".join(interesting) if interesting else "<empty>"
+    if "_async_handle_reload" in stack_text or "async_schedule_reload" in stack_text:
+        trace.warning(
+            "unload triggered by HA Core reload (not KORE): task=%s, "
+            "entry_state=%s — likely entity_registry disabled_by change "
+            "(30s debounce). caller_stack=%s",
+            task_name,
+            entry.state,
+            stack_text,
+        )
+    else:
+        trace.info(
+            "unload triggered (task=%s, entry_state=%s, caller_stack=%s)",
+            task_name,
+            entry.state,
+            stack_text,
+        )
 
 
 async def _await_cleanup_step(
