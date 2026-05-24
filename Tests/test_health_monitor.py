@@ -311,18 +311,34 @@ class TestInverterHealthMonitor:
         m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
         assert m.isolation.current is None
 
-    def test_isolation_sentinel_65535000_skipped(self) -> None:
-        """The Modbus sentinel marker must not contaminate the isolation trend."""
+    def test_isolation_sentinel_recorded_as_off_scale_during_pv(self) -> None:
+        """Sentinel during PV matches Kostal ~65.5 MΩ off-scale display."""
         m = InverterHealthMonitor()
         m.update_from_modbus(
-            {"isolation_resistance": 65535000.0, "total_dc_power": 5000.0}
+            {
+                "isolation_resistance": 65_535_000.0,
+                "total_dc_power": 5000.0,
+                "inverter_state": 6,
+            }
         )
-        assert m.isolation.current is None
-        assert m.get_isolation_resistance_ohm() is None
-        assert m._isolation_modbus_unavailable is True
+        assert m.isolation.current == 65_535_000.0
+        assert m.get_isolation_resistance_ohm() == 65_535_000.0
+        assert m._isolation_modbus_off_scale is True
         attrs = m.isolation_modbus_attributes()
         assert attrs["modbus_sentinel"] is True
-        assert attrs["modbus_measurement_unavailable"] is True
+        assert attrs["kostal_display_mohm"] == 65.5
+
+    def test_isolation_sentinel_skipped_at_night(self) -> None:
+        """Sentinel without PV must not seed a fake high reading."""
+        m = InverterHealthMonitor()
+        m.update_from_modbus(
+            {
+                "isolation_resistance": 65_535_000.0,
+                "total_dc_power": 0.0,
+                "inverter_state": 10,
+            }
+        )
+        assert m.isolation.current is None
 
     @pytest.mark.asyncio
     async def test_restore_isolation_skips_expired_persisted_sample(
@@ -350,11 +366,10 @@ class TestInverterHealthMonitor:
         await coord._restore_isolation_sample()
         assert monitor.isolation.sample_count == 0
 
-    def test_isolation_sentinel_clears_stale_persisted_sample(self) -> None:
-        """Stale restored values must not display when Modbus only sends sentinel."""
+    def test_isolation_sentinel_replaces_stale_low_sample(self) -> None:
+        """Off-scale sentinel overwrites a wrong historic sample (e.g. 22.7 MΩ)."""
         m = InverterHealthMonitor()
         m.isolation.record(22_700_000.0)
-        assert m.get_isolation_resistance_ohm() == 22_700_000.0
         m.update_from_modbus(
             {
                 "isolation_resistance": 65_535_000.0,
@@ -362,9 +377,8 @@ class TestInverterHealthMonitor:
                 "inverter_state": 6,
             }
         )
-        assert m.isolation.current is None
-        assert m.get_isolation_resistance_ohm() is None
-        assert m.isolation.sample_count == 0
+        assert m.get_isolation_resistance_ohm() == 65_535_000.0
+        assert m.isolation.sample_count == 2
 
 
 class TestHealthMonitorCoverageGaps:

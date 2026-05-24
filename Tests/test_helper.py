@@ -211,7 +211,9 @@ def test_isolation_sentinel_and_measurement_expected_helpers() -> None:
         INVERTER_STATE_ISOMEAS,
         ISOLATION_SENTINEL_OHM,
         is_isolation_sentinel_ohm,
+        isolation_kostal_display_mohm,
         isolation_measurement_expected,
+        isolation_sentinel_as_off_scale_high,
     )
 
     assert is_isolation_sentinel_ohm(ISOLATION_SENTINEL_OHM)
@@ -221,6 +223,10 @@ def test_isolation_sentinel_and_measurement_expected_helpers() -> None:
         pv_active=False, inverter_state=INVERTER_STATE_ISOMEAS
     )
     assert not isolation_measurement_expected(pv_active=False, inverter_state=10)
+    assert isolation_sentinel_as_off_scale_high(pv_active=True, inverter_state=6)
+    assert not isolation_sentinel_as_off_scale_high(pv_active=False, inverter_state=10)
+    assert isolation_kostal_display_mohm(ISOLATION_SENTINEL_OHM) == 65.5
+    assert isolation_kostal_display_mohm(None) is None
 
 
 def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:

@@ -328,8 +328,6 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             iso_float = float(iso_ohm)
         except (TypeError, ValueError):
             return
-        if is_isolation_sentinel_ohm(iso_float):
-            return
         if self._health_monitor is not None and hasattr(self._health_monitor, "isolation"):
             self._health_monitor.isolation.record(iso_float)
             _LOGGER.debug(
@@ -342,8 +340,6 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         from .helper import is_isolation_sentinel_ohm
 
-        if is_isolation_sentinel_ohm(iso_ohm):
-            return
         if self._last_persisted_isolation_ohm == iso_ohm:
             return
         try:
