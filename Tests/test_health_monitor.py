@@ -318,6 +318,53 @@ class TestInverterHealthMonitor:
             {"isolation_resistance": 65535000.0, "total_dc_power": 5000.0}
         )
         assert m.isolation.current is None
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+        attrs = m.isolation_modbus_attributes()
+        assert attrs["modbus_sentinel"] is True
+        assert attrs["modbus_measurement_unavailable"] is True
+
+    @pytest.mark.asyncio
+    async def test_restore_isolation_skips_expired_persisted_sample(
+        self, hass: HomeAssistant
+    ) -> None:
+        import time
+        from unittest.mock import AsyncMock, MagicMock
+
+        from custom_components.kostal_kore.modbus_coordinator import (
+            ModbusDataUpdateCoordinator,
+        )
+
+        client = MagicMock()
+        client.host = "192.168.1.250"
+        client.port = 1502
+        coord = ModbusDataUpdateCoordinator(hass, client)
+        monitor = InverterHealthMonitor()
+        coord._health_monitor = monitor
+        coord._isolation_store.async_load = AsyncMock(
+            return_value={
+                "isolation_ohm": 22_700_000.0,
+                "saved_at": time.time() - 90_000.0,
+            }
+        )
+        await coord._restore_isolation_sample()
+        assert monitor.isolation.sample_count == 0
+
+    def test_isolation_sentinel_clears_stale_persisted_sample(self) -> None:
+        """Stale restored values must not display when Modbus only sends sentinel."""
+        m = InverterHealthMonitor()
+        m.isolation.record(22_700_000.0)
+        assert m.get_isolation_resistance_ohm() == 22_700_000.0
+        m.update_from_modbus(
+            {
+                "isolation_resistance": 65_535_000.0,
+                "total_dc_power": 9000.0,
+                "inverter_state": 6,
+            }
+        )
+        assert m.isolation.current is None
+        assert m.get_isolation_resistance_ohm() is None
+        assert m.isolation.sample_count == 0
 
 
 class TestHealthMonitorCoverageGaps:

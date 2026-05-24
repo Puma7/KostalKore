@@ -206,6 +206,23 @@ def test_generate_confirmation_code_uses_expected_alphabet() -> None:
     assert all(c in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" for c in code)
 
 
+def test_isolation_sentinel_and_measurement_expected_helpers() -> None:
+    from custom_components.kostal_kore.helper import (
+        INVERTER_STATE_ISOMEAS,
+        ISOLATION_SENTINEL_OHM,
+        is_isolation_sentinel_ohm,
+        isolation_measurement_expected,
+    )
+
+    assert is_isolation_sentinel_ohm(ISOLATION_SENTINEL_OHM)
+    assert not is_isolation_sentinel_ohm(65_500_000.0)
+    assert isolation_measurement_expected(pv_active=True, inverter_state=6)
+    assert isolation_measurement_expected(
+        pv_active=False, inverter_state=INVERTER_STATE_ISOMEAS
+    )
+    assert not isolation_measurement_expected(pv_active=False, inverter_state=10)
+
+
 def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
     assert normalize_isolation_resistance_ohm(
         65.5, pv_active=True, inverter_state=6

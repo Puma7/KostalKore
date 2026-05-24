@@ -459,7 +459,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 degradation_tracker.update_from_modbus(data)
                 if battery_soh_calc.update_from_modbus(data):
                     battery_soh_calc.schedule_save()
-                iso_current = health_monitor.isolation.current
+                iso_current = health_monitor.get_isolation_resistance_ohm()
                 if iso_current is not None:
                     hass.async_create_task(
                         modbus_coordinator._save_isolation_sample(iso_current)

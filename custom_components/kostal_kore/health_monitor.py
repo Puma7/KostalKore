@@ -23,7 +23,11 @@ from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any, Final
 
-from .helper import normalize_isolation_resistance_ohm
+from .helper import (
+    is_isolation_sentinel_ohm,
+    isolation_measurement_expected,
+    normalize_isolation_resistance_ohm,
+)
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -259,6 +263,8 @@ class InverterHealthMonitor:
         self._failed_polls: int = 0
         self._inverter_state_changes: deque[HealthEvent] = deque(maxlen=100)
         self._last_inverter_state: int | None = None
+        self._isolation_last_modbus_raw: float | None = None
+        self._isolation_modbus_unavailable: bool = False
 
     @property
     def all_trackers(self) -> dict[str, ParameterTracker]:
@@ -329,21 +335,21 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
-                        # Record isolation when PV is active (>5 W) or during
-                        # IsoMeas state (state=2), where the inverter actively
-                        # measures isolation before grid connection.
-                        iso_meas_active = inverter_state == 2
-                        if not pv_active and not iso_meas_active:
+                        self._isolation_last_modbus_raw = fval
+                        expects_measurement = isolation_measurement_expected(
+                            pv_active=pv_active,
+                            inverter_state=inverter_state,
+                        )
+                        if not expects_measurement:
                             continue
-                        # Modbus sentinel: 65535000 Ω = 0xFFFFFF (max-value
-                        # marker the inverter writes when no measurement is
-                        # available, typically at night or before isolation
-                        # has been measured for the cycle). Recording it
-                        # produces a flat sentinel line in the recorder
-                        # history that hides real degradation.
-                        from .helper import ISOLATION_SENTINEL_OHM
-                        if fval == ISOLATION_SENTINEL_OHM:
+                        if is_isolation_sentinel_ohm(fval):
+                            # Register 120 reports "no value" while we expect a
+                            # measurement — drop stale restored/historic samples
+                            # so the Health entity shows unknown, not 22.7 MΩ.
+                            self._isolation_modbus_unavailable = True
+                            self.isolation.samples.clear()
                             continue
+                        self._isolation_modbus_unavailable = False
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
                             pv_active=pv_active,
@@ -355,6 +361,23 @@ class InverterHealthMonitor:
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass
+
+    def get_isolation_resistance_ohm(self) -> float | None:
+        """Return isolation for HA display; None when Modbus has no valid reading."""
+        if self._isolation_modbus_unavailable:
+            return None
+        return self.isolation.current
+
+    def isolation_modbus_attributes(self) -> dict[str, Any]:
+        """Diagnostic attributes for the isolation health sensor."""
+        raw = self._isolation_last_modbus_raw
+        return {
+            "modbus_raw_ohm": raw,
+            "modbus_sentinel": (
+                is_isolation_sentinel_ohm(raw) if raw is not None else None
+            ),
+            "modbus_measurement_unavailable": self._isolation_modbus_unavailable,
+        }
 
     def _apply_grid_profile(self, data: dict[str, Any]) -> None:
         """Adapt frequency/voltage thresholds for 50/60Hz and 120/230V grids."""
