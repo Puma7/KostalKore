@@ -39,6 +39,9 @@ ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 # from contaminating the recorder history and trend math.
 ISOLATION_SENTINEL_OHM: Final[float] = 65_535_000.0
 
+# Do not restore persisted isolation samples older than this (seconds).
+ISOLATION_PERSIST_MAX_AGE_SECONDS: Final[float] = 86_400.0
+
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
     """Return mutable per-entry integration state store.
@@ -105,6 +108,20 @@ def normalize_isolation_resistance_ohm(
 INVERTER_STATE_OFF: Final[int] = 0
 INVERTER_STATE_INIT: Final[int] = 1
 INVERTER_STATE_ISOMEAS: Final[int] = 2
+
+
+def is_isolation_sentinel_ohm(value: float) -> bool:
+    """Return True when Modbus register 120 reports the no-measurement marker."""
+    return value == ISOLATION_SENTINEL_OHM
+
+
+def isolation_measurement_expected(
+    *, pv_active: bool, inverter_state: int | None
+) -> bool:
+    """Return True when the inverter should provide a real isolation reading."""
+    return pv_active or inverter_state == INVERTER_STATE_ISOMEAS
+
+
 INVERTER_STATE_GRID_CHECK: Final[int] = 3
 INVERTER_STATE_START_UP: Final[int] = 4
 INVERTER_STATE_FEED_IN: Final[int] = 6

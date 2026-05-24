@@ -116,12 +116,12 @@ class IsolationResistanceSensor(SensorEntity):
 
     @property
     def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
-        return self._monitor.isolation.current
+        return self._monitor.get_isolation_resistance_ohm()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
         t = self._monitor.isolation
-        return {
+        attrs = {
             "trend": t.trend,
             "level": t.level.value,
             "min": t.min_value,
@@ -129,6 +129,8 @@ class IsolationResistanceSensor(SensorEntity):
             "avg": round(t.avg_value, 0) if t.avg_value is not None else None,
             "samples": t.sample_count,
         }
+        attrs.update(self._monitor.isolation_modbus_attributes())
+        return attrs
 
 
 class ControllerTempHealthSensor(SensorEntity):

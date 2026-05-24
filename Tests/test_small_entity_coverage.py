@@ -79,6 +79,7 @@ def _tracker(
 def _health_monitor() -> SimpleNamespace:
     battery_temperature = _tracker(current=23.4)
     controller_temperature = _tracker(current=44.4)
+    isolation_tracker = _tracker(current=1234.0, unit="Ohm")
     return SimpleNamespace(
         overall_health=HealthLevel.GOOD,
         health_score=88,
@@ -86,7 +87,13 @@ def _health_monitor() -> SimpleNamespace:
         error_rate_per_hour=1.2,
         _total_polls=10,
         _failed_polls=1,
-        isolation=_tracker(current=1234.0, unit="Ohm"),
+        isolation=isolation_tracker,
+        get_isolation_resistance_ohm=lambda: isolation_tracker.current,
+        isolation_modbus_attributes=lambda: {
+            "modbus_raw_ohm": 1234.0,
+            "modbus_sentinel": False,
+            "modbus_measurement_unavailable": False,
+        },
         controller_temp=_tracker(current=51.2),
         battery_soh=_tracker(current=92.0),
         battery_cycles=_tracker(current=111, max_value=222, avg_value=150),

@@ -296,7 +296,13 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _restore_isolation_sample(self) -> None:
         """Seed the health-monitor deque with the last persisted isolation value."""
-        from .helper import ISOLATION_SENTINEL_OHM
+        import time
+
+        from .helper import (
+            ISOLATION_PERSIST_MAX_AGE_SECONDS,
+            is_isolation_sentinel_ohm,
+        )
+
         try:
             stored = await self._isolation_store.async_load()
         except Exception:
@@ -306,15 +312,23 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         iso_ohm = stored.get("isolation_ohm")
         if iso_ohm is None:
             return
+        saved_at = stored.get("saved_at")
+        if saved_at is not None:
+            try:
+                age = time.time() - float(saved_at)
+            except (TypeError, ValueError):
+                age = ISOLATION_PERSIST_MAX_AGE_SECONDS + 1.0
+            if age > ISOLATION_PERSIST_MAX_AGE_SECONDS:
+                _LOGGER.debug(
+                    "Skipping stale persisted isolation sample (age %.0fs)",
+                    age,
+                )
+                return
         try:
             iso_float = float(iso_ohm)
         except (TypeError, ValueError):
             return
-        # Skip persisted sentinel values — would re-seed the tracker with the
-        # 0xFFFFFF marker and produce a flat history line until the next real
-        # measurement arrives. Existing stores written before the sentinel
-        # filter landed may still carry the sentinel.
-        if iso_float == ISOLATION_SENTINEL_OHM:
+        if is_isolation_sentinel_ohm(iso_float):
             return
         if self._health_monitor is not None and hasattr(self._health_monitor, "isolation"):
             self._health_monitor.isolation.record(iso_float)
@@ -324,15 +338,18 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _save_isolation_sample(self, iso_ohm: float) -> None:
         """Persist the most recent isolation resistance value."""
-        from .helper import ISOLATION_SENTINEL_OHM
-        # Never persist the sentinel — keeps restore_isolation_sample
-        # safe even on older stores that pre-date the in-line filter.
-        if iso_ohm == ISOLATION_SENTINEL_OHM:
+        import time
+
+        from .helper import is_isolation_sentinel_ohm
+
+        if is_isolation_sentinel_ohm(iso_ohm):
             return
         if self._last_persisted_isolation_ohm == iso_ohm:
             return
         try:
-            await self._isolation_store.async_save({"isolation_ohm": iso_ohm})
+            await self._isolation_store.async_save(
+                {"isolation_ohm": iso_ohm, "saved_at": time.time()}
+            )
             self._last_persisted_isolation_ohm = iso_ohm
         except Exception as err:
             _LOGGER.debug("Could not persist isolation resistance: %s", err)

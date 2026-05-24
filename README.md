@@ -345,7 +345,8 @@ The integration provides human-readable inverter states:
 ### Isolation Resistance shows `unknown`
 1. In KORE, isolation resistance is sourced from Modbus register `120` (`isolation_resistance`), not REST.
 2. `unknown` means no valid Modbus value was read yet (startup, transient disconnects, or unsupported register on current model/firmware).
-3. Check logs for:
+3. When the inverter display shows a value but Modbus returns **65,535,000 Ω**, that is Kostal's **sentinel** (no measurement on register 120). The Health sensor intentionally shows `unknown` instead of a stale cached value. Check entity attributes `modbus_raw_ohm` and `modbus_sentinel`.
+4. Check logs for:
    - `Connection lost reading isolation_resistance`
    - `Illegal data address`
 4. Verify Modbus is enabled on inverter and integration settings (host/port/unit-id) are correct.
