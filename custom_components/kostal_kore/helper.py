@@ -33,11 +33,12 @@ ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
 # Modbus isolation-resistance sentinel (= 0xFFFF × 1000, i.e. UINT16-max
 # multiplied by the inverter's internal kΩ→Ω scale factor = 65,535,000 Ω).
-# The inverter writes this value when no actual isolation measurement is
-# available — typically at night or before isolation has been measured for
-# the current cycle. Filtering it consistently prevents a flat sentinel line
-# from contaminating the recorder history and trend math.
+#
+# Kostal uses this when the UINT16 kΩ channel overflows (~65.535 MΩ max) or
+# when no measurement is available. During PV / IsoMeas it matches the WR UI
+# showing about "65.5 MΩ" (very high / off-scale). At night it means "no reading".
 ISOLATION_SENTINEL_OHM: Final[float] = 65_535_000.0
+ISOLATION_OFF_SCALE_DISPLAY_MOHM: Final[float] = 65.5
 
 # Do not restore persisted isolation samples older than this (seconds).
 ISOLATION_PERSIST_MAX_AGE_SECONDS: Final[float] = 86_400.0
@@ -111,8 +112,24 @@ INVERTER_STATE_ISOMEAS: Final[int] = 2
 
 
 def is_isolation_sentinel_ohm(value: float) -> bool:
-    """Return True when Modbus register 120 reports the no-measurement marker."""
+    """Return True when Modbus register 120 reports the Kostal sentinel / overflow."""
     return value == ISOLATION_SENTINEL_OHM
+
+
+def isolation_sentinel_as_off_scale_high(
+    *, pv_active: bool, inverter_state: int | None
+) -> bool:
+    """During production, treat the sentinel like the WR's ~65.5 MΩ off-scale display."""
+    return isolation_measurement_expected(
+        pv_active=pv_active, inverter_state=inverter_state
+    )
+
+
+def isolation_kostal_display_mohm(ohm: float | None) -> float | None:
+    """Convert stored Ω to the same MΩ scale shown on Kostal inverters (~65.5)."""
+    if ohm is None:
+        return None
+    return round(ohm / 1_000_000, 1)
 
 
 def isolation_measurement_expected(

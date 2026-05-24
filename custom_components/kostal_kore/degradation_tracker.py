@@ -337,9 +337,18 @@ class DegradationTracker:
                 # Skip Modbus sentinel 65535000 Ω (= 0xFFFFFF), the inverter's
                 # "no measurement available" marker. Recording it would
                 # produce a flat line that masks real isolation trends.
-                from .helper import ISOLATION_SENTINEL_OHM
-                if float(iso) == ISOLATION_SENTINEL_OHM:
-                    pass
+                from .helper import (
+                    ISOLATION_SENTINEL_OHM,
+                    is_isolation_sentinel_ohm,
+                    isolation_sentinel_as_off_scale_high,
+                )
+
+                if is_isolation_sentinel_ohm(float(iso)):
+                    if isolation_sentinel_as_off_scale_high(
+                        pv_active=pv_active,
+                        inverter_state=inverter_state,
+                    ):
+                        self.isolation.record(ISOLATION_SENTINEL_OHM / 1000.0, now)
                 else:
                     normalized_ohm = normalize_isolation_resistance_ohm(
                         iso,

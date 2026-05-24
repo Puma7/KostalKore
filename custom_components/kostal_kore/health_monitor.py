@@ -25,8 +25,11 @@ from enum import IntEnum, StrEnum
 from typing import Any, Final
 
 from .helper import (
+    ISOLATION_SENTINEL_OHM,
     is_isolation_sentinel_ohm,
+    isolation_kostal_display_mohm,
     isolation_measurement_expected,
+    isolation_sentinel_as_off_scale_high,
     normalize_isolation_resistance_ohm,
 )
 
@@ -305,6 +308,7 @@ class InverterHealthMonitor:
         self._last_inverter_state: int | None = None
         self._isolation_last_modbus_raw: float | None = None
         self._isolation_modbus_unavailable: bool = False
+        self._isolation_modbus_off_scale: bool = False
 
     @property
     def all_trackers(self) -> dict[str, ParameterTracker]:
@@ -383,13 +387,19 @@ class InverterHealthMonitor:
                         if not expects_measurement:
                             continue
                         if is_isolation_sentinel_ohm(fval):
-                            # Register 120 reports "no value" while we expect a
-                            # measurement — drop stale restored/historic samples
-                            # so the Health entity shows unknown, not 22.7 MΩ.
-                            self._isolation_modbus_unavailable = True
-                            self.isolation.samples.clear()
+                            if isolation_sentinel_as_off_scale_high(
+                                pv_active=pv_active,
+                                inverter_state=inverter_state,
+                            ):
+                                # Kostal WR UI shows ~65.5 MΩ for this Modbus
+                                # pattern during production — record it so HA
+                                # tracks "high" and later real drops.
+                                self._isolation_modbus_unavailable = False
+                                self._isolation_modbus_off_scale = True
+                                self.isolation.record(ISOLATION_SENTINEL_OHM)
                             continue
                         self._isolation_modbus_unavailable = False
+                        self._isolation_modbus_off_scale = False
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
                             pv_active=pv_active,
@@ -411,12 +421,15 @@ class InverterHealthMonitor:
     def isolation_modbus_attributes(self) -> dict[str, Any]:
         """Diagnostic attributes for the isolation health sensor."""
         raw = self._isolation_last_modbus_raw
+        current = self.isolation.current
         return {
             "modbus_raw_ohm": raw,
             "modbus_sentinel": (
                 is_isolation_sentinel_ohm(raw) if raw is not None else None
             ),
+            "modbus_off_scale_high": self._isolation_modbus_off_scale,
             "modbus_measurement_unavailable": self._isolation_modbus_unavailable,
+            "kostal_display_mohm": isolation_kostal_display_mohm(current),
         }
 
     def _apply_grid_profile(self, data: dict[str, Any]) -> None:
