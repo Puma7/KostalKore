@@ -1951,12 +1951,53 @@ async def test_audit_grid_limiter_uses_full_home_consumption(
     assert "home_from_battery" in calls, "home_from_battery must be read"
     assert "home_from_grid" in calls, "home_from_grid must be read"
 
-    # home = 500 + 300 + 700 = 1500 W; available = 8000 - 1500 = 6500 W
-    # surplus over 5000 W cap = 1500 W → charge limit = 1500 W
+    # home = 1500 W AC; PVdc=8000 → PVac~=7680; available = 6180 W
+    # surplus over 5000 W cap = 1180 W → charge limit = 1180 W
     assert write_calls, "Charge limit must have been written"
-    assert abs(write_calls[0] - 1500.0) < 1.0, (
-        f"Charge limit should be 1500 W (all home sources summed), got {write_calls[0]}"
+    assert abs(write_calls[0] - 1180.0) < 1.0, (
+        f"Charge limit should be ~1180 W (AC-scaled PV minus full home), got {write_calls[0]}"
     )
+
+
+@pytest.mark.asyncio
+async def test_audit_grid_limiter_skips_incomplete_home() -> None:
+    """When any home_from_* is missing, do not write a charge limit this cycle."""
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
+
+    sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
+    sw._is_on = True
+    sw._current_charge_limit = 0.0
+    sw._device_power_limit_w = 10000.0
+    sw._feed_in_limit_w = 5000.0
+    sw._original_charge_limit = None
+
+    async def _read_float(name: str) -> float | None:
+        return {
+            "total_dc_power": 8000.0,
+            "home_from_pv": 500.0,
+            "home_from_battery": None,
+            "home_from_grid": 700.0,
+        }.get(name)
+
+    sw._read_float = _read_float
+    write_calls: list[float] = []
+
+    async def _write(watts: float) -> None:
+        write_calls.append(watts)
+        sw._is_on = False
+
+    sw._write_charge_limit = _write
+    sw.async_write_ha_state = MagicMock()
+
+    async def _sleep_and_stop(_seconds: float) -> None:
+        sw._is_on = False
+
+    with patch("asyncio.sleep", side_effect=_sleep_and_stop):
+        await sw._control_loop()
+
+    # Only the finally-block restore on loop exit — no surplus charge limit.
+    assert len(write_calls) == 1
+    assert write_calls[0] == sw._device_power_limit_w
 
 
 # ---------------------------------------------------------------------------

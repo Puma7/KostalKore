@@ -289,6 +289,40 @@ class TestInverterHealthMonitor:
         assert m.active_error_count.current == 2.0
         assert m.active_warning_count.current == 5.0
 
+    def test_resolve_active_error_warning_counts_from_rest(self) -> None:
+        from custom_components.kostal_kore.health_monitor import (
+            resolve_active_error_warning_counts,
+        )
+
+        counts = resolve_active_error_warning_counts(
+            {
+                "scb:event": {
+                    "Event:ActiveErrorCnt": "0",
+                    "Event:ActiveWarningCnt": "2",
+                }
+            }
+        )
+        assert counts == (0, 2)
+
+    def test_resolve_active_error_warning_counts_event_fallback(self) -> None:
+        from custom_components.kostal_kore.health_monitor import (
+            resolve_active_error_warning_counts,
+        )
+
+        counts = resolve_active_error_warning_counts(
+            None,
+            event_snapshot={"active_error_events_count": 3},
+        )
+        assert counts == (3, 0)
+
+    def test_resolve_active_error_warning_counts_missing(self) -> None:
+        from custom_components.kostal_kore.health_monitor import (
+            resolve_active_error_warning_counts,
+        )
+
+        assert resolve_active_error_warning_counts(None) is None
+        assert resolve_active_error_warning_counts({}) is None
+
     def test_info_level_threshold(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"controller_temp": 64.0})
@@ -310,14 +344,113 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
         assert m.isolation.current is None
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+        assert m.isolation_modbus_attributes()["modbus_measurement_unavailable"] is True
 
-    def test_isolation_sentinel_65535000_skipped(self) -> None:
-        """The Modbus sentinel marker must not contaminate the isolation trend."""
+    def test_isolation_sentinel_recorded_as_off_scale_during_pv(self) -> None:
+        """Sentinel during PV matches Kostal ~65.5 MΩ off-scale display."""
         m = InverterHealthMonitor()
         m.update_from_modbus(
-            {"isolation_resistance": 65535000.0, "total_dc_power": 5000.0}
+            {
+                "isolation_resistance": 65_535_000.0,
+                "total_dc_power": 5000.0,
+                "inverter_state": 6,
+            }
+        )
+        assert m.isolation.current == 65_535_000.0
+        assert m.get_isolation_resistance_ohm() == 65_535_000.0
+        assert m._isolation_modbus_off_scale is True
+        attrs = m.isolation_modbus_attributes()
+        assert attrs["modbus_sentinel"] is True
+        assert attrs["kostal_display_mohm"] == 65.5
+        assert attrs["modbus_measurement_unavailable"] is False
+
+    def test_isolation_sentinel_skipped_at_night(self) -> None:
+        """Sentinel without PV must not seed a fake high reading."""
+        m = InverterHealthMonitor()
+        m.update_from_modbus(
+            {
+                "isolation_resistance": 65_535_000.0,
+                "total_dc_power": 0.0,
+                "inverter_state": 10,
+            }
         )
         assert m.isolation.current is None
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+
+    def test_isolation_sentinel_unavailable_when_not_off_scale(self) -> None:
+        m = InverterHealthMonitor()
+        with patch(
+            "custom_components.kostal_kore.health_monitor.isolation_sentinel_as_off_scale_high",
+            return_value=False,
+        ):
+            m.update_from_modbus(
+                {
+                    "isolation_resistance": 65_535_000.0,
+                    "total_dc_power": 5000.0,
+                    "inverter_state": 6,
+                }
+            )
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+
+    def test_isolation_unavailable_when_normalization_fails(self) -> None:
+        m = InverterHealthMonitor()
+        with patch(
+            "custom_components.kostal_kore.health_monitor.normalize_isolation_resistance_ohm",
+            return_value=None,
+        ):
+            m.update_from_modbus(
+                {
+                    "isolation_resistance": 5000.0,
+                    "total_dc_power": 5000.0,
+                    "inverter_state": 6,
+                }
+            )
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+
+    @pytest.mark.asyncio
+    async def test_restore_isolation_skips_expired_persisted_sample(
+        self, hass: HomeAssistant
+    ) -> None:
+        import time
+        from unittest.mock import AsyncMock, MagicMock
+
+        from custom_components.kostal_kore.modbus_coordinator import (
+            ModbusDataUpdateCoordinator,
+        )
+
+        client = MagicMock()
+        client.host = "192.168.1.250"
+        client.port = 1502
+        coord = ModbusDataUpdateCoordinator(hass, client)
+        monitor = InverterHealthMonitor()
+        coord._health_monitor = monitor
+        coord._isolation_store.async_load = AsyncMock(
+            return_value={
+                "isolation_ohm": 22_700_000.0,
+                "saved_at": time.time() - 90_000.0,
+            }
+        )
+        await coord._restore_isolation_sample()
+        assert monitor.isolation.sample_count == 0
+
+    def test_isolation_sentinel_replaces_stale_low_sample(self) -> None:
+        """Off-scale sentinel overwrites a wrong historic sample (e.g. 22.7 MΩ)."""
+        m = InverterHealthMonitor()
+        m.isolation.record(22_700_000.0)
+        m.update_from_modbus(
+            {
+                "isolation_resistance": 65_535_000.0,
+                "total_dc_power": 9000.0,
+                "inverter_state": 6,
+            }
+        )
+        assert m.get_isolation_resistance_ohm() == 65_535_000.0
+        assert m.isolation.sample_count == 2
 
 
 class TestHealthMonitorCoverageGaps:

@@ -33,11 +33,90 @@ ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
 
 # Modbus isolation-resistance sentinel (= 0xFFFF × 1000, i.e. UINT16-max
 # multiplied by the inverter's internal kΩ→Ω scale factor = 65,535,000 Ω).
-# The inverter writes this value when no actual isolation measurement is
-# available — typically at night or before isolation has been measured for
-# the current cycle. Filtering it consistently prevents a flat sentinel line
-# from contaminating the recorder history and trend math.
+#
+# Kostal uses this when the UINT16 kΩ channel overflows (~65.535 MΩ max) or
+# when no measurement is available. During PV / IsoMeas it matches the WR UI
+# showing about "65.5 MΩ" (very high / off-scale). At night it means "no reading".
 ISOLATION_SENTINEL_OHM: Final[float] = 65_535_000.0
+ISOLATION_OFF_SCALE_DISPLAY_MOHM: Final[float] = 65.5
+
+# Do not restore persisted isolation samples older than this (seconds).
+ISOLATION_PERSIST_MAX_AGE_SECONDS: Final[float] = 86_400.0
+
+# Conservative DC→AC factor when comparing Modbus total_dc_power (register 100,
+# DC side) with home_from_* registers (AC house consumption, Kostal footnote 8).
+INVERTER_DC_TO_AC_EFFICIENCY: Final[float] = 0.96
+
+
+def optional_float(val: Any) -> float | None:
+    """Parse a numeric Modbus/REST value; reject NaN/Inf."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
+
+
+def safe_home_power_w(value: float | None, *, register: str) -> float:
+    """Return non-negative home power [W]; log unexpected negatives."""
+    if value is None:
+        return 0.0
+    if value < 0:
+        _LOGGER.warning(
+            "Unexpected negative home power on %s: %s W — treating as 0",
+            register,
+            value,
+        )
+        return 0.0
+    return value
+
+
+def sum_home_consumption_power_w(
+    home_from_pv: float | None,
+    home_from_battery: float | None,
+    home_from_grid: float | None,
+) -> float | None:
+    """Sum Kostal home_from_* [W] when all three registers are present."""
+    parts = (home_from_pv, home_from_battery, home_from_grid)
+    if all(p is None for p in parts):
+        return None
+    if any(p is None for p in parts):
+        return None
+    return (
+        safe_home_power_w(home_from_pv, register="home_from_pv")
+        + safe_home_power_w(home_from_battery, register="home_from_battery")
+        + safe_home_power_w(home_from_grid, register="home_from_grid")
+    )
+
+
+def dc_pv_power_to_ac_estimate_w(dc_power_w: float) -> float:
+    """Estimate AC PV output from total_dc_power (register 100)."""
+    return max(0.0, dc_power_w * INVERTER_DC_TO_AC_EFFICIENCY)
+
+
+def battery_efficiency_measurement_quality(
+    charge_pv_kwh: float,
+    charge_grid_kwh: float,
+) -> str:
+    """Classify hybrid battery-efficiency inputs for sensor attributes."""
+    total = charge_pv_kwh + charge_grid_kwh
+    if total <= 0:
+        return "no_charge"
+    if charge_grid_kwh <= 0:
+        return "pure_dc"
+    if charge_pv_kwh <= 0:
+        return "pure_ac"
+    grid_share = charge_grid_kwh / total
+    # Heuristic bands for sensor attributes (not used in control logic).
+    if grid_share < 0.05:
+        return "mostly_dc"
+    if grid_share > 0.95:
+        return "mostly_ac"
+    return "mixed"
 
 
 def integration_entry_store(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
@@ -105,6 +184,36 @@ def normalize_isolation_resistance_ohm(
 INVERTER_STATE_OFF: Final[int] = 0
 INVERTER_STATE_INIT: Final[int] = 1
 INVERTER_STATE_ISOMEAS: Final[int] = 2
+
+
+def is_isolation_sentinel_ohm(value: float) -> bool:
+    """Return True when Modbus register 120 reports the Kostal sentinel / overflow."""
+    return value == ISOLATION_SENTINEL_OHM
+
+
+def isolation_sentinel_as_off_scale_high(
+    *, pv_active: bool, inverter_state: int | None
+) -> bool:
+    """During production, treat the sentinel like the WR's ~65.5 MΩ off-scale display."""
+    return isolation_measurement_expected(
+        pv_active=pv_active, inverter_state=inverter_state
+    )
+
+
+def isolation_kostal_display_mohm(ohm: float | None) -> float | None:
+    """Convert stored Ω to the same MΩ scale shown on Kostal inverters (~65.5)."""
+    if ohm is None:
+        return None
+    return round(ohm / 1_000_000, 1)
+
+
+def isolation_measurement_expected(
+    *, pv_active: bool, inverter_state: int | None
+) -> bool:
+    """Return True when the inverter should provide a real isolation reading."""
+    return pv_active or inverter_state == INVERTER_STATE_ISOMEAS
+
+
 INVERTER_STATE_GRID_CHECK: Final[int] = 3
 INVERTER_STATE_START_UP: Final[int] = 4
 INVERTER_STATE_FEED_IN: Final[int] = 6

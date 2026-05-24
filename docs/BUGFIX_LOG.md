@@ -476,6 +476,19 @@ home = abs(home_from_pv or 0) + abs(home_from_battery or 0) + abs(home_from_grid
 
 ---
 
+### Calculated values — DC/AC alignment and partial home sums (2026-05)
+
+**Files:** `helper.py`, `grid_charge_limiter.py`, `mqtt_bridge.py`, `observability_entities.py`, `sensor.py`
+
+1. **Grid Feed-In Optimizer:** Compare AC-scaled PV (`total_dc_power × 0.96`) to the sum of all three `home_from_*` registers. Skip the control cycle when any home register is missing (no partial sums). Replace `abs()` with `safe_home_power_w()` that logs negative readings.
+2. **MQTT proxy:** `home_power` is published only when all three home registers are present. Added `pv_power_dc` and `pv_power_ac_est`; `pv_power` remains a legacy alias for DC.
+3. **REST/Modbus consistency sensor:** Uses the same all-or-nothing home sum.
+4. **BatteryEfficiency / BatteryNetEfficiency:** Attribute `measurement_quality` (`pure_dc`, `mixed`, …) — formulas unchanged (documented hybrid approximation).
+
+**Tests:** `test_sum_home_consumption_power_w_all_or_nothing`, `test_audit_grid_limiter_skips_incomplete_home`, MQTT partial-home publish checks in `test_mqtt_bridge_publish_and_formatting_edge_paths`.
+
+---
+
 ### Bugbot MITTEL-1 🟡 — migration_services duplicate_source path renamed old row anyway
 
 **File:** `custom_components/kostal_kore/migration_services.py:430+`

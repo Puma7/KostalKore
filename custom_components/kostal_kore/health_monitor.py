@@ -19,15 +19,62 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any, Final
 
-from .helper import normalize_isolation_resistance_ohm
+from .helper import (
+    ISOLATION_SENTINEL_OHM,
+    is_isolation_sentinel_ohm,
+    isolation_kostal_display_mohm,
+    isolation_measurement_expected,
+    isolation_sentinel_as_off_scale_high,
+    normalize_isolation_resistance_ohm,
+)
 
 _LOGGER: Final = logging.getLogger(__name__)
 
 MAX_HISTORY_SIZE: Final[int] = 2000
+
+
+def resolve_active_error_warning_counts(
+    process_data: Mapping[str, Any] | None,
+    *,
+    event_snapshot: Mapping[str, Any] | None = None,
+) -> tuple[int, int] | None:
+    """Map REST/event counters to (errors, warnings) for the health binary sensor.
+
+    Primary source is scb:event process data (Event:ActiveErrorCnt /
+    Event:ActiveWarningCnt). When the error counter is missing, fall back to
+    the event coordinator's active_error_events_count (warnings default to 0).
+    """
+    errors: int | None = None
+    warnings: int | None = None
+
+    if process_data:
+        event_mod = process_data.get("scb:event")
+        if isinstance(event_mod, Mapping):
+            errors = _safe_int(event_mod.get("Event:ActiveErrorCnt"))
+            warnings = _safe_int(event_mod.get("Event:ActiveWarningCnt"))
+
+    if errors is None and event_snapshot is not None:
+        errors = _safe_int(event_snapshot.get("active_error_events_count"))
+
+    if errors is None:
+        return None
+    if warnings is None:
+        warnings = 0
+    return errors, warnings
+
+
+def _safe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_float(value: Any) -> float | None:
@@ -259,6 +306,9 @@ class InverterHealthMonitor:
         self._failed_polls: int = 0
         self._inverter_state_changes: deque[HealthEvent] = deque(maxlen=100)
         self._last_inverter_state: int | None = None
+        self._isolation_last_modbus_raw: float | None = None
+        self._isolation_modbus_unavailable: bool = False
+        self._isolation_modbus_off_scale: bool = False
 
     @property
     def all_trackers(self) -> dict[str, ParameterTracker]:
@@ -329,32 +379,65 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
-                        # Record isolation when PV is active (>5 W) or during
-                        # IsoMeas state (state=2), where the inverter actively
-                        # measures isolation before grid connection.
-                        iso_meas_active = inverter_state == 2
-                        if not pv_active and not iso_meas_active:
+                        self._isolation_last_modbus_raw = fval
+                        expects_measurement = isolation_measurement_expected(
+                            pv_active=pv_active,
+                            inverter_state=inverter_state,
+                        )
+                        if not expects_measurement:
+                            # Night/standby: no valid Modbus isolation for HA.
+                            self._isolation_modbus_unavailable = True
+                            self._isolation_modbus_off_scale = False
                             continue
-                        # Modbus sentinel: 65535000 Ω = 0xFFFFFF (max-value
-                        # marker the inverter writes when no measurement is
-                        # available, typically at night or before isolation
-                        # has been measured for the cycle). Recording it
-                        # produces a flat sentinel line in the recorder
-                        # history that hides real degradation.
-                        from .helper import ISOLATION_SENTINEL_OHM
-                        if fval == ISOLATION_SENTINEL_OHM:
+                        if is_isolation_sentinel_ohm(fval):
+                            if isolation_sentinel_as_off_scale_high(
+                                pv_active=pv_active,
+                                inverter_state=inverter_state,
+                            ):
+                                # Kostal WR UI shows ~65.5 MΩ for this Modbus
+                                # pattern during production — record it so HA
+                                # tracks "high" and later real drops.
+                                self._isolation_modbus_unavailable = False
+                                self._isolation_modbus_off_scale = True
+                                self.isolation.record(ISOLATION_SENTINEL_OHM)
+                            else:
+                                self._isolation_modbus_unavailable = True
+                                self._isolation_modbus_off_scale = False
                             continue
+                        self._isolation_modbus_off_scale = False
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
                             pv_active=pv_active,
                             inverter_state=inverter_state,
                         )
                         if normalized_ohm is None:
+                            self._isolation_modbus_unavailable = True
                             continue
+                        self._isolation_modbus_unavailable = False
                         fval = normalized_ohm
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass
+
+    def get_isolation_resistance_ohm(self) -> float | None:
+        """Return isolation for HA display; None when Modbus has no valid reading."""
+        if self._isolation_modbus_unavailable:
+            return None
+        return self.isolation.current
+
+    def isolation_modbus_attributes(self) -> dict[str, Any]:
+        """Diagnostic attributes for the isolation health sensor."""
+        raw = self._isolation_last_modbus_raw
+        current = self.isolation.current
+        return {
+            "modbus_raw_ohm": raw,
+            "modbus_sentinel": (
+                is_isolation_sentinel_ohm(raw) if raw is not None else None
+            ),
+            "modbus_off_scale_high": self._isolation_modbus_off_scale,
+            "modbus_measurement_unavailable": self._isolation_modbus_unavailable,
+            "kostal_display_mohm": isolation_kostal_display_mohm(current),
+        }
 
     def _apply_grid_profile(self, data: dict[str, Any]) -> None:
         """Adapt frequency/voltage thresholds for 50/60Hz and 120/230V grids."""

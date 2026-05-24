@@ -345,7 +345,8 @@ The integration provides human-readable inverter states:
 ### Isolation Resistance shows `unknown`
 1. In KORE, isolation resistance is sourced from Modbus register `120` (`isolation_resistance`), not REST.
 2. `unknown` means no valid Modbus value was read yet (startup, transient disconnects, or unsupported register on current model/firmware).
-3. Check logs for:
+3. When Modbus returns **65,535,000 Ω** during PV production, Kostal uses that as an **off-scale high** reading (WR UI shows about **65.5 MΩ**). KORE records it for trends; see attributes `modbus_off_scale_high` and `kostal_display_mohm`. At night the same raw value means “no measurement” and is not recorded.
+4. Check logs for:
    - `Connection lost reading isolation_resistance`
    - `Illegal data address`
 4. Verify Modbus is enabled on inverter and integration settings (host/port/unit-id) are correct.

@@ -27,14 +27,19 @@ from custom_components.kostal_kore.helper import (
     ModbusServerDeviceFailureError,
     ModbusServerDeviceBusyError,
     PlenticoreDataFormatter,
+    battery_efficiency_measurement_quality,
+    dc_pv_power_to_ac_estimate_w,
     ensure_installer_access,
     generate_confirmation_code,
     get_hostname_id,
     integration_entry_store,
     is_battery_control,
     normalize_isolation_resistance_ohm,
+    optional_float,
     parse_modbus_exception,
     requires_installer_service_code,
+    safe_home_power_w,
+    sum_home_consumption_power_w,
 )
 
 @pytest.fixture
@@ -206,6 +211,29 @@ def test_generate_confirmation_code_uses_expected_alphabet() -> None:
     assert all(c in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" for c in code)
 
 
+def test_isolation_sentinel_and_measurement_expected_helpers() -> None:
+    from custom_components.kostal_kore.helper import (
+        INVERTER_STATE_ISOMEAS,
+        ISOLATION_SENTINEL_OHM,
+        is_isolation_sentinel_ohm,
+        isolation_kostal_display_mohm,
+        isolation_measurement_expected,
+        isolation_sentinel_as_off_scale_high,
+    )
+
+    assert is_isolation_sentinel_ohm(ISOLATION_SENTINEL_OHM)
+    assert not is_isolation_sentinel_ohm(65_500_000.0)
+    assert isolation_measurement_expected(pv_active=True, inverter_state=6)
+    assert isolation_measurement_expected(
+        pv_active=False, inverter_state=INVERTER_STATE_ISOMEAS
+    )
+    assert not isolation_measurement_expected(pv_active=False, inverter_state=10)
+    assert isolation_sentinel_as_off_scale_high(pv_active=True, inverter_state=6)
+    assert not isolation_sentinel_as_off_scale_high(pv_active=False, inverter_state=10)
+    assert isolation_kostal_display_mohm(ISOLATION_SENTINEL_OHM) == 65.5
+    assert isolation_kostal_display_mohm(None) is None
+
+
 def test_normalize_isolation_resistance_ohm_handles_kohm_variant() -> None:
     assert normalize_isolation_resistance_ohm(
         65.5, pv_active=True, inverter_state=6
@@ -364,3 +392,39 @@ async def test_get_hostname_id_missing_network_settings() -> None:
     client.get_settings = AsyncMock(return_value={})
     with pytest.raises(ApiException):
         await get_hostname_id(client)
+
+
+def test_sum_home_consumption_power_w_all_or_nothing() -> None:
+    assert sum_home_consumption_power_w(None, None, None) is None
+    assert sum_home_consumption_power_w(100.0, None, 50.0) is None
+    assert sum_home_consumption_power_w(100.0, 20.0, 30.0) == 150.0
+
+
+def test_safe_home_power_w_rejects_negative(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING"):
+        assert safe_home_power_w(-5.0, register="home_from_pv") == 0.0
+    assert "home_from_pv" in caplog.text
+
+
+def test_dc_pv_power_to_ac_estimate_w() -> None:
+    assert dc_pv_power_to_ac_estimate_w(5000.0) == 4800.0
+    assert dc_pv_power_to_ac_estimate_w(-100.0) == 0.0
+
+
+def test_optional_float_rejects_nan() -> None:
+    assert optional_float(float("nan")) is None
+    assert optional_float("12.5") == 12.5
+    assert optional_float("not-a-number") is None
+
+
+def test_safe_home_power_w_none_treated_as_zero() -> None:
+    assert safe_home_power_w(None, register="home_from_pv") == 0.0
+
+
+def test_battery_efficiency_measurement_quality() -> None:
+    assert battery_efficiency_measurement_quality(10.0, 0.0) == "pure_dc"
+    assert battery_efficiency_measurement_quality(0.0, 5.0) == "pure_ac"
+    assert battery_efficiency_measurement_quality(95.0, 1.0) == "mostly_dc"
+    assert battery_efficiency_measurement_quality(1.0, 95.0) == "mostly_ac"
+    assert battery_efficiency_measurement_quality(5.0, 5.0) == "mixed"
+    assert battery_efficiency_measurement_quality(0.0, 0.0) == "no_charge"

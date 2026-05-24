@@ -36,7 +36,11 @@ from .coordinator import (
     PlenticoreConfigEntry,
     ProcessDataUpdateCoordinator,
 )
-from .helper import PlenticoreDataFormatter, parse_modbus_exception
+from .helper import (
+    PlenticoreDataFormatter,
+    battery_efficiency_measurement_quality,
+    parse_modbus_exception,
+)
 from .ksem_coordinator import KsemDataUpdateCoordinator
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .startup_trace import log_entity_batch
@@ -1528,6 +1532,10 @@ async def async_setup_entry(
         _entry_store_pc.get("degradation_tracker")
         if isinstance(_entry_store_pc, dict) else None
     )
+    _event_coordinator_obj = (
+        _entry_store_pc.get("event_coordinator")
+        if isinstance(_entry_store_pc, dict) else None
+    )
     if _health_monitor_obj is not None or _degradation_tracker_obj is not None:
         def _feed_rest_soh() -> None:
             data = process_data_update_coordinator.data
@@ -1559,6 +1567,33 @@ async def async_setup_entry(
         # methods firing on already-torn-down trackers).
         _unsub_soh = process_data_update_coordinator.async_add_listener(_feed_rest_soh)
         entry.async_on_unload(_unsub_soh)
+
+    if _health_monitor_obj is not None:
+        from .health_monitor import resolve_active_error_warning_counts
+
+        def _feed_active_error_counts() -> None:
+            counts = resolve_active_error_warning_counts(
+                process_data_update_coordinator.data,
+                event_snapshot=(
+                    _event_coordinator_obj.data
+                    if _event_coordinator_obj is not None
+                    else None
+                ),
+            )
+            if counts is None:
+                return
+            errors, warnings = counts
+            _health_monitor_obj.update_error_counts(errors, warnings)
+
+        _unsub_errors = process_data_update_coordinator.async_add_listener(
+            _feed_active_error_counts
+        )
+        entry.async_on_unload(_unsub_errors)
+        if _event_coordinator_obj is not None:
+            _unsub_errors_ev = _event_coordinator_obj.async_add_listener(
+                _feed_active_error_counts
+            )
+            entry.async_on_unload(_unsub_errors_ev)
 
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(
@@ -2133,6 +2168,35 @@ class PlenticoreCalculatedSensor(
             _LOGGER.debug("Error calculating %s: %s", self.data_id, e)
             return None
         return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """Expose measurement-plane metadata for hybrid efficiency sensors."""
+        if ":" not in self.data_id:
+            return {}
+        metric, period = self.data_id.split(":", 1)
+        if metric not in ("BatteryEfficiency", "BatteryNetEfficiency"):
+            return {}
+        charge_pv = self._get_sensor_value(
+            "scb:statistic:EnergyFlow", f"Statistic:EnergyChargePv:{period}"
+        )
+        charge_grid = self._get_sensor_value(
+            "scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}"
+        )
+        if charge_pv is None or charge_grid is None:
+            return {}
+        try:
+            pv_kwh = float(charge_pv)
+            grid_kwh = float(charge_grid)
+        except (TypeError, ValueError):
+            return {}
+        return {
+            "measurement_quality": battery_efficiency_measurement_quality(
+                pv_kwh, grid_kwh
+            ),
+            "charge_pv_kwh": round(pv_kwh, 3),
+            "charge_grid_kwh": round(grid_kwh, 3),
+        }
 
     def _get_sensor_value(self, module_id: str, data_id: str) -> str | None:
         """Get value from another sensor."""

@@ -131,21 +131,70 @@ async def test_mqtt_bridge_publish_and_formatting_edge_paths() -> None:
 
     with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
         await bridge._publish_data({"custom": _Unserializable(), "battery_soc": 72})
+        payloads = [call.args[2] for call in mock_mqtt.async_publish.await_args_list]
         await bridge._publish_proxy_topics({"inverter_state": "not-an-int"})
+        assert any(
+            call.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/inverter_state"
+            and call.args[2] == "not-an-int"
+            for call in mock_mqtt.async_publish.await_args_list
+        )
+        mock_mqtt.async_publish.reset_mock()
+        await bridge._publish_proxy_topics(
+            {
+                "total_dc_power": 5000,
+                "home_from_pv": 1000,
+                "home_from_battery": None,
+                "home_from_grid": 500,
+            }
+        )
+        partial_home = [
+            c
+            for c in mock_mqtt.async_publish.await_args_list
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/home_power"
+        ]
+        assert not partial_home, "home_power must not publish when a register is missing"
+
+        mock_mqtt.async_publish.reset_mock()
+        await bridge._publish_proxy_topics(
+            {
+                "total_dc_power": 5000,
+                "home_from_pv": 1000,
+                "home_from_battery": 200,
+                "home_from_grid": 500,
+            }
+        )
+        full_home = [
+            c
+            for c in mock_mqtt.async_publish.await_args_list
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/home_power"
+        ]
+        assert full_home, "home_power should publish when all three registers exist"
+        publish_args = mock_mqtt.async_publish.await_args_list
+        pv_dc = [
+            c
+            for c in publish_args
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/pv_power_dc"
+        ]
+        pv_legacy = [
+            c
+            for c in publish_args
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/pv_power"
+        ]
+        assert pv_dc and pv_legacy
+        assert pv_dc[0].args[2] == pv_legacy[0].args[2] == "5000.0"
+        pv_ac = [
+            c
+            for c in publish_args
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/pv_power_ac_est"
+        ]
+        assert pv_ac and pv_ac[0].args[2] == "4800.0"
         await bridge._publish_register_metadata()
 
-    payloads = [call.args[2] for call in mock_mqtt.async_publish.await_args_list]
     assert any("custom" in str(payload) for payload in payloads)
-    assert any(
-        call.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/inverter_state"
-        and call.args[2] == "not-an-int"
-        for call in mock_mqtt.async_publish.await_args_list
-    )
     assert any(
         call.args[1] == f"{TOPIC_PREFIX}/INV123/modbus/config"
         for call in mock_mqtt.async_publish.await_args_list
     )
-
     hass = _mock_mqtt_hass(mqtt_available=False)
     bridge = KostalMqttBridge(hass, coordinator, "INV123")
     await bridge._publish_proxy_topics({"battery_soc": 50})
