@@ -137,11 +137,19 @@ class GridFeedInLimiterSwitch(SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        self._cancel_control()
+        # Set before any await: cancelled _control_loop finally can run during
+        # _write_charge_limit; without this it would call _restore_limit() again
+        # after the snapshot was already consumed and fall back to device max.
+        self._restore_handled_in_turn_off = True
+        task = self._cancel_control()
+        if isinstance(task, asyncio.Task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         restore = self._restore_limit()
         await self._write_charge_limit(restore)
         release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
-        self._restore_handled_in_turn_off = True
         self._current_charge_limit = 0.0
         self._modbus_read_failed_cycles = 0
         self.async_write_ha_state()
@@ -154,10 +162,13 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             "kostal_kore_grid_feedin_control",
         )
 
-    def _cancel_control(self) -> None:
-        if self._task and not self._task.done():
-            self._task.cancel()
+    def _cancel_control(self) -> asyncio.Task[None] | None:
+        """Cancel the control loop task and clear ``_task``. Returns the task."""
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
         self._task = None
+        return task
 
     async def _control_loop(self) -> None:
         """Dynamically adjust battery charge limit based on PV production."""

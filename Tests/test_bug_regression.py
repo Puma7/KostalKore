@@ -1765,6 +1765,70 @@ async def test_audit_grid_optimizer_restores_limit_on_exception(
     assert sw._is_on is False, "Optimizer must mark itself OFF after restore"
 
 
+@pytest.mark.asyncio
+async def test_grid_turn_off_restore_flag_before_control_loop_finally(
+    hass: HomeAssistant,
+) -> None:
+    """async_turn_off must set _restore_handled_in_turn_off before any await.
+
+    Otherwise the cancelled _control_loop finally can run during
+    _write_charge_limit, call _restore_limit() after the snapshot was consumed,
+    and restore device max instead of the user's previous limit.
+    """
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
+
+    from custom_components.kostal_kore.const import DOMAIN
+
+    sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
+    sw._entry_id = "race_entry"
+    sw.hass = hass
+    sw._coord = MagicMock()
+    sw._device_power_limit_w = 12500.0
+    sw._feed_in_limit_w = 5000.0
+    sw._current_charge_limit = 0.0
+    sw._original_charge_limit = 3200.0
+    sw._restore_handled_in_turn_off = False
+    sw._is_on = True
+    sw._modbus_read_failed_cycles = 0
+    sw.async_write_ha_state = MagicMock()
+
+    written: list[float] = []
+    finally_flag: list[bool] = []
+
+    async def track_write(watts: float) -> None:
+        written.append(watts)
+
+    sw._write_charge_limit = track_write
+
+    hass.data.setdefault(DOMAIN, {})["race_entry"] = {}
+
+    async def fake_control_loop_with_flag_probe() -> None:
+        try:
+            while sw._is_on:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            return
+        finally:
+            sw._is_on = False
+            sw.async_write_ha_state()
+            finally_flag.append(sw._restore_handled_in_turn_off)
+            if not sw._restore_handled_in_turn_off:
+                await sw._write_charge_limit(sw._restore_limit())
+            sw._restore_handled_in_turn_off = False
+
+    sw._task = hass.async_create_task(fake_control_loop_with_flag_probe())
+    await asyncio.sleep(0)
+
+    await sw.async_turn_off()
+
+    assert finally_flag == [True], (
+        "Control-loop finally must see restore_handled before turn_off write"
+    )
+    assert written == [3200.0], (
+        f"Only turn_off should restore snapshotted limit, got {written}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Bugbot-Audit KRITISCH-1 — Modbus slow-poll cache
 #
