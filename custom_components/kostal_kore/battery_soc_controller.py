@@ -153,27 +153,35 @@ class BatterySocController:
             return
 
         acquire_reg_1038_or_raise(self._hass, self._entry_id, OWNER_SOC_CONTROLLER)
+        try:
+            _LOGGER.info("SoC Controller: target = %.0f%%", soc)
+            await self._notify(
+                "Ziel-SoC gesetzt",
+                f"Batterie wird auf {soc:.0f}% gesteuert "
+                f"(Bereich: {SAFE_MIN_SOC:.0f}-{SAFE_MAX_SOC:.0f}%).\n"
+                f"Max. Laden: {self._max_charge_w:.0f} W\n"
+                f"Max. Entladen: {self._max_discharge_w:.0f} W",
+            )
 
-        _LOGGER.info("SoC Controller: target = %.0f%%", soc)
-        await self._notify(
-            "Ziel-SoC gesetzt",
-            f"Batterie wird auf {soc:.0f}% gesteuert "
-            f"(Bereich: {SAFE_MIN_SOC:.0f}-{SAFE_MAX_SOC:.0f}%).\n"
-            f"Max. Laden: {self._max_charge_w:.0f} W\n"
-            f"Max. Entladen: {self._max_discharge_w:.0f} W",
-        )
-
-        # Guard task creation to prevent duplicate control loops when
-        # two set_target() calls race across an await boundary.
-        async with self._task_lock:
-            if self._task is None or self._task.done():
-                if self._hass is not None:
-                    self._task = self._hass.async_create_task(
-                        self._run_loop(),
-                        "kostal_kore_soc_controller",
-                    )
-                else:
-                    self._task = asyncio.ensure_future(self._run_loop())
+            # Guard task creation to prevent duplicate control loops when
+            # two set_target() calls race across an await boundary.
+            async with self._task_lock:
+                if self._task is None or self._task.done():
+                    if self._hass is not None:
+                        self._task = self._hass.async_create_task(
+                            self._run_loop(),
+                            "kostal_kore_soc_controller",
+                        )
+                    else:
+                        self._task = asyncio.ensure_future(self._run_loop())
+        except BaseException:
+            hass = getattr(self, "_hass", None)
+            entry_id = getattr(self, "_entry_id", "")
+            async with self._task_lock:
+                task_running = self._task is not None and not self._task.done()
+            if hass is not None and entry_id and not task_running:
+                release_reg_1038(hass, entry_id, OWNER_SOC_CONTROLLER)
+            raise
 
     async def _stop(self) -> None:
         """Stop the controller and reset to automatic."""
@@ -188,8 +196,10 @@ class BatterySocController:
         self._target_soc = None
         self._status = "idle"
         await self._write_normal()
-        if self._hass is not None and self._entry_id:
-            release_reg_1038(self._hass, self._entry_id, OWNER_SOC_CONTROLLER)
+        hass = getattr(self, "_hass", None)
+        entry_id = getattr(self, "_entry_id", "")
+        if hass is not None and entry_id:
+            release_reg_1038(hass, entry_id, OWNER_SOC_CONTROLLER)
         _LOGGER.info("SoC Controller: stopped, automatic mode")
 
     async def stop(self) -> None:

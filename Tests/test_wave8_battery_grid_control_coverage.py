@@ -8,6 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.kostal_kore.battery_reg_1038_owner import (
+    OWNER_SOC_CONTROLLER,
+    get_reg_1038_owner_manager,
+)
 from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.battery_soc_controller import (
     BatterySocController,
@@ -128,6 +132,20 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     await controller._notify("Title", "Body")
     controller._hass = None
     await controller._notify("Ignored", "No hass")
+
+
+@pytest.mark.asyncio
+async def test_set_target_releases_reg_1038_when_setup_fails_before_loop() -> None:
+    """Acquire must not leak if notify/task setup fails before _run_loop starts."""
+    coord = _coord_stub()
+    hass = SimpleNamespace(data={DOMAIN: {"entry1": {}}})
+    controller = BatterySocController(coord, hass=hass, entry_id="entry1")
+    controller._notify = AsyncMock(side_effect=RuntimeError("notify failed"))
+
+    with pytest.raises(RuntimeError, match="notify failed"):
+        await controller.set_target(50)
+
+    assert get_reg_1038_owner_manager(hass, "entry1").current is None
 
 
 @pytest.mark.asyncio

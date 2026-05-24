@@ -101,8 +101,8 @@ class BatteryChargeBlockSwitch(SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Block battery charging: REG 1038 = 0."""
-        acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         await self._snapshot_charge_limit()
+        acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         try:
             await self._write_block()
         except Exception as err:

@@ -287,6 +287,28 @@ class BatteryTestSuite:
             self._emit(f"  Debug-Log: {self._debug_path}")
             self._emit("")
 
+            if (
+                self._hass
+                and self._entry_id
+                and getattr(self._hass, "data", None) is not None
+            ):
+                from homeassistant.exceptions import HomeAssistantError
+
+                from .battery_reg_1038_owner import (
+                    OWNER_BATTERY_TEST,
+                    acquire_reg_1038_or_raise,
+                )
+
+                try:
+                    acquire_reg_1038_or_raise(
+                        self._hass, self._entry_id, OWNER_BATTERY_TEST
+                    )
+                    reg_1038_acquired = True
+                except HomeAssistantError as err:
+                    self._emit(f"❌ {err}")
+                    await self._notify("Test abgebrochen", str(err))
+                    return results
+
             pf = await self._preflight(phases)
             if not pf.ok:
                 self._emit("❌ PRE-FLIGHT FEHLGESCHLAGEN")
@@ -300,21 +322,6 @@ class BatteryTestSuite:
                 self._emit(f"   ✓ {c}")
 
             await self._notify("Test gestartet", f"{len(phases)} Phasen | SoC {pf.battery_soc:.0f}%")
-
-            if (
-                self._hass
-                and self._entry_id
-                and getattr(self._hass, "data", None) is not None
-            ):
-                from .battery_reg_1038_owner import (
-                    OWNER_BATTERY_TEST,
-                    acquire_reg_1038_or_raise,
-                )
-
-                acquire_reg_1038_or_raise(
-                    self._hass, self._entry_id, OWNER_BATTERY_TEST
-                )
-                reg_1038_acquired = True
 
             for i, phase in enumerate(phases, 1):
                 if self._abort_requested:
