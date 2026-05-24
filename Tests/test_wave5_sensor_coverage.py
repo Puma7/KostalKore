@@ -240,6 +240,8 @@ async def test_sensor_calculated_and_virtual_sensor_paths() -> None:
     assert battery_eff.native_value == 80
     assert net_eff.native_value == 60
     assert inverter_eff.native_value == 75
+    assert battery_eff.extra_state_attributes["measurement_quality"] == "mixed"
+    assert net_eff.extra_state_attributes["measurement_quality"] == "mixed"
 
     broken_coordinator = MagicMock()
     broken_coordinator.data = {

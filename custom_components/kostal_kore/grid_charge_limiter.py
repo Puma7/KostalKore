@@ -15,7 +15,8 @@ When PV < feed-in limit: Battery charge = 0 (all to grid + house)
 When the switch is OFF: Normal operation (battery charges freely)
 
 Uses REG 1038 (bat_max_charge_limit) with 15s keepalive.
-Reads total_dc_power and pm_total_active every cycle to adjust dynamically.
+Reads total_dc_power and all home_from_* registers every cycle. DC PV is
+scaled by INVERTER_DC_TO_AC_EFFICIENCY before comparing to AC home load.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .helper import dc_pv_power_to_ac_estimate_w, sum_home_consumption_power_w
 from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import REGISTER_BY_NAME
@@ -155,9 +157,18 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                     await asyncio.sleep(CONTROL_INTERVAL)
                     continue
 
-                home = abs(home_pv or 0) + abs(home_bat or 0) + abs(home_grid or 0)
+                home = sum_home_consumption_power_w(
+                    home_pv, home_bat, home_grid
+                )
+                if home is None:
+                    _LOGGER.debug(
+                        "FeedIn Optimizer: incomplete home_from_* — skip cycle"
+                    )
+                    await asyncio.sleep(CONTROL_INTERVAL)
+                    continue
 
-                available_for_grid = pv_power - home
+                ac_pv = dc_pv_power_to_ac_estimate_w(pv_power)
+                available_for_grid = ac_pv - home
                 surplus = available_for_grid - self._feed_in_limit_w
 
                 if surplus > MIN_CHARGE_POWER_W:
@@ -171,11 +182,18 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                 await self._write_charge_limit(new_limit)
 
                 _LOGGER.debug(
-                    "FeedIn Optimizer: PV=%.0fW Home=%.0fW (pv=%.0f bat=%.0f grid=%.0f) "
+                    "FeedIn Optimizer: PVdc=%.0fW PVac~=%.0fW Home=%.0fW "
+                    "(pv=%.0f bat=%.0f grid=%.0f) "
                     "→ Available=%.0fW (charge limit=%.0fW, feed-in cap=%.0fW)",
-                    pv_power, home,
-                    abs(home_pv or 0), abs(home_bat or 0), abs(home_grid or 0),
-                    available_for_grid, new_limit, self._feed_in_limit_w,
+                    pv_power,
+                    ac_pv,
+                    home,
+                    home_pv or 0,
+                    home_bat or 0,
+                    home_grid or 0,
+                    available_for_grid,
+                    new_limit,
+                    self._feed_in_limit_w,
                 )
 
                 self.async_write_ha_state()
