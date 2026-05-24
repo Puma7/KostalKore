@@ -1229,6 +1229,13 @@ the filter at the health_monitor layer. If you add a new ingestion point for
 isolation resistance, add a corresponding test that feeds in `65_535_000.0` and
 asserts it produces no sample.
 
+> **Cross-ref (added 2026-05):** the sentinel filter must run on BOTH save AND
+> restore paths. `modbus_coordinator._restore_isolation_sample` previously
+> re-loaded persisted sentinels and re-poisoned the deque on every HA restart.
+> The shared `ISOLATION_SENTINEL_OHM` constant in `helper.py` is now consumed
+> by all three call sites (`health_monitor`, `degradation_tracker`,
+> `modbus_coordinator`). See §56 for the broader Battery SoH context.
+
 ---
 
 ## 49) OLS battery SoH projection: use discharge-only throughput axis
@@ -1259,6 +1266,10 @@ axis-independent). The baseline is never dropped across versions.
 
 Do not change the throughput axis again without bumping `_STORE_VERSION` and
 updating the migration function. The comment in the module explains the history.
+
+> **Cross-ref (added 2026-05):** §56 documents the full Battery SoH calculator
+> architecture (baseline, sample buffer, projection gates, NaN guard, capacity
+> ceiling) of which the OLS axis is one piece.
 
 ---
 
@@ -1375,3 +1386,851 @@ if cancel := entry_store.pop("_diag_cancel", None):
 The safest approach for diagnostic logging that doesn't need to be deferred is
 to move it into the `async_added_to_hass` callback of the entity, which fires
 synchronously during setup.
+
+---
+
+# Wave 2026-05-16 → 2026-05-23 — Reload Loop, Modbus Shutdown, Battery SoH, Observatory
+
+Captures the consolidated learnings from ~100 commits between 2026-05-16 and
+2026-05-23 on `main`. Earlier sections (§1–§53) remain authoritative for the
+March/April waves. New material is organized by theme — each section
+references the originating commits so you can trace the reasoning back to the
+diff if needed.
+
+## 54) HA reload loop: three independent root causes (b8 → b9 → b11)
+
+### Context
+
+Late May 2026, users reported a recurring ~55s setup→unload→setup cycle on
+Plenticore G3 setups. Initially looked like one bug. Forensic analysis
+revealed THREE independent root causes layered on top of each other,
+requiring three separate fix waves. Without this layering, a single fix
+would have looked successful and shipped — only to have the loop reappear
+days later under a different name.
+
+### Root cause 1 — Modbus refresh task blocks unload (b8 → b9)
+
+`async_shutdown()` closed the TCP client AFTER `super().async_shutdown()`.
+An in-progress pymodbus read was still blocking the refresh task when HA
+hit its 9-second unload deadline. HA logged `Task 'Kostal Modbus - WR -
+refresh' did not complete in time`, marked unload as failed, and entered a
+setup→retry cycle.
+
+*Commits: `52cf1a8` (Claude), `d1b4d08` (Cursor) — independent diagnosis,
+same root cause.*
+
+**Fix:**
+
+- Call `client.async_shutdown()` BEFORE `super().async_shutdown()` so the
+  TCP socket is closed and `_closing` is set while the refresh task is
+  still in-flight; blocked reads then fail fast.
+- Add `_closing` guard at start of `read_registers_batch`,
+  `_raw_read_inner`, `_raw_write_inner` (before AND after lock) for
+  defense-in-depth.
+- Fix unload order: stop SoC controller, proxy, MQTT bridge BEFORE
+  coordinator shutdown and platform unload — so register writes cannot
+  race against a half-closed client.
+
+### Root cause 2 — Listener fires during `ConfigEntryNotReady` rollback (b9 reload pressure)
+
+After b9 fix, init-loop-like behaviour persisted on some systems.
+`_feed_health_data` was registered before platform setup completed; during
+`ConfigEntryNotReady` rollback the listener could fire on the
+half-torn-down coordinator. Additionally, `BatterySohCalculator.async_save()`
+ran on EVERY changed Modbus poll during baseline calibration (could be
+every 30 s), creating I/O burst pressure that compounded with the
+listener problem.
+
+*Commits: `f2e78f6` (Cursor), `aaeac5c` (Cursor), `de86248` (Claude).*
+
+**Fix:**
+
+- Defer `_feed_health_data` listener registration until AFTER platform
+  setup succeeds.
+- Debounce SoH store writes 60 s via `schedule_save()` + `_debounced_save()`
+  — coalesces a burst of `changed=True` into one write.
+- Skip redundant isolation-resistance persistence when value is unchanged
+  (`_last_persisted_isolation_ohm`).
+- Add `cancel_pending_save()` registered via `async_on_unload` so the
+  debounce task is cancelled on entry unload (without this, the old
+  calculator instance could write stale data after a reload).
+
+### Root cause 3 — Entity registry `disabled_by` writes trigger HA-side reload (b10 → b11)
+
+After b9 made unloads succeed cleanly (0.2–0.9 s instead of timeout), the
+cycle STILL repeated every ~53 s with NO errors. No options-changed events
+fired, no integration code called `async_reload`. Trigger had to be
+external.
+
+The smoking gun was diagnostic logging (PR #41, see §55):
+`async_unload_entry`'s stack trace showed
+`EntityRegistryDisabledHandler._async_handle_reload` as the caller. HA
+schedules a config-entry reload **30 seconds after ANY `disabled_by`
+change** on registry entries. KORE was writing `disabled_by` from both
+`number.py` and `select.py` during setup (including a deferred 10 s
+callback for legacy inverter ID paths), producing ~55 s setup→unload
+cycles without KORE ever requesting a reload.
+
+*Commits: `05c6616` (Cursor PR #43), `1a011f3` (Cursor follow-up).*
+
+**Fix:**
+
+- New `entity_registry_helpers.py` module —
+  `update_disabled_by_if_changed()` only writes when the value actually
+  differs (no-op writes don't fire `EVENT_ENTITY_REGISTRY_UPDATED`).
+- Run duplicate-number cleanup ONCE after setup via
+  `run_post_setup_entity_registry_maintenance()` instead of
+  `async_call_later(10s, _ensure_critical_numbers_enabled)`.
+- Set `entity_registry_enabled_default=True` for force-created numbers so
+  they don't need a `disabled_by=None` write after add.
+- Log WARNING when unload stack shows HA Core `_async_handle_reload`, so
+  future occurrences are self-documenting in user logs.
+
+### Lessons
+
+1. **Layered bugs**: A reload loop with one observable symptom may have
+   multiple causes. Fixing one reveals the next; don't assume the first
+   fix solved it. Always re-test with full traces between cycles before
+   declaring victory.
+2. **HA Core can cause reloads silently**: Any `disabled_by`,
+   `disabled_by_for_user`, or similar registry mutation triggers a
+   scheduled reload via `EntityRegistryDisabledHandler`. Inspect HA Core
+   handlers when an external reload trigger is suspected.
+3. **Shutdown order matters more than logical order**: Close the network
+   client BEFORE the framework's `super().async_shutdown()`. The framework
+   handles graceful task cancellation but cannot abort blocked I/O — only
+   socket-level closure can.
+4. **No-op guards on registry writes are essential**: A bulk write of
+   `disabled_by=None` that doesn't change anything still fires
+   `EVENT_ENTITY_REGISTRY_UPDATED`. Always read-before-write for registry
+   mutations.
+
+---
+
+## 55) Diagnostic infrastructure: startup trace + unload caller tracing
+
+### Context
+
+The b9-era reload loop investigation was initially blind — logs only
+showed setup messages, no indication of WHO triggered the unload. Without
+forensic infrastructure, debugging required guesswork on production
+systems. Two new helpers turned this into a directed investigation and
+ultimately revealed Root Cause 3 in §54.
+
+### Startup trace logging (`startup_trace.py`)
+
+- Phase timing for login, Modbus, KSEM, each platform forward, entity
+  batch registration.
+- Sample `unique_id`s logged per batch so production issues can be matched
+  to entity-creation code paths.
+- Reload/unload tracing with explicit source tags (`options_listener`,
+  `config_flow`, `legacy_migration`).
+- Reload-skip reasons promoted from DEBUG to INFO so they appear in
+  default logs.
+- Filter pattern: `Kostal setup trace` shows the full lifecycle.
+
+*Commits: `2275f11`, `33bc144` (Cursor).*
+
+### Unload caller stack trace (`_log_unload_caller`)
+
+Dumps the asyncio task name plus the top ~10 non-kostal / non-stdlib
+frames at the moment `async_unload_entry` is entered. Bounded cost (10
+frames max, no I/O). Logs through `SetupTrace` so the existing filter
+picks it up.
+
+*Commit: `e95d5e2` (Claude). Mypy compatibility follow-up: `530c1b6`.*
+
+This is what revealed `EntityRegistryDisabledHandler._async_handle_reload`
+as the external trigger in §54.
+
+### Cross-cutting: route ALL integration-initiated reloads through one path
+
+Previously, multiple code paths called `hass.config_entries.async_reload()`
+directly. Now everything goes through `async_request_config_reload()` with
+an explicit `source` tag. When the unload caller trace shows NO such
+source tag, the reload came from HA itself or another integration.
+
+*Commit: `33bc144`.*
+
+### Lessons
+
+1. **Build diagnostics before you need them**: When a reload loop hits,
+   you have minutes to capture state before the user restarts HA.
+   Pre-built phase timing and stack dumps are 10× more useful than ad-hoc
+   print statements added mid-incident.
+2. **Tag reload origins explicitly**: When HA reloads can come from at
+   least 4 places (HA core, options listener, config flow, legacy
+   migration, foreign integration), an untagged `async_reload()` call is
+   a debug black hole.
+3. **Move INFO-level diagnostics out of DEBUG**: Default HA log level is
+   INFO. Reload-skip reasons, lifecycle counters, and rapid-cycle
+   detection should be INFO, not DEBUG. Users won't enable DEBUG before
+   reporting an issue — the data must be in the default log.
+4. **Filter by prefix**: A consistent log prefix (`Kostal setup trace`)
+   lets users grep without needing log-level changes or per-module logger
+   gymnastics.
+
+---
+
+## 56) Battery SoH calculator: inferred from Modbus telemetry alone
+
+### Context
+
+The Plenticore exposes a `SoH` REST register, but it's unreliable across
+firmware versions — some models report 0, others report inconsistent
+values. Battery sellers also want third-party verification that doesn't
+trust the inverter's self-report. The new `BatterySohCalculator` module
+derives SoH from `battery_work_capacity` (Modbus register 1068, in Wh)
+plus discharge throughput history.
+
+*Commits: `d394db0` (initial), `6b115d9` (Cursor review), `f452e02`
+(NaN/ceiling), `6a3160e` (store v2), `e339443` (coverage), `8c0abcf` (REST
+SoH feed), `aaeac5c`, `de86248` (write hardening).*
+
+See also §49 (OLS discharge-only throughput axis — the math foundation
+for the slope calculation here) and §48 (isolation sentinel filter — the
+restore-path bug was discovered while hardening this module).
+
+### Architecture
+
+**Persistent baseline (`_baseline_capacity_wh`):**
+
+- Set on first observed `battery_work_capacity`.
+- Raised by `>0.5%` when capacity climbs (early-calibration fresh
+  batteries can rise during their first weeks).
+- Never falls (the historical maximum becomes the reference for 100% SoH).
+- Persisted via HA Store; tolerates corrupt / missing entries.
+
+**Sample buffer:**
+
+- Records `(discharge_kwh, capacity_wh, timestamp)` every 3 h.
+- Bounded `deque(maxlen=N)` — oldest samples auto-evict.
+
+**Derived properties:**
+
+- `soh_pct = current_capacity / baseline × 100`
+- `degradation_per_kwh` = OLS slope of capacity vs cumulative discharge
+  (Wh-lost per kWh-discharged, negative = degrading).
+- `soh_projection_5y_pct = current_capacity − (slope × 5y_throughput)`,
+  projected linearly.
+- `total_throughput_kwh`, `cycles`, `annual_throughput_kwh` as attributes
+  for debugging and external automations.
+
+**Output sensors (`battery_soh_entities.py`):**
+
+- "Battery SoH (Calculated)" → `source=calculated_capacity_ratio`
+- "Battery SoH Projection 5y" → `source=calculated_ols_extrapolation`
+- "Battery Health (SoH Trend)" → `source=bms_via_rest` (existing,
+  previously starved — see "REST SoH listener" below).
+
+### Subtle correctness decisions
+
+**Discharge-only throughput axis (NOT charge+discharge):** Round-trip
+losses cause charge ≠ discharge per cycle. Summing both double-counts and
+produces a slope that's hard to compare against manufacturer cycle-life
+specs. Industry standard is discharge-only. (Already documented in §49.)
+
+**Capacity ceiling (10 MWh):** Modbus outlier limit (10 GWh FLOAT32) is
+too permissive for the SoH consumer. A one-off corrupted frame reading
+e.g. 50 MWh would lock in a baseline no future reading can match,
+pinning calculated SoH near 0% forever with no way to recover short of
+deleting the storage file. Hard cap at 10 MWh; readings above are
+silently skipped.
+
+**NaN guard on REST SoH:** Some firmware emits `"nan"` for the BMS SoH
+before calibration. `float("nan") > 0` is False but `nan is not None` is
+True, so the value silently flowed into `update_battery_soh()` and
+poisoned the `ParameterTracker`. Explicit `isnan()` + `isinf()` filter
+added before forwarding.
+
+**Strict projection gates:** `_MIN_SAMPLES_FOR_SLOPE = 30`,
+`_MIN_PROJECTION_AGE_S = 30 days`. Projections expose
+`projection_reliable` so downstream consumers know when to trust the
+value. Before the gate is reached, sensors return `None` (intentionally
+`unavailable` — better than guessing).
+
+**Sentinel filter on restore (not just save):**
+`modbus_coordinator._restore_isolation_sample` previously re-loaded
+persisted sentinel values (65,535,000 Ω) on restart, exactly the
+contamination the in-line filter was meant to prevent. Filter is now
+applied on BOTH save and restore via a shared
+`ISOLATION_SENTINEL_OHM` constant in `helper.py`. (See §48.)
+
+**REST SoH listener — the function that nobody called:** Both
+`InverterHealthMonitor.battery_soh` and `DegradationTracker.battery_soh`
+had `update_battery_soh()` methods, but NOTHING in production called
+them. All three battery-SoH-related entities stayed `unknown`
+indefinitely. The Modbus coordinator's data doesn't contain SoH (no
+register exposes it), so the existing `_feed_health_data` listener
+couldn't surface it. Added a REST process-data listener in
+`sensor.async_setup_entry` that reads `devices:local:battery[SoH]` and
+forwards it to both trackers.
+
+*Commit: `8c0abcf`.*
+
+### Schema migration (Store v1 → v2)
+
+When discharge-only throughput replaced charge+discharge, `_STORE_VERSION`
+had to bump v1 → v2. Existing user stores would have mixed the two
+formats in one OLS slope, mis-attributing degradation for the ~62 days
+until old samples rotate out of the deque. `_async_migrate_func` drops
+the now-incompatible samples while preserving the baseline (baseline is
+just a capacity reading and not tied to the X-axis semantics). Tests
+cover v1 → v2, no-op pass-through, and corrupt-data tolerance.
+
+*Commit: `6a3160e`.*
+
+### Lessons
+
+1. **Don't trust vendor-reported derived metrics**: SoH,
+   "battery_health", "cycles" are often computed by firmware in
+   undocumented ways and vary between releases. If you can compute it
+   from raw telemetry, do so AND expose both for cross-check.
+2. **Outlier limits at the boundary, ceilings at the consumer**: The
+   Modbus coordinator's 10 GWh outlier limit is permissive (right call —
+   better to let through suspicious values than mask hardware issues).
+   The SoH calculator's 10 MWh ceiling is consumer-specific (right call
+   — derived values need consumer-specific sanity bounds).
+3. **NaN poisons cumulative math silently**: Always `isnan()` + `isinf()`
+   check before feeding values into rolling buffers, OLS slopes, or
+   baselines.
+4. **Schema migration is mandatory when axes change**: Bumping
+   `_STORE_VERSION` and writing a no-op migration is cheap insurance.
+   Forgetting it = silent data corruption for the rotation window.
+5. **Trace which functions are actually called from production**: A
+   function with a great-looking signature and 100 % unit-test coverage
+   may still be dead code if nothing in `async_setup_entry` wires it up.
+   `update_battery_soh()` had this problem for months.
+
+---
+
+## 57) Kostal Kore Observatory: write audit, REST↔Modbus consistency, debug bundle
+
+### Context
+
+Diagnostics were scattered: write events lived in DEBUG logs, scheduler
+stats were inaccessible, REST/Modbus drift was invisible, and users had
+no one-click way to export state for bug reports. PR #31 consolidated
+this into the "Observatory" — a coherent diagnostic surface exposed as
+diagnostic-category sensors plus an export service.
+
+*Commits: `0f2aabc` (initial), `fe1b0f8` (FC16 audit gap + low-power
+consistency), `1d9a566` (4 red-team issues), `9c5937a` (5 audit gaps),
+`6b7794a` (mypy), `340c7f4` (visibility), `8fac04f` (coverage),
+`6d41901` (test patching).*
+
+### P0 — Write Audit Ring Buffer (`write_audit.py`)
+
+`WriteEvent` dataclass + `WriteAuditLog(maxlen=200)` tracking every write
+event with `source`, `key`, `value`, `result`. Hooks at every write site:
+
+- `modbus_coordinator.async_write_register` / `async_write_by_address` —
+  source `modbus_coord`.
+- `mqtt_bridge._execute_write` — source `mqtt`, captures
+  `rejected_rate`, `rejected_installer`, `rejected_validation`.
+- `modbus_proxy._handle_write_single` / `_multiple` — source
+  `proxy_fc06` / `proxy_fc16`, captures `rejected_*` and
+  `forwarded_direct`.
+
+Sensor "Write Audit Event Rate" exposes count/min and the last 10 events
+as attributes. Renamed from "Write Audit Rate" because the metric
+includes rejections, not just successful writes — the original name
+implied throughput.
+
+### P1 — Scheduler & coordinator sensors (`observability_entities.py`)
+
+- `RequestSchedulerSensor`: `total_requests`, `waits`, `timeouts`,
+  `lock_held`.
+- `ModbusCoordinatorSensor`: `update_count`, `poll_phase`,
+  `slow_data_age_s` (exposes slow-poll cache age — see §58).
+- All `MEASUREMENT` state_class, NOT `TOTAL_INCREASING`: the latter
+  requires a `unit_of_measurement`, which scheduler counters don't have,
+  causing HA statistics validation errors.
+
+*Commit: `340c7f4`.*
+
+### P2 — REST↔Modbus consistency sensor
+
+Compares 3 pairs: SoC (±2pp absolute), `Dc_P` (5%/15% relative),
+`Home_P` (5%/15% relative).
+
+**Absolute floor for low-power readings:** Pure relative thresholds
+produced spurious "mismatch" at low power (e.g. rest=50W vs modbus=60W =
+16.7%). Added `_WARN_ABS_FLOOR_W=50W`, `_MISMATCH_ABS_FLOOR_W=150W`.
+Status escalates only when BOTH relative AND absolute deltas exceed
+threshold.
+
+*Commit: `fe1b0f8`.*
+
+**Partial state:** `ok` requires ALL pairs to be `ok`. New `partial`
+state covers "some pairs ok, others insufficient_data". Prevents a
+partial REST outage from silently reporting `ok`.
+
+*Commit: `1d9a566`.*
+
+### P3 — Debug bundle export service
+
+`kostal_kore.export_debug_bundle` writes a JSON snapshot to
+`/config/www/kore_debug_<ts>.json` (downloadable via `/local/`):
+
+- Health summary, fire safety state, scheduler stats.
+- Last 100 write audit events.
+- Proxy state: `running`, `client_count`,
+  `last_ext_writes_seconds_ago` (NOT Unix timestamp, see below).
+- Full Modbus + REST snapshots.
+- Coordinator state: `update_count`, `poll_phase`, `slow_data_age_s`.
+
+Persistent notification posts URL on success and error message on
+failure.
+
+### Subtle correctness fixes from red-team audit
+
+**FC16 decode-error audit gap:** When `_decode_for_write` raised before
+reaching `async_write_register`, the coordinator hook never ran —
+silent data loss in audit trail. Manual `_log_audit` added in the
+proxy's `except` branch.
+
+*Commit: `fe1b0f8`.*
+
+**FC06 multi-register rejection:** FC06 on `reg.count > 1` was rejected
+silently (error 0x03, no audit log). Added
+`_log_audit(..., 'rejected_validation', 'FC06 multi-reg')`.
+
+*Commit: `1d9a566`.*
+
+**Debug bundle timestamp bug:** `time.time() - (time.monotonic() - ts)`
+produced a Unix timestamp that LOOKED correct but was actually
+wall-clock-minus-monotonic-delta — wrong by the difference between
+monotonic epoch and Unix epoch (typically hours, sometimes days).
+Replaced with raw `time.monotonic() - ts` and renamed the key to
+`last_ext_writes_seconds_ago` so the unit is unambiguous.
+
+*Commit: `1d9a566`.*
+
+**Non-Modbus exceptions in writes now audited:** Coordinator's except
+clause was `except ModbusClientError`. `TimeoutError` / `RuntimeError`
+from the underlying client escaped without an audit event. Broadened to
+`except Exception` (re-raises after recording).
+
+*Commit: `9c5937a`.*
+
+**Single-source audit pattern:** `async_write_register` and
+`async_write_by_address` take an `audit_source` kwarg. The Proxy passes
+`proxy_fc06` / `proxy_fc16`, MQTT passes `mqtt`, default is
+`modbus_coord`. No more manual `_log_audit("ok"/"error")` calls in
+callers — one chokepoint, consistent labelling.
+
+*Commit: `9c5937a`.*
+
+### Entity visibility lesson
+
+`RestModbusConsistencySensor` was originally named
+`"REST↔Modbus Consistency"`. HA's `slugify()` strips the `↔` character,
+producing `entity_id` without a separator between rest/modbus — which
+conflicted with stale registry entries from prior setups. Renamed to
+`"REST/Modbus Consistency"`.
+
+*Commit: `340c7f4`.*
+
+### Lessons
+
+1. **Audit hooks at the lowest single source of truth**:
+   `async_write_register` is the chokepoint for ALL SoC-controller,
+   grid-limiter, and charge-block writes. Hooking there beats hooking at
+   each consumer — it's both more complete and less invasive.
+2. **Rejection paths must audit too**: A write rejected by rate-limit,
+   installer-access, or SoC-active guards is more interesting than a
+   successful write — that's where bugs live. Capture `rejected_*`
+   results in the same audit log.
+3. **Relative + absolute thresholds for power comparisons**: Pure
+   relative thresholds explode at low values; pure absolute thresholds
+   miss issues at high values. Use both with `AND` semantics.
+4. **Avoid Unicode in HA entity names**: `slugify()` strips most
+   non-ASCII. Use ASCII separators (`/`, `:`, `-`) instead of `↔`, `→`,
+   `≥`.
+5. **Synthetic timestamps need explicit units in the key name**:
+   `last_ext_writes` was ambiguous (Unix ts? monotonic? seconds ago?).
+   `last_ext_writes_seconds_ago` is unambiguous and self-documenting.
+
+---
+
+## 58) Slow-poll cache must MERGE into every tick, not REPLACE
+
+### What happened
+
+`ModbusDataUpdateCoordinator._async_update_data` was returning `{}` for
+slow-group registers (ENERGY / CONTROL / BATTERY_MGMT) on 5 of every 6
+ticks. Entities went `unavailable` every ~25 seconds, then back to
+available for one tick, then unavailable again.
+
+*Commit: `07f1481` (KRITISCH part 1).*
+
+### Root cause
+
+The coordinator polls "fast" registers every tick (5 s) and "slow"
+registers every 6th tick (30 s). On the 5 non-slow ticks, the
+coordinator built `data` from fast registers only — slow-register keys
+were missing entirely from the returned dict, even though they had been
+read 5 ticks ago and were still perfectly fresh.
+
+Entities subscribed to slow registers (energy counters, control
+settings, battery management) saw `data[key] = None` from `.get()`
+defaults and went unavailable.
+
+### Fix
+
+`_last_slow_data` cache: when a slow-poll tick succeeds, store the
+result. On non-slow ticks, MERGE `_last_slow_data` into the returned
+`data` dict before returning. The age of the cache is exposed via
+`slow_data_age_s` on the Observatory `ModbusCoordinatorSensor` (see §57)
+so users can verify the merge is working without log inspection.
+
+### Lessons
+
+1. **Partial data on alternating ticks is worse than slow polling**: HA
+   entity availability cycles every poll interval. A 5-second
+   `unavailable`/`available` flap fires automations, kills graph
+   continuity, and pollutes long-term statistics. Better to poll
+   everything every tick and live with the I/O cost than to flicker.
+2. **Two-rate polling needs explicit cache merge**: When you split a
+   poll into fast/slow groups for I/O reasons, the consumer-facing data
+   dict must still contain BOTH groups on every tick. The slow group
+   lives in a cache; the fast group is fresh.
+3. **Expose cache age as a diagnostic attribute**: `slow_data_age_s`
+   makes the cache merge testable from the UI without log inspection.
+   Bonus: catches the case where the slow-poll has been broken for hours
+   and nobody noticed.
+
+---
+
+## 59) Home consumption is a three-source sum, not one-source
+
+### What happened
+
+Three independent code sites computed "home consumption" by reading only
+`home_from_pv` (the PV→home component) and treating it as the total home
+load:
+
+- `mqtt_bridge.py`: `home_power` MQTT topic.
+- `grid_charge_limiter.py`: `available_for_grid = pv_power - home_pv` in
+  the feed-in optimizer.
+- `observability_entities.py`: REST↔Modbus consistency check for
+  `Home_P`.
+
+When the home was being supplied by battery discharge or grid import
+(i.e., most of the day for many users), `home_from_pv` is near zero — so
+the "home consumption" estimate was massively too low. External EMS
+(evcc, iobroker) made wrong charge/discharge decisions. The grid limiter
+allowed excess feed-in because it thought there was more surplus than
+there actually was.
+
+*Commits: `076f71b` (mqtt_bridge initial fix), `2a07b8d` (None-vs-0
+follow-up for PV-only systems), `07f1481` (grid limiter same bug).*
+
+### Fix
+
+Sum all three sources: `home_from_pv + home_from_battery + home_from_grid`.
+These are AC measurements from the inverter's energy-flow monitoring,
+all in the same plane.
+
+**PV-only systems**: `home_from_battery` may be permanently `None` (the
+battery register is suppressed after 3 strikes on systems without a
+battery). Treat absent values as `0.0` rather than letting `None`
+propagate to a `None` total — otherwise PV-only systems get a
+permanently broken `home_power` MQTT topic.
+
+*Commit: `2a07b8d`.*
+
+### Open follow-up (PR #47 in draft as of 2026-05-24)
+
+PR #47 tightens the MQTT bridge from "sum what's available" to
+"all-or-nothing": if any of the three registers is None, publish nothing.
+PR #47 also addresses the DC/AC mismatch in the grid limiter:
+`total_dc_power` is DC-side, `home_from_*` is AC-side, so the
+subtraction `pv - home` overstates available power by inverter
+efficiency loss (~3–5%). Both pending merge.
+
+### Lessons
+
+1. **A field named `home_from_pv` does NOT mean "total home
+   consumption"**: It means "home load supplied from PV". Don't conflate
+   an aggregate with a one-source contribution. Always verify the
+   unit/meaning by hardware measurement, not by name intuition.
+2. **Three-source patterns recur — extract a helper**: After three
+   independent code sites had the same bug, a shared helper
+   (`sum_home_consumption_power_w`) is overdue. PR #47 finally does
+   this.
+3. **`None` ≠ `0` for hardware-suppressed registers**: A battery
+   register on a battery-less system can be permanently absent. Decide
+   per consumer whether to (a) treat as 0, (b) publish nothing, (c)
+   propagate None — and document the choice next to the code.
+
+---
+
+## 60) Safety defaults: restrict-by-default for installer-access fallback
+
+### What happened
+
+Three runtime sites read installer access as:
+
+```python
+bool(entry.data.get(CONF_INSTALLER_ACCESS, bool(entry.data.get(CONF_SERVICE_CODE))))
+```
+
+This grants installer writes for ANY entry that has a
+`CONF_SERVICE_CODE` persisted but lacks the explicit
+`CONF_INSTALLER_ACCESS` flag — regardless of the user's actual role.
+
+The wizard already evaluates `_installer_access_from_role()` and writes
+the authoritative boolean. The runtime fallback was a "side door"
+through which a USER-role + service-code combination could unlock writes
+after a partial migration, storage corruption, or a manually-edited
+config entry.
+
+*Commits: `5c6ad4d` (HIGH-08 initial), `63acdb6` (HIGH-07 + HIGH-08
+wider), `809a560` (test-fixture follow-up).*
+
+### Fix
+
+Read `CONF_INSTALLER_ACCESS` flag directly; default to `False` when
+absent. Removed `CONF_SERVICE_CODE` imports from the three affected
+files. Test fixtures updated to set the explicit flag —
+`mock_installer_config_entry` now writes `CONF_INSTALLER_ACCESS=True`
+AND `CONF_ACCESS_ROLE="INSTALLER"`, mirroring what `_build_entry_data()`
+actually persists.
+
+### Related: primary-device deletion on lookup error (HIGH-07)
+
+`async_remove_config_entry_device` returned `True` (= allow deletion)
+when `_get_persistent_device_id()` raised. With an active runtime, that
+was the wrong default — a transient registry hiccup would wipe the
+user's primary inverter tile and leave orphan entities. Now returns
+`False` in that branch so the user has to remove the config entry itself
+(the explicit and recoverable path). The unloaded-entry branch still
+returns `True` so stale devices remain cleanable after uninstall.
+
+### Related: unrecognised firmware role (HIGH-08 followup)
+
+`_installer_access_from_role()` previously fell back to service-code for
+ANY unknown role string. New behaviour: only fall back for explicit
+`UNKNOWN` / empty role strings. Arbitrary strings (`INSTALLER_TRIAL`,
+`GUEST_EXT`, etc.) now DENY installer writes and emit a WARNING so the
+role can be whitelisted intentionally — instead of silently unlocking
+write access for whatever the next firmware revision invents.
+
+### Lessons
+
+1. **Fallback chains for security flags are footguns**: When the primary
+   check is "is the flag True", a fallback to "is some related field
+   set" almost always inverts the safety direction. Drop the fallback;
+   force explicit configuration.
+2. **Default-deny on lookup errors that affect destructive operations**:
+   Device removal, write authorization, factory reset — these need
+   `False` on lookup error, with the user-recovery path being the
+   explicit "remove the config entry" gesture.
+3. **Unknown enum values: deny + WARN, don't grant + silent**: When
+   parsing a role/permission string from firmware, an unknown value
+   should refuse access AND log enough info that a maintainer can
+   whitelist it consciously. Never grant on unknown — firmware will
+   eventually introduce a value you didn't anticipate.
+
+---
+
+## 61) Modbus proxy: vendor endianness + partial coverage = fabricated zeros
+
+### Vendor endianness rule (Audit-1)
+
+The integrated Modbus client has a special rule: UINT32/SINT32 registers
+at address `>= 500` are always big-endian on the wire, regardless of the
+system's `byte_order` setting. The proxy did NOT mirror this rule —
+external clients (evcc, iobroker) reading vendor registers via the proxy
+received word-swapped values under the default `endianness="little"`,
+while reading the same register through the integrated client returned
+the correct value. Silent per-register data corruption.
+
+*Commit: `7251e55` (Audit-1).*
+
+**Fix:** Proxy now applies the same address-based rule. FLOAT32 word
+order is unaffected (mirrors client behaviour) and is regression-tested.
+
+### Partial-coverage strategy (HIGH-02)
+
+`modbus_proxy._build_register_image` previously returned a zero-padded
+image when the requested range only partially covered known registers.
+evcc/EMS would read fabricated zeros for unknown gaps and act on them as
+if they were genuine measurements (e.g., "battery_power=0" → "battery
+is idle" → wrong charge decision).
+
+*Commit: `63acdb6` (HIGH-02).*
+
+**Fix:** Return `None` on partial coverage instead of a zero-padded
+image. Proxy then falls back to a forwarded read (direct passthrough to
+the inverter) for the unknown range. Worst case: slower response. Better
+than: fabricated zeros that look real.
+
+### Lessons
+
+1. **Mirror vendor quirks at every protocol boundary, not just the
+   canonical path**: If your client has an "always big-endian for vendor
+   registers >= 500" rule, your proxy needs the same rule. Cross-
+   reference the rule by address range or register family, not by hoping
+   callers know to apply it.
+2. **Zero-padding is fabrication, not gracefulness**: A protocol
+   response that returns zeros for "I don't know" is worse than
+   returning an error. Consumers cannot distinguish "the value is zero"
+   from "the proxy made it up". Return error or `None`; let the caller
+   decide whether to retry, forward, or give up.
+3. **Partial coverage requires a forwarding fallback**: When you
+   implement a cached proxy, "partial cache hit" is a real case. Don't
+   fake the missing parts; have a passthrough path.
+
+---
+
+## 62) HA `DataUpdateCoordinator` `config_entry` kwarg: compatibility saga
+
+### What happened
+
+The `config_entry` kwarg was added to `DataUpdateCoordinator.__init__`
+in HA 2024.11. Our declared minimum is `2024.1.0`. Three coordinators
+(`PlenticoreDataUpdateCoordinator`, `PlenticoreSelectDataUpdateCoordinator`,
+`KsemDataUpdateCoordinator`) were passing it through `super().__init__()`,
+causing `TypeError` on HA 2024.1–2024.10.
+
+Then the OTHER direction: on HA 2026.x,
+`DataUpdateCoordinator.config_entry` became a real attribute, making the
+existing `# type: ignore[assignment]` on
+`EventDataUpdateCoordinator.config_entry` an `[unused-ignore]` mypy
+error.
+
+*Commits: `fed4b34` (remove kwarg), `5f25b88` (HA 2024.4 compat for
+`_get_reconfigure_entry`), `b14a160` (unused-ignore for HA 2026.x).*
+
+### Pattern that works across HA versions
+
+```python
+def __init__(self, hass, ..., config_entry):
+    super().__init__(hass, _LOGGER, name=..., update_interval=...)
+    # NOT: super().__init__(hass, _LOGGER, ..., config_entry=config_entry)
+    self.config_entry = config_entry
+```
+
+Mypy on HA 2024.x complains about the assignment (no such attribute on
+the base class). Mypy on HA 2026.x is happy. Drop the ignore once
+minimum HA is 2024.11+ (already done — `b14a160`).
+
+### Related: `_get_reconfigure_entry()` was added in HA 2024.4
+
+`config_flow.py` calls to `_get_reconfigure_entry()` were inlined for HA
+2024.1–2024.3 users. The reconfigure step now reads `self.config_entry`
+directly from the context dict.
+
+### Related: `OptionsFlow.config_entry` no longer auto-provided in HA 2026.x
+
+`KostalPlenticoreOptionsFlow.__init__` now REQUIRES `config_entry` as an
+explicit constructor argument. `async_get_options_flow` passes it;
+direct test instantiations were updated.
+
+### Lessons
+
+1. **Don't adopt a new kwarg even if it's "free"**: When HA adds a
+   parameter to a base class, the temptation is to use it for
+   cleanliness. But passing it locks out users on older HA versions and
+   creates rebase pain. Wait until your minimum HA contains it.
+2. **Test on the declared minimum HA version**: CI ran on HA 2024.3 for
+   a long time. Production users on 2024.1–2024.2 hit `TypeError`s CI
+   never saw. Pin CI to the declared minimum, not the latest.
+3. **Drop `# type: ignore` immediately when it becomes `unused`**:
+   `[unused-ignore]` is itself a mypy error in strict mode. Leaving them
+   around as "harmless" eventually breaks the build.
+
+---
+
+## 63) SoC controller tri-state `was_charging` initialization
+
+### What happened
+
+`BatterySocController._control_loop` was hitting a `target_reached`
+early exit on the FIRST iteration whenever `current_soc <= target` and
+`need_discharge` was False. The user-visible bug:
+
+> User sets target = 50%, battery currently at 49%. Controller exits via
+> "target reached" before ever calling `_write_charge`. Battery stays at
+> 49% indefinitely. No log error.
+
+*Commit: `297745f` (Audit-Bug7).*
+
+### Root cause
+
+`was_charging` was initialized to `False`. The stop condition:
+
+```python
+elif not was_charging and need_discharge is False and current_soc <= target:
+    # "we were not charging, and SoC is below target → we must be at discharge target"
+```
+
+fires on any first iteration where `SoC ≤ target` — including the
+perfectly normal "I just started, SoC is 49, target is 50, I haven't
+decided what to do yet" case.
+
+The condition was meant to detect "we were discharging and undershot the
+target" — but `was_charging=False` on iteration 1 incorrectly satisfied
+the "we were not charging" predicate.
+
+### Fix
+
+Tri-state `was_charging`: `None` until an action is recorded. Overshoot/
+undershoot branches use `is True` / `is False` so neither fires while
+`was_charging is None`. Stop conditions become:
+
+- `need_charge=False AND need_discharge=False` → at target → stop.
+- `was_charging is True AND current_soc >= target` → charge overshoot →
+  stop.
+- `was_charging is False AND current_soc <= target` → discharge
+  undershoot → stop.
+
+### Related: Grid Feed-In optimizer leaves charge limit stuck on exception
+
+`GridFeedInLimiterSwitch._control_loop`'s `finally` block restored only
+when `not self._is_on`. During the loop `_is_on` is True, so an
+exception that aborted the loop skipped the restore and left the
+inverter charge limit at whatever the last write set — typically 0 W or
+a low surplus value, effectively capping battery charging indefinitely
+until the user toggled the optimizer.
+
+**Fix:** Always restore on exit (idempotent if `turn_off` already ran).
+Mark `_is_on=False` before the restore so future toggles work cleanly.
+Wrap the restore call in its own `try` so a restore-time failure can't
+shadow the original exception.
+
+### Lessons
+
+1. **Boolean state with "I haven't decided yet" is tri-state, not
+   two-state**: Initialize to `None`, use `is True` / `is False` for
+   comparisons, and only treat truthy/falsy at decision points.
+   Defaulting to `False` for "unknown" leaks the unknown state into
+   branches that mean something specific.
+2. **`finally` blocks must be unconditional for resource restore**:
+   Wrapping the restore in `if not self._is_on:` defeats the entire
+   point of `finally`. Make it idempotent and run it always.
+3. **Synthetic first-iteration tests catch init-state bugs**: A test
+   that starts with `was_charging=False, current_soc=49, target=50`
+   instantly catches this class of bug. Regression tests added: SoC
+   charges from 49 to 50, SoC discharges from 51 to 50, SoC stops
+   exactly at target without any write.
+
+---
+
+## Index of new sections (Wave 2026-05)
+
+| § | Title | Key commits |
+|---|---|---|
+| 54 | HA reload loop: three independent root causes | `52cf1a8`, `f2e78f6`, `05c6616` |
+| 55 | Diagnostic infrastructure: startup trace + unload caller | `2275f11`, `e95d5e2` |
+| 56 | Battery SoH calculator: inferred from telemetry | `d394db0`, `6b115d9`, `6a3160e` |
+| 57 | Kostal Kore Observatory | `0f2aabc`, `9c5937a` |
+| 58 | Slow-poll cache must MERGE, not REPLACE | `07f1481` |
+| 59 | Home consumption is a three-source sum | `076f71b`, `07f1481`, `2a07b8d` |
+| 60 | Safety defaults: installer-access fallback | `5c6ad4d`, `63acdb6` |
+| 61 | Modbus proxy: endianness + partial coverage | `7251e55`, `63acdb6` |
+| 62 | `DataUpdateCoordinator` config_entry compat saga | `fed4b34`, `b14a160` |
+| 63 | SoC controller tri-state `was_charging` | `297745f` |
