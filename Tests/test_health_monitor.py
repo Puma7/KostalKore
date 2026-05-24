@@ -438,6 +438,33 @@ class TestInverterHealthMonitor:
         await coord._restore_isolation_sample()
         assert monitor.isolation.sample_count == 0
 
+    @pytest.mark.asyncio
+    async def test_restore_isolation_skips_sentinel_persisted_sample(
+        self, hass: HomeAssistant
+    ) -> None:
+        import time
+        from unittest.mock import AsyncMock, MagicMock
+
+        from custom_components.kostal_kore.helper import ISOLATION_SENTINEL_OHM
+        from custom_components.kostal_kore.modbus_coordinator import (
+            ModbusDataUpdateCoordinator,
+        )
+
+        client = MagicMock()
+        client.host = "192.168.1.250"
+        client.port = 1502
+        coord = ModbusDataUpdateCoordinator(hass, client)
+        monitor = InverterHealthMonitor()
+        coord._health_monitor = monitor
+        coord._isolation_store.async_load = AsyncMock(
+            return_value={
+                "isolation_ohm": ISOLATION_SENTINEL_OHM,
+                "saved_at": time.time(),
+            }
+        )
+        await coord._restore_isolation_sample()
+        assert monitor.isolation.sample_count == 0
+
     def test_isolation_sentinel_replaces_stale_low_sample(self) -> None:
         """Off-scale sentinel overwrites a wrong historic sample (e.g. 22.7 MΩ)."""
         m = InverterHealthMonitor()

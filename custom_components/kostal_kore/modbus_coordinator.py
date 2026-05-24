@@ -89,6 +89,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_info_tick = 0
         self._device_info: dict[str, Any] = {}
         self._last_slow_data: dict[str, Any] = {}
+        self._slow_poll_stale: bool = False
         self._update_count: int = 0
         self._fast_error_count: int = 0
         self._last_slow_ts: float = 0.0
@@ -127,6 +128,11 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._last_slow_ts == 0.0:
             return None
         return time.monotonic() - self._last_slow_ts
+
+    @property
+    def slow_poll_stale(self) -> bool:
+        """True when merged slow-register values are from a failed refresh."""
+        return self._slow_poll_stale
 
     @property
     def update_count(self) -> int:
@@ -237,10 +243,13 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 slow_result = await self._client.read_registers_batch(slow_regs)
                 self._last_slow_data = slow_result
                 self._last_slow_ts = time.monotonic()
+                self._slow_poll_stale = False
                 data.update(slow_result)
             except ModbusConnectionError as err:
+                self._slow_poll_stale = bool(self._last_slow_data)
                 _LOGGER.debug("Slow-poll connection lost: %s", err)
             except ModbusClientError as err:
+                self._slow_poll_stale = bool(self._last_slow_data)
                 _LOGGER.debug("Slow-poll batch failed: %s", err)
 
         self._device_info_tick += 1
@@ -328,6 +337,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             iso_float = float(iso_ohm)
         except (TypeError, ValueError):
             return
+        if is_isolation_sentinel_ohm(iso_float):
+            _LOGGER.debug(
+                "Skipping persisted isolation sentinel on restore (%.0f Ω)",
+                iso_float,
+            )
+            return
         if self._health_monitor is not None and hasattr(self._health_monitor, "isolation"):
             self._health_monitor.isolation.record(iso_float)
             _LOGGER.debug(
@@ -339,6 +354,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         import time
 
         from .helper import is_isolation_sentinel_ohm
+
+        if is_isolation_sentinel_ohm(iso_ohm):
+            return
 
         if self._last_persisted_isolation_ohm == iso_ohm:
             return

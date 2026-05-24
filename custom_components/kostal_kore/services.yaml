@@ -120,7 +120,8 @@ export_debug_bundle:
     Collects a full diagnostic snapshot (Modbus/REST data, write audit, health
     summary, scheduler stats, proxy state) and writes it to
     /config/www/kore_debug_<timestamp>.json. Posts a persistent notification
-    with the download URL. No data is redacted — intended for local support use.
+    with the download URL. Passwords, service codes, and other sensitive fields are
+    redacted before writing the file.
 
 apply_orphan_history_mapping:
   name: Apply orphan history mapping

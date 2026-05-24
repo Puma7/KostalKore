@@ -98,8 +98,6 @@ MODBUS_PLATFORMS: Final[list[Platform]] = [
 
 # Platforms that completed async_forward_entry_setups for this entry.
 KEY_LOADED_PLATFORMS: Final[str] = "_loaded_platforms"
-KEY_SETUP_IN_PROGRESS: Final[str] = "_setup_in_progress"
-KEY_UNLOAD_IN_PROGRESS: Final[str] = "_unload_in_progress"
 
 # Performance constants
 SETUP_TIMEOUT_SECONDS: Final[float] = 90.0
@@ -364,6 +362,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 endianness=endianness,
                 soc_controller=soc_controller,
                 installer_access=installer_access,
+                hass=hass,
+                entry_id=entry.entry_id,
             )
             try:
                 await modbus_proxy.start()
@@ -521,7 +521,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             _LOGGER.error("Could not pre-instantiate Grid Feed-In Limiter: %s", err)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        KEY_SETUP_IN_PROGRESS: True,
         KEY_LOADED_PLATFORMS: [],
         "_setup_trace": trace,
         "modbus_coordinator": modbus_coordinator,
@@ -609,7 +608,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     from .entity_registry_helpers import run_post_setup_entity_registry_maintenance
 
     run_post_setup_entity_registry_maintenance(hass, entry)
-    entry_store[KEY_SETUP_IN_PROGRESS] = False
     trace.phase_end("setup_entry", success=True)
     _log_setup_metrics(start_time, True, trace)
     return True
@@ -815,7 +813,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     # external reload) instead of just seeing "unload begins" every cycle.
     _log_unload_caller(hass, trace, entry)
     trace.phase_begin("unload_entry")
-    entry_data[KEY_UNLOAD_IN_PROGRESS] = True
     loaded = _platforms_to_unload(entry_data)
     trace.info("unload platforms: %s", [p.value for p in loaded])
 

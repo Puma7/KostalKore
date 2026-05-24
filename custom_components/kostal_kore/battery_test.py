@@ -271,6 +271,7 @@ class BatteryTestSuite:
         self._log.clear()
         self._dbg.clear()
         results: list[PhaseResult] = []
+        reg_1038_acquired = False
         if phases is None:
             phases = list(DEFAULT_PHASES)
 
@@ -285,6 +286,28 @@ class BatteryTestSuite:
             self._emit("  Phasen-Übergang: DIREKT (kein Reset, WR bleibt aktiv)")
             self._emit(f"  Debug-Log: {self._debug_path}")
             self._emit("")
+
+            if (
+                self._hass
+                and self._entry_id
+                and getattr(self._hass, "data", None) is not None
+            ):
+                from homeassistant.exceptions import HomeAssistantError
+
+                from .battery_reg_1038_owner import (
+                    OWNER_BATTERY_TEST,
+                    acquire_reg_1038_or_raise,
+                )
+
+                try:
+                    acquire_reg_1038_or_raise(
+                        self._hass, self._entry_id, OWNER_BATTERY_TEST
+                    )
+                    reg_1038_acquired = True
+                except HomeAssistantError as err:
+                    self._emit(f"❌ {err}")
+                    await self._notify("Test abgebrochen", str(err))
+                    return results
 
             pf = await self._preflight(phases)
             if not pf.ok:
@@ -343,6 +366,18 @@ class BatteryTestSuite:
                     await asyncio.sleep(3)
 
         finally:
+            if (
+                reg_1038_acquired
+                and self._hass
+                and self._entry_id
+                and getattr(self._hass, "data", None) is not None
+            ):
+                from .battery_reg_1038_owner import (
+                    OWNER_BATTERY_TEST,
+                    release_reg_1038,
+                )
+
+                release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
             await self._write_normal()
             self._running = False
             self._emit("")

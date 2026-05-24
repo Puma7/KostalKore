@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.system_info import async_get_system_info
 
-from .const import CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
+from .const import CONF_HOST, CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
@@ -30,8 +30,21 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
 
-# Data redaction constants
-TO_REDACT: Final[set[str]] = {CONF_PASSWORD, CONF_SERVICE_CODE}
+# Data redaction constants (config entry diagnostics + export_debug_bundle).
+TO_REDACT: Final[set[str]] = {
+    CONF_PASSWORD,
+    CONF_SERVICE_CODE,
+    CONF_HOST,
+    "password",
+    "service_code",
+    "host",
+    "ip",
+    "ip_address",
+    "api_key",
+    "token",
+    "secret",
+    "authorization",
+}
 
 # Diagnostics constants
 DEVICES_LOCAL_MODULE: Final[str] = ModuleId.DEVICES_LOCAL
@@ -344,6 +357,7 @@ async def _export_bundle_for_entry(
             "update_count": modbus_coord.update_count,
             "poll_phase": modbus_coord.poll_phase,
             "slow_data_age_s": modbus_coord.slow_data_age_s,
+            "slow_poll_stale": modbus_coord.slow_poll_stale,
             "fast_error_count": modbus_coord._fast_error_count,
         }
 
@@ -361,7 +375,10 @@ async def _export_bundle_for_entry(
         except Exception as err:  # noqa: BLE001
             bundle["rest_snapshot"] = {"error": str(err)}
 
-    ts_str = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
+    bundle = async_redact_data(bundle, TO_REDACT)
+
+    _now = datetime.now(tz=timezone.utc)
+    ts_str = _now.strftime("%Y%m%dT%H%M%S") + f"{_now.microsecond // 1000:03d}"
     filename = f"kore_debug_{entry_id[:8]}_{ts_str}.json"
     path = f"/config/www/{filename}"
 

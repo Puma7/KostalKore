@@ -200,6 +200,8 @@ class ModbusTcpProxyServer:
         endianness: str = "little",
         soc_controller: Any = None,
         installer_access: bool = False,
+        hass: Any = None,
+        entry_id: str = "",
     ) -> None:
         self._coordinator = coordinator
         self._port = port
@@ -208,6 +210,8 @@ class ModbusTcpProxyServer:
         self._endianness = endianness
         self._soc_controller = soc_controller
         self._installer_access = installer_access
+        self._hass = hass
+        self._entry_id = entry_id
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task[None]] = set()
         self._last_ext_write: dict[int, float] = {}  # address → timestamp
@@ -225,6 +229,13 @@ class ModbusTcpProxyServer:
     @property
     def running(self) -> bool:
         return self._server is not None and self._server.is_serving()
+
+    def _reg_1038_locked_by_integration(self) -> bool:
+        if not self._hass or not self._entry_id:
+            return False
+        from .battery_reg_1038_owner import get_reg_1038_owner_manager
+
+        return get_reg_1038_owner_manager(self._hass, self._entry_id).current is not None
 
     async def start(self) -> None:
         """Start listening for Modbus TCP connections."""
@@ -425,6 +436,14 @@ class ModbusTcpProxyServer:
                 self._log_audit(f"addr:{address}", value, "rejected_soc_active", "FC06")
                 return self._error_response(FC_WRITE_SINGLE, 0x06)
 
+        if address == 1038 and self._reg_1038_locked_by_integration():
+            _LOGGER.warning(
+                "Proxy: REJECTED write to reg 1038 = %d (held by integration feature).",
+                value,
+            )
+            self._log_audit(f"addr:{address}", value, "rejected_reg_1038_owner", "FC06")
+            return self._error_response(FC_WRITE_SINGLE, 0x06)
+
         self._last_ext_write[address] = time.monotonic()
         self._fc06_count += 1
 
@@ -510,6 +529,13 @@ class ModbusTcpProxyServer:
                 )
                 self._log_audit(f"addr:{start_addr}", None, "rejected_soc_active", "FC16")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x06)
+
+        if 1038 in write_range and self._reg_1038_locked_by_integration():
+            _LOGGER.warning(
+                "Proxy: REJECTED write-multiple touching reg 1038 (held by integration).",
+            )
+            self._log_audit(f"addr:{start_addr}", None, "rejected_reg_1038_owner", "FC16")
+            return self._error_response(FC_WRITE_MULTIPLE, 0x06)
 
         self._last_ext_write[start_addr] = time.monotonic()
         self._fc16_count += 1

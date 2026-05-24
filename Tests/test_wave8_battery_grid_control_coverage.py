@@ -8,6 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.kostal_kore.battery_reg_1038_owner import (
+    OWNER_SOC_CONTROLLER,
+    get_reg_1038_owner_manager,
+)
+from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.battery_soc_controller import (
     BatterySocController,
     KEEPALIVE_INTERVAL,
@@ -51,6 +56,7 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     hass = SimpleNamespace(
         async_create_task=MagicMock(),
         services=SimpleNamespace(async_call=AsyncMock()),
+        data={DOMAIN: {"entry1": {}}},
     )
     controller = BatterySocController(coord, hass=hass, entry_id="entry1")
 
@@ -91,7 +97,12 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     assert controller._task is existing_task
 
     no_hass = BatterySocController(coord, hass=None, entry_id="entry2")
-    with patch("custom_components.kostal_kore.battery_soc_controller.asyncio.ensure_future") as ensure_future, patch.object(
+    with patch(
+        "custom_components.kostal_kore.battery_soc_controller.acquire_reg_1038_or_raise",
+        return_value=MagicMock(),
+    ), patch(
+        "custom_components.kostal_kore.battery_soc_controller.asyncio.ensure_future"
+    ) as ensure_future, patch.object(
         no_hass, "_notify", new=AsyncMock()
     ):
         await no_hass.set_target(60)
@@ -121,6 +132,20 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     await controller._notify("Title", "Body")
     controller._hass = None
     await controller._notify("Ignored", "No hass")
+
+
+@pytest.mark.asyncio
+async def test_set_target_releases_reg_1038_when_setup_fails_before_loop() -> None:
+    """Acquire must not leak if notify/task setup fails before _run_loop starts."""
+    coord = _coord_stub()
+    hass = SimpleNamespace(data={DOMAIN: {"entry1": {}}})
+    controller = BatterySocController(coord, hass=hass, entry_id="entry1")
+    controller._notify = AsyncMock(side_effect=RuntimeError("notify failed"))
+
+    with pytest.raises(RuntimeError, match="notify failed"):
+        await controller.set_target(50)
+
+    assert get_reg_1038_owner_manager(hass, "entry1").current is None
 
 
 @pytest.mark.asyncio
@@ -381,7 +406,10 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
     """Grid limiter switch and number should cover control, restore and read paths."""
     coord = _coord_stub()
     limiter = GridFeedInLimiterSwitch(coord, "entry", _device_info(), hass=SimpleNamespace())
-    limiter.hass = SimpleNamespace(async_create_task=MagicMock())
+    limiter.hass = SimpleNamespace(
+        async_create_task=MagicMock(),
+        data={DOMAIN: {"entry": {}}},
+    )
     limiter.async_write_ha_state = MagicMock()
 
     assert not limiter.is_on
@@ -407,6 +435,20 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
         await limiter.async_turn_on()
     start_control.assert_called_once()
     assert limiter.is_on
+
+    from custom_components.kostal_kore.battery_reg_1038_owner import (
+        OWNER_GRID_FEEDIN,
+        get_reg_1038_owner_manager,
+    )
+
+    get_reg_1038_owner_manager(limiter.hass, "entry").release(OWNER_GRID_FEEDIN)
+    with patch.object(
+        limiter, "_start_control", side_effect=RuntimeError("no task")
+    ):
+        with pytest.raises(RuntimeError, match="no task"):
+            await limiter.async_turn_on()
+    assert not limiter.is_on
+    assert get_reg_1038_owner_manager(limiter.hass, "entry").current is None
 
     limiter._original_charge_limit = 500.0
     with patch.object(limiter, "_cancel_control") as cancel_control, patch.object(

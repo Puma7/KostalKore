@@ -7,80 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-05-24 — Production readiness
+
 ### Added
+- **REG 1038 owner arbitration** — Grid Feed-In Optimizer, SoC Controller, and
+  Block Battery Charging mutually exclude writes to `bat_max_charge_limit`
+  (register 1038). Turning on a second feature raises a clear `HomeAssistantError`.
+- **`slow_poll_stale` coordinator flag** — Exposed in debug bundles and
+  coordinator state when slow-register data is merged from a failed refresh.
+- **Service translations** (`translations/en.json`) for migration, orphan-history,
+  and debug-bundle services.
 - **Startup setup trace logging** — Filter logs with `Kostal setup trace` to
-  follow config-entry phases (login, Modbus, KSEM, each platform one-by-one
-  with timing), entity registration batches (process sensors, SoH, health,
-  …) with counts and sample `unique_id`s, reload triggers, and unload steps.
-  Helps pinpoint which platform or entity group correlates with reload loops.
+  follow config-entry phases, platform timing, entity batches, reload triggers,
+  and unload steps.
+- **Orphan-history MVP** — `scan_orphan_history` / `apply_orphan_history_mapping`
+  services and `docs/migration_orphan_history.md`.
+
+### Changed
+- **Integration name and version** — Dropped “Experimental Alpha”; release **3.0.0**.
+- **`export_debug_bundle`** — Passwords, service codes, and other sensitive keys
+  are redacted via `async_redact_data` before writing JSON to `/config/www/`.
+- **Config flow / number audit labels** — `write_access` and write-audit `user_type`
+  use `CONF_INSTALLER_ACCESS` only (no `CONF_SERVICE_CODE` fallback).
+- **Modbus proxy REG 1038 arbitration** — External FC06/FC16 writes to register
+  1038 are rejected while an integration feature holds the owner lock (evcc,
+  iobroker, etc.).
+- **Grid Feed-In Optimizer** — `modbus_read_degraded` attribute; control-loop
+  `finally` always restores charge limit and releases REG 1038.
 
 ### Fixed
-- **Shutdown poll no longer logged as coordinator error** — During reload,
-  `Read of … aborted during shutdown` was wrapped in `UpdateFailed` and surfaced
-  as `Error fetching Kostal Modbus data` in the UI. Shutdown I/O now raises
-  `ModbusShutdownAbort`; the coordinator returns cached data instead of
-  `UpdateFailed`. Options reloads are ignored while `KEY_UNLOAD_IN_PROGRESS`.
-- **Modbus refresh task unload timeout** — HA logged
-  `Task 'Kostal Modbus - WR - refresh' did not complete in time` during
-  config-entry unload when a poll was blocked in pymodbus. Shutdown now closes
-  the client (sets `_closing`) before `DataUpdateCoordinator.async_shutdown()`,
-  aborts reads/writes while closing, and stops SoC/proxy/MQTT before platform
-  unload so the refresh task is gone before HA's unload deadline.
-- **b9 reload pressure (blind follow-up, PR #37)** — After b9 still showed
-  init-loop-like behaviour on some systems without a fresh log. Likely causes
-  beyond the b8→b9 shutdown fixes: (1) `_feed_health_data` registered before
-  platform setup could fire during `ConfigEntryNotReady` rollback; (2) SoH
-  baseline calibration called `async_save()` on every changed Modbus poll.
-  Fixes: defer health listener until platforms are loaded; debounce SoH store
-  writes (60s); skip redundant isolation-resistance persistence when the
-  value is unchanged.
-- **Bug #11** — PV per-string energy statistics
-  (`Statistic:EnergyPv{N}:{Day,Month,Year,Total}`) were hardcoded for PV1–PV3
-  only. 1-string inverters saw permanent `unavailable` PV2/PV3 entries;
-  inverters with 4–6 strings lost energy stats entirely. New helper
-  `generate_pv_energy_sensor_descriptions(count)` mirrors
-  `generate_dc_sensor_descriptions(count)` and produces descriptions for the
-  actually-discovered string count. (commit `2973895`)
+- **Debug bundle secret leak** — `modbus_snapshot` / `rest_snapshot` were written
+  unredacted; now covered by the same `TO_REDACT` set as config diagnostics.
+- **Isolation restore poisoning** — Persisted isolation sentinel values are no
+  longer seeded into the health-monitor deque on startup or re-saved to disk.
+- **REG 1038 contention** — Three features could overwrite each other's charge
+  limit without coordination.
+- **Dead lifecycle keys** — Removed unused `KEY_SETUP_IN_PROGRESS` /
+  `KEY_UNLOAD_IN_PROGRESS` from `__init__.py` (options reload guard uses
+  `ConfigEntryState.LOADED` since PR #51).
+- **Shutdown poll / unload** — `ModbusShutdownAbort` during reload; Modbus
+  shutdown ordering and `_closing` flag (PRs #35–#51 on `main`).
+- **Bug #11** — Dynamic PV per-string energy statistics for 1–6 strings.
+- **Bug #1 regression guard** — `FullChargeCap_E` remains **Ah**, not kWh.
 
-### Reverted
-- **Bug #1 false fix on `FullChargeCap_E`** — commit `2973895` incorrectly
-  changed the REST-API `FullChargeCap_E` sensor from `"Ah"` to
-  `UnitOfEnergy.WATT_HOUR` with `device_class=ENERGY_STORAGE`. This was the
-  *second* occurrence of the identical hallucination (the first was reverted
-  in commit `6bf7680` in 2025). Live hardware measurement (LEARNINGS §23)
-  confirms `FullChargeCap_E ≈ 50 Ah` — multiplied by the inverter's ~760 V
-  DC bus this yields ~38 kWh, matching the SoC math. 50 Wh would be
-  physically absurd. The sensor description is reverted, the canary
-  regression test is restored to `test_bug1_full_charge_cap_unit_is_ah`
-  with a do-not-rename docstring, and LEARNINGS §47 documents how the loop
-  re-occurred.
-
-### Added
-- **Orphan-history MVP** for long-time KORE users who never ran the legacy
-  migration. New module `custom_components/kostal_kore/orphan_history.py`
-  exposes two services:
-  - `kostal_kore.scan_orphan_history` (read-only): scans Recorder
-    `StatesMeta` + `StatisticsMeta` for entity_ids matching legacy Plenticore
-    patterns that no longer exist in the Entity Registry. Posts a persistent
-    notification with fuzzy-match suggestions to current KORE entities.
-  - `kostal_kore.apply_orphan_history_mapping` (dry-run default): re-binds
-    orphan rows to current KORE entities by delegating to the existing
-    `_copy_legacy_history_sync` engine — unit-mismatch and duplicate-source
-    guards from QA-2 carry over. Targets that aren't registered to the
-    `kostal_kore` platform are rejected.
-  - User-facing walkthrough in `docs/migration_orphan_history.md`. (commit `bca1587`)
-
-### Tests
-- `Tests/test_bug_regression.py`: added
-  `test_bug11_pv_energy_sensors_generated_dynamically` (1/3/6 strings →
-  4/12/24 sensors) and `test_bug11_static_pv_energy_descriptions_removed`.
-  `test_bug1_full_charge_cap_unit_is_ah` is restored to its canary form
-  (asserts Ah + `device_class is None`) with an explicit do-not-rename
-  docstring referencing LEARNINGS §23/§36/§37/§47.
-- `Tests/test_orphan_history.py`: 26 new tests covering pure helpers, sync
-  scan with mocked recorder session, dry-run safety (executor never called),
-  apply path reaching the copy engine, backend/recording guards, notification
-  formatters, and service registration idempotence.
+### Documentation
+- **LEARNINGS §59–§60** — PR #47 merge and installer-access fix; removed stale
+  “PR #47 in draft” / service-code fallback wording.
+- **`services.yaml`** — Debug bundle description matches redaction behaviour.
 
 ## [2.16.10-rc.6] — 2026-05-22 — Reload-Loop Hotfix (b8→b9)
 
