@@ -169,12 +169,25 @@ async def test_mqtt_bridge_publish_and_formatting_edge_paths() -> None:
             if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/home_power"
         ]
         assert full_home, "home_power should publish when all three registers exist"
+        publish_args = mock_mqtt.async_publish.await_args_list
         pv_dc = [
             c
-            for c in mock_mqtt.async_publish.await_args_list
+            for c in publish_args
             if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/pv_power_dc"
         ]
-        assert pv_dc
+        pv_legacy = [
+            c
+            for c in publish_args
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/pv_power"
+        ]
+        assert pv_dc and pv_legacy
+        assert pv_dc[0].args[2] == pv_legacy[0].args[2] == "5000.0"
+        pv_ac = [
+            c
+            for c in publish_args
+            if c.args[1] == f"{TOPIC_PREFIX}/INV123/proxy/pv_power_ac_est"
+        ]
+        assert pv_ac and pv_ac[0].args[2] == "4800.0"
         await bridge._publish_register_metadata()
 
     assert any("custom" in str(payload) for payload in payloads)

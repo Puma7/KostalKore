@@ -111,6 +111,7 @@ def battery_efficiency_measurement_quality(
     if charge_pv_kwh <= 0:
         return "pure_ac"
     grid_share = charge_grid_kwh / total
+    # Heuristic bands for sensor attributes (not used in control logic).
     if grid_share < 0.05:
         return "mostly_dc"
     if grid_share > 0.95:
