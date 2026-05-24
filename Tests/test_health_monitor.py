@@ -289,6 +289,40 @@ class TestInverterHealthMonitor:
         assert m.active_error_count.current == 2.0
         assert m.active_warning_count.current == 5.0
 
+    def test_resolve_active_error_warning_counts_from_rest(self) -> None:
+        from custom_components.kostal_kore.health_monitor import (
+            resolve_active_error_warning_counts,
+        )
+
+        counts = resolve_active_error_warning_counts(
+            {
+                "scb:event": {
+                    "Event:ActiveErrorCnt": "0",
+                    "Event:ActiveWarningCnt": "2",
+                }
+            }
+        )
+        assert counts == (0, 2)
+
+    def test_resolve_active_error_warning_counts_event_fallback(self) -> None:
+        from custom_components.kostal_kore.health_monitor import (
+            resolve_active_error_warning_counts,
+        )
+
+        counts = resolve_active_error_warning_counts(
+            None,
+            event_snapshot={"active_error_events_count": 3},
+        )
+        assert counts == (3, 0)
+
+    def test_resolve_active_error_warning_counts_missing(self) -> None:
+        from custom_components.kostal_kore.health_monitor import (
+            resolve_active_error_warning_counts,
+        )
+
+        assert resolve_active_error_warning_counts(None) is None
+        assert resolve_active_error_warning_counts({}) is None
+
     def test_info_level_threshold(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"controller_temp": 64.0})
