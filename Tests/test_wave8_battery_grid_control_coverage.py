@@ -436,6 +436,20 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
     start_control.assert_called_once()
     assert limiter.is_on
 
+    from custom_components.kostal_kore.battery_reg_1038_owner import (
+        OWNER_GRID_FEEDIN,
+        get_reg_1038_owner_manager,
+    )
+
+    get_reg_1038_owner_manager(limiter.hass, "entry").release(OWNER_GRID_FEEDIN)
+    with patch.object(
+        limiter, "_start_control", side_effect=RuntimeError("no task")
+    ):
+        with pytest.raises(RuntimeError, match="no task"):
+            await limiter.async_turn_on()
+    assert not limiter.is_on
+    assert get_reg_1038_owner_manager(limiter.hass, "entry").current is None
+
     limiter._original_charge_limit = 500.0
     with patch.object(limiter, "_cancel_control") as cancel_control, patch.object(
         limiter, "_write_charge_limit", new=AsyncMock()

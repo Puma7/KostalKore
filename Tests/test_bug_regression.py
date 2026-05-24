@@ -1829,6 +1829,129 @@ async def test_grid_turn_off_restore_flag_before_control_loop_finally(
     )
 
 
+@pytest.mark.asyncio
+async def test_grid_turn_on_releases_reg_1038_when_post_acquire_fails(
+    hass: HomeAssistant,
+) -> None:
+    """async_turn_on must release REG 1038 if control task setup fails after acquire."""
+    from custom_components.kostal_kore.battery_reg_1038_owner import (
+        OWNER_GRID_FEEDIN,
+        get_reg_1038_owner_manager,
+    )
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
+
+    from custom_components.kostal_kore.const import DOMAIN
+
+    sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
+    sw._entry_id = "on_fail_entry"
+    sw.hass = hass
+    sw._coord = MagicMock()
+    sw._device_power_limit_w = 5000.0
+    sw._feed_in_limit_w = 3000.0
+    sw._current_charge_limit = 0.0
+    sw._original_charge_limit = None
+    sw._restore_handled_in_turn_off = False
+    sw._is_on = False
+    sw._task = None
+    sw._modbus_read_failed_cycles = 0
+    sw.async_write_ha_state = MagicMock()
+    sw._snapshot_charge_limit = AsyncMock()
+
+    hass.data.setdefault(DOMAIN, {})["on_fail_entry"] = {}
+
+    with patch.object(
+        sw, "_start_control", side_effect=RuntimeError("task setup failed")
+    ):
+        with pytest.raises(RuntimeError, match="task setup failed"):
+            await sw.async_turn_on()
+
+    assert not sw._is_on
+    assert get_reg_1038_owner_manager(hass, "on_fail_entry").current is None
+    assert (
+        get_reg_1038_owner_manager(hass, "on_fail_entry").try_acquire(
+            OWNER_GRID_FEEDIN
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_grid_turn_off_keeps_reg_1038_lock_until_restore_write(
+    hass: HomeAssistant,
+) -> None:
+    """Control-loop finally must not release REG 1038 while async_turn_off restores."""
+    from custom_components.kostal_kore.battery_reg_1038_owner import (
+        OWNER_GRID_FEEDIN,
+        get_reg_1038_owner_manager,
+    )
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
+
+    from custom_components.kostal_kore.const import DOMAIN
+
+    sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
+    sw._entry_id = "lock_entry"
+    sw.hass = hass
+    sw._coord = MagicMock()
+    sw._device_power_limit_w = 12500.0
+    sw._feed_in_limit_w = 5000.0
+    sw._current_charge_limit = 0.0
+    sw._original_charge_limit = 2800.0
+    sw._restore_handled_in_turn_off = False
+    sw._is_on = True
+    sw._modbus_read_failed_cycles = 0
+    sw._task = None
+    sw.async_write_ha_state = MagicMock()
+    hass.data.setdefault(DOMAIN, {})["lock_entry"] = {}
+    get_reg_1038_owner_manager(hass, "lock_entry").try_acquire(OWNER_GRID_FEEDIN)
+
+    from custom_components.kostal_kore.grid_charge_limiter import release_reg_1038
+
+    release_phases: list[str] = []
+
+    async def slow_restore_write(watts: float) -> None:
+        assert (
+            get_reg_1038_owner_manager(hass, "lock_entry").current
+            == OWNER_GRID_FEEDIN
+        ), "Restore write must run while turn_off still holds REG 1038"
+        release_phases.append("during_write")
+        await asyncio.sleep(0)
+
+    async def idle_control_loop() -> None:
+        try:
+            while sw._is_on:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            return
+        finally:
+            # Mirror GridFeedInLimiterSwitch._control_loop finally (release guard).
+            sw._is_on = False
+            sw.async_write_ha_state()
+            try:
+                if not getattr(sw, "_restore_handled_in_turn_off", False):
+                    await sw._write_charge_limit(sw._restore_limit())
+            except Exception:
+                pass
+            finally:
+                turn_off_handles = getattr(
+                    sw, "_restore_handled_in_turn_off", False
+                )
+                sw._restore_handled_in_turn_off = False
+                if not turn_off_handles:
+                    release_reg_1038(hass, "lock_entry", OWNER_GRID_FEEDIN)
+                    release_phases.append("finally_release")
+                else:
+                    release_phases.append("finally_skipped_release")
+
+    sw._write_charge_limit = slow_restore_write
+    sw._task = hass.async_create_task(idle_control_loop())
+    await asyncio.sleep(0)
+
+    await sw.async_turn_off()
+
+    assert release_phases == ["finally_skipped_release", "during_write"]
+    assert get_reg_1038_owner_manager(hass, "lock_entry").current is None
+
+
 # ---------------------------------------------------------------------------
 # Bugbot-Audit KRITISCH-1 — Modbus slow-poll cache
 #

@@ -124,9 +124,20 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._restore_handled_in_turn_off = False
         await self._snapshot_charge_limit()
         acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
-        self._is_on = True
-        self._start_control()
-        self.async_write_ha_state()
+        try:
+            self._is_on = True
+            self._start_control()
+            self.async_write_ha_state()
+        except BaseException:
+            self._is_on = False
+            task = self._cancel_control()
+            if isinstance(task, asyncio.Task):
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+            raise
         _LOGGER.info("Grid Feed-In Optimizer ON (limit=%.0f W)", self._feed_in_limit_w)
 
     def _restore_limit(self) -> float:
@@ -256,8 +267,14 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                     restore_err,
                 )
             finally:
+                turn_off_handles_release = getattr(
+                    self, "_restore_handled_in_turn_off", False
+                )
                 self._restore_handled_in_turn_off = False
-                release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+                if not turn_off_handles_release:
+                    release_reg_1038(
+                        self.hass, self._entry_id, OWNER_GRID_FEEDIN
+                    )
 
     async def _read_float(self, name: str) -> float | None:
         reg = REGISTER_BY_NAME.get(name)
