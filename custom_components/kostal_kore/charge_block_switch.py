@@ -25,6 +25,11 @@ from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .battery_reg_1038_owner import (
+    OWNER_CHARGE_BLOCK,
+    acquire_reg_1038_or_raise,
+    release_reg_1038,
+)
 from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import REGISTER_BY_NAME
@@ -96,11 +101,13 @@ class BatteryChargeBlockSwitch(SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Block battery charging: REG 1038 = 0."""
+        acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         await self._snapshot_charge_limit()
         try:
             await self._write_block()
         except Exception as err:
             self._original_charge_limit = None  # discard snapshot on failure
+            release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
             raise HomeAssistantError("Ladung konnte nicht blockiert werden") from err
         self._is_on = True
         self._start_keepalive()
@@ -125,6 +132,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         restore = self._restore_limit()
         await self._write_normal(restore)
         self._is_on = False
+        release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         self.async_write_ha_state()
         _LOGGER.info("Battery charging RESTORED (REG 1038 = %.0f)", restore)
 

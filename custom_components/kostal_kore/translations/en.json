@@ -851,5 +851,27 @@
                 "name": "Battery Charge/Discharge Test"
             }
         }
+    },
+    "services": {
+        "adopt_legacy_entity_ids": {
+            "name": "Adopt legacy entity IDs",
+            "description": "Rebind legacy kostal_plenticore entities to a kostal_kore config entry (dry-run by default)."
+        },
+        "copy_legacy_history": {
+            "name": "Copy legacy history",
+            "description": "Copy Recorder history from legacy Plenticore entities to current KORE entities."
+        },
+        "scan_orphan_history": {
+            "name": "Scan orphan Recorder history",
+            "description": "Read-only scan for legacy entity_ids with no Entity Registry binding; posts mapping suggestions."
+        },
+        "apply_orphan_history_mapping": {
+            "name": "Apply orphan history mapping",
+            "description": "Merge orphan Recorder rows into current kostal_kore entities (dry-run by default)."
+        },
+        "export_debug_bundle": {
+            "name": "Export debug bundle",
+            "description": "Write a redacted diagnostic JSON snapshot to /config/www/ and notify with download URLs."
+        }
     }
 }

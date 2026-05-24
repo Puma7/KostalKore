@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.battery_soc_controller import (
     BatterySocController,
     KEEPALIVE_INTERVAL,
@@ -51,6 +52,7 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     hass = SimpleNamespace(
         async_create_task=MagicMock(),
         services=SimpleNamespace(async_call=AsyncMock()),
+        data={DOMAIN: {"entry1": {}}},
     )
     controller = BatterySocController(coord, hass=hass, entry_id="entry1")
 
@@ -91,7 +93,12 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     assert controller._task is existing_task
 
     no_hass = BatterySocController(coord, hass=None, entry_id="entry2")
-    with patch("custom_components.kostal_kore.battery_soc_controller.asyncio.ensure_future") as ensure_future, patch.object(
+    with patch(
+        "custom_components.kostal_kore.battery_soc_controller.acquire_reg_1038_or_raise",
+        return_value=MagicMock(),
+    ), patch(
+        "custom_components.kostal_kore.battery_soc_controller.asyncio.ensure_future"
+    ) as ensure_future, patch.object(
         no_hass, "_notify", new=AsyncMock()
     ):
         await no_hass.set_target(60)
@@ -381,7 +388,10 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
     """Grid limiter switch and number should cover control, restore and read paths."""
     coord = _coord_stub()
     limiter = GridFeedInLimiterSwitch(coord, "entry", _device_info(), hass=SimpleNamespace())
-    limiter.hass = SimpleNamespace(async_create_task=MagicMock())
+    limiter.hass = SimpleNamespace(
+        async_create_task=MagicMock(),
+        data={DOMAIN: {"entry": {}}},
+    )
     limiter.async_write_ha_state = MagicMock()
 
     assert not limiter.is_on

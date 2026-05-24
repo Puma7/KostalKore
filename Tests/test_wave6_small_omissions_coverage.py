@@ -133,8 +133,13 @@ async def test_charge_block_switch_turn_on_off_keepalive_and_restore_paths() -> 
     """Charge block switch should snapshot, restore, notify and manage keepalive."""
     coordinator = _coordinator_stub()
     hass_ref = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+    from custom_components.kostal_kore.const import DOMAIN
+
     entity = BatteryChargeBlockSwitch(coordinator, "entry42", _device_info(), hass=hass_ref)
-    entity.hass = SimpleNamespace(async_create_task=MagicMock(return_value="task"))
+    entity.hass = SimpleNamespace(
+        async_create_task=MagicMock(return_value="task"),
+        data={DOMAIN: {"entry42": {}}},
+    )
     entity.async_write_ha_state = MagicMock()
 
     assert not entity.is_on
@@ -280,8 +285,11 @@ async def test_charge_block_switch_turn_on_write_failure_raises() -> None:
     """async_turn_on should raise HomeAssistantError when _write_block fails."""
     from homeassistant.exceptions import HomeAssistantError
 
+    from custom_components.kostal_kore.const import DOMAIN
+
     coordinator = _coordinator_stub()
     entity = BatteryChargeBlockSwitch(coordinator, "entryFail", _device_info())
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entryFail": {}}})
     entity.async_write_ha_state = MagicMock()
 
     # Pre-set a snapshot so we can verify it gets discarded
@@ -300,9 +308,12 @@ async def test_charge_block_switch_turn_on_write_failure_raises() -> None:
 @pytest.mark.asyncio
 async def test_charge_block_switch_no_notification_and_notification_error_paths() -> None:
     """Charge block switch should tolerate absent or failing notifications."""
+    from custom_components.kostal_kore.const import DOMAIN
+
     coordinator = _coordinator_stub()
 
     no_notify = BatteryChargeBlockSwitch(coordinator, "entryNone", _device_info(), hass=None)
+    no_notify.hass = SimpleNamespace(data={DOMAIN: {"entryNone": {}}})
     no_notify.async_write_ha_state = MagicMock()
     with patch.object(no_notify, "_start_keepalive"), patch.object(
         no_notify, "_write_block", new=AsyncMock()
@@ -322,9 +333,11 @@ async def test_charge_block_switch_no_notification_and_notification_error_paths(
         await no_notify.async_will_remove_from_hass()
 
     failing_hass = SimpleNamespace(
-        services=SimpleNamespace(async_call=AsyncMock(side_effect=RuntimeError("notify failed")))
+        services=SimpleNamespace(async_call=AsyncMock(side_effect=RuntimeError("notify failed"))),
+        data={DOMAIN: {"entryErr": {}}},
     )
     entity = BatteryChargeBlockSwitch(coordinator, "entryErr", _device_info(), hass=failing_hass)
+    entity.hass = failing_hass
     entity.async_write_ha_state = MagicMock()
 
     with patch.object(entity, "_start_keepalive"), patch.object(

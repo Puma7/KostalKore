@@ -56,6 +56,7 @@ def _minimal_store() -> dict:
     modbus_coord.update_count = 42
     modbus_coord.poll_phase = 3
     modbus_coord.slow_data_age_s = 12.5
+    modbus_coord.slow_poll_stale = False
     modbus_coord._fast_error_count = 0
 
     process_coord = MagicMock()
@@ -153,6 +154,7 @@ async def test_export_bundle_for_entry_happy_path(tmp_path):
     assert "proxy_state" in bundle
     assert "modbus_snapshot" in bundle
     assert "coordinator_state" in bundle
+    assert bundle["coordinator_state"]["slow_poll_stale"] is False
     assert "rest_snapshot" in bundle
     assert bundle["rest_snapshot"]["devices:local"]["Dc_P"] == "4200"
     assert "last_ext_writes_seconds_ago" in bundle["proxy_state"]
@@ -265,6 +267,35 @@ async def test_export_bundle_for_entry_oserror_raises():
     ):
         with pytest.raises(OSError, match="Cannot write to"):
             await _export_bundle_for_entry(hass, "entry1", store)
+
+
+@pytest.mark.asyncio
+async def test_export_bundle_redacts_sensitive_nested_values():
+    """service_code and password keys in snapshots must be redacted."""
+    from homeassistant.components.diagnostics import REDACTED
+
+    hass = MagicMock()
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+
+    store = _minimal_store()
+    store["process_coordinator"].data = {
+        "devices:local": {"service_code": "SECRET123", "Dc_P": "4200"}
+    }
+    store["modbus_coordinator"].data = {"password": "pw", "battery_soc": 50.0}
+
+    with (
+        patch("custom_components.kostal_kore.diagnostics.async_get_system_info",
+              new=AsyncMock(return_value={})),
+        patch("custom_components.kostal_kore.diagnostics.os.makedirs"),
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.kostal_kore.diagnostics.json.dump") as mock_dump,
+    ):
+        await _export_bundle_for_entry(hass, "entry1", store)
+
+    bundle = mock_dump.call_args[0][0]
+    assert bundle["rest_snapshot"]["devices:local"]["service_code"] == REDACTED
+    assert bundle["modbus_snapshot"]["password"] == REDACTED
+    assert bundle["modbus_snapshot"]["battery_soc"] == 50.0
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,11 @@ import math
 import time
 from typing import Any, Final
 
+from .battery_reg_1038_owner import (
+    OWNER_SOC_CONTROLLER,
+    acquire_reg_1038_or_raise,
+    release_reg_1038,
+)
 from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import REGISTER_BY_NAME
@@ -147,6 +152,8 @@ class BatterySocController:
             await self._stop()
             return
 
+        acquire_reg_1038_or_raise(self._hass, self._entry_id, OWNER_SOC_CONTROLLER)
+
         _LOGGER.info("SoC Controller: target = %.0f%%", soc)
         await self._notify(
             "Ziel-SoC gesetzt",
@@ -181,6 +188,8 @@ class BatterySocController:
         self._target_soc = None
         self._status = "idle"
         await self._write_normal()
+        if self._hass is not None and self._entry_id:
+            release_reg_1038(self._hass, self._entry_id, OWNER_SOC_CONTROLLER)
         _LOGGER.info("SoC Controller: stopped, automatic mode")
 
     async def stop(self) -> None:

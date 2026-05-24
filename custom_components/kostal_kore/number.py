@@ -30,7 +30,6 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_INSTALLER_ACCESS,
-    CONF_SERVICE_CODE,
     DATA_KEY_FORCED_NUMBER_UNIQUE_IDS,
     DOMAIN,
     AddConfigEntryEntitiesCallback,
@@ -1841,12 +1840,7 @@ class PlenticoreDataNumber(
             user_type = (
                 "installer"
                 if requires_installer
-                and (
-                    entry.data.get(
-                        CONF_INSTALLER_ACCESS,
-                        bool(entry.data.get(CONF_SERVICE_CODE)),
-                    )
-                )
+                and bool(entry.data.get(CONF_INSTALLER_ACCESS, False))
                 else "user"
             )
             _LOGGER.info(

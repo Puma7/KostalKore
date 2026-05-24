@@ -1941,14 +1941,24 @@ permanently broken `home_power` MQTT topic.
 
 *Commit: `2a07b8d`.*
 
-### Open follow-up (PR #47 in draft as of 2026-05-24)
+### Follow-up resolved by PR #47 (merged 2026-05-24)
 
-PR #47 tightens the MQTT bridge from "sum what's available" to
-"all-or-nothing": if any of the three registers is None, publish nothing.
-PR #47 also addresses the DC/AC mismatch in the grid limiter:
+PR #47 tightened the MQTT bridge from "sum what's available" to
+"all-or-nothing": if any of the three registers is None,
+`sum_home_consumption_power_w()` returns `None` and the consumer
+publishes nothing. This supersedes the earlier "treat absent as 0.0"
+heuristic for the MQTT bridge — that heuristic now applies only inside
+`safe_home_power_w()` (negative-value clamp), not to missing registers.
+
+PR #47 also addressed the DC/AC mismatch in the grid limiter:
 `total_dc_power` is DC-side, `home_from_*` is AC-side, so the
-subtraction `pv - home` overstates available power by inverter
-efficiency loss (~3–5%). Both pending merge.
+subtraction `pv - home` overstated available power by inverter
+efficiency loss (~3–5%). The helper `dc_pv_power_to_ac_estimate_w(dc)`
+applies a conservative `INVERTER_DC_TO_AC_EFFICIENCY = 0.96` factor
+before subtraction.
+
+*Commit on this branch: `7e6cf5f` (DC/AC + partial-sum fix), merged via
+PR #47.*
 
 ### Lessons
 
@@ -1992,11 +2002,21 @@ wider), `809a560` (test-fixture follow-up).*
 
 ### Fix
 
-Read `CONF_INSTALLER_ACCESS` flag directly; default to `False` when
-absent. Removed `CONF_SERVICE_CODE` imports from the three affected
-files. Test fixtures updated to set the explicit flag —
-`mock_installer_config_entry` now writes `CONF_INSTALLER_ACCESS=True`
-AND `CONF_ACCESS_ROLE="INSTALLER"`, mirroring what `_build_entry_data()`
+Read `CONF_INSTALLER_ACCESS` flag directly and default to `False` when
+absent. Sites updated to the safe pattern:
+
+- `helper.py` (inside `ensure_installer_access`) — **security
+  gate**: write authorization for module/setting writes
+- `__init__.py` (setup-time installer flag) — **security gate**:
+  passed into coordinators and proxy
+- `number.py` / `config_flow.py` — display and audit labels only;
+  must not infer installer access from a persisted service code
+
+Removed `CONF_SERVICE_CODE` fallback from runtime write gates and from
+config-flow `write_access` placeholders. Test fixtures updated to set
+the explicit flag — `mock_installer_config_entry` now writes
+`CONF_INSTALLER_ACCESS=True` AND `CONF_ACCESS_ROLE="INSTALLER"`,
+mirroring what `_build_entry_data()`
 actually persists.
 
 ### Related: primary-device deletion on lookup error (HIGH-07)

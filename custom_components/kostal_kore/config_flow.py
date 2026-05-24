@@ -773,12 +773,7 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
         access_role = str(self.config_entry.data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
         write_access = (
             "enabled"
-            if bool(
-                self.config_entry.data.get(
-                    CONF_INSTALLER_ACCESS,
-                    bool(self.config_entry.data.get(CONF_SERVICE_CODE)),
-                )
-            )
+            if bool(self.config_entry.data.get(CONF_INSTALLER_ACCESS, False))
             else "restricted"
         )
         return self.async_show_form(

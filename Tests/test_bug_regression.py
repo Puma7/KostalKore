@@ -1736,8 +1736,12 @@ async def test_audit_grid_optimizer_restores_limit_on_exception(
     """An exception during the loop while _is_on=True must still restore."""
     from kostal_plenticore.grid_charge_limiter import GridFeedInLimiterSwitch
 
+    from custom_components.kostal_kore.const import DOMAIN
+
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._is_on = True
+    sw._entry_id = "audit_entry"
+    sw.hass = SimpleNamespace(data={DOMAIN: {"audit_entry": {}}})
     sw._coordinator = MagicMock()
     sw._device_power_limit_w = 5000.0
     sw._feed_in_limit_w = 1000.0
@@ -1918,8 +1922,12 @@ async def test_audit_grid_limiter_uses_full_home_consumption(
     """_control_loop must sum all three home-source registers."""
     from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
+    from custom_components.kostal_kore.const import DOMAIN
+
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._is_on = True
+    sw._entry_id = "audit_entry2"
+    sw.hass = SimpleNamespace(data={DOMAIN: {"audit_entry2": {}}})
     sw._current_charge_limit = 0.0
     sw._device_power_limit_w = 10000.0
     sw._feed_in_limit_w = 5000.0
@@ -1964,8 +1972,12 @@ async def test_audit_grid_limiter_skips_incomplete_home() -> None:
     """When any home_from_* is missing, do not write a charge limit this cycle."""
     from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
+    from custom_components.kostal_kore.const import DOMAIN
+
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._is_on = True
+    sw._entry_id = "audit_entry3"
+    sw.hass = SimpleNamespace(data={DOMAIN: {"audit_entry3": {}}})
     sw._current_charge_limit = 0.0
     sw._device_power_limit_w = 10000.0
     sw._feed_in_limit_w = 5000.0

@@ -30,8 +30,14 @@ from typing import Any, Final
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory, UnitOfPower
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .battery_reg_1038_owner import (
+    OWNER_GRID_FEEDIN,
+    acquire_reg_1038_or_raise,
+    release_reg_1038,
+)
 from .helper import dc_pv_power_to_ac_estimate_w, sum_home_consumption_power_w
 from .modbus_client import ModbusClientError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
@@ -62,7 +68,9 @@ class GridFeedInLimiterSwitch(SwitchEntity):
     ) -> None:
         self._coord = coordinator
         self._hass_ref = hass
+        self._entry_id = entry_id
         self._device_power_limit_w = get_device_power_limit_w(coordinator)
+        self._modbus_read_failed_cycles: int = 0
         self._attr_unique_id = f"{entry_id}_grid_feedin_optimizer"
         self._attr_device_info = device_info
         self._is_on = False
@@ -80,7 +88,12 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         return {
             "feed_in_limit_w": self._feed_in_limit_w,
             "inverter_max_power_w": self._device_power_limit_w,
-            "current_battery_charge_limit_w": round(self._current_charge_limit, 0),
+            "current_battery_charge_limit_w": (
+                round(self._current_charge_limit, 0)
+                if self._modbus_read_failed_cycles < 3
+                else None
+            ),
+            "modbus_read_degraded": self._modbus_read_failed_cycles >= 3,
             "description": (
                 f"Begrenzt Batterieladung so, dass max. {self._feed_in_limit_w:.0f}W "
                 f"ins Netz eingespeist werden. Überschuss geht in die Batterie."
@@ -107,6 +120,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             _LOGGER.debug("Could not snapshot charge limit: %s", err)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         await self._snapshot_charge_limit()
         self._is_on = True
         self._start_control()
@@ -124,7 +138,9 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._cancel_control()
         restore = self._restore_limit()
         await self._write_charge_limit(restore)
+        release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         self._current_charge_limit = 0.0
+        self._modbus_read_failed_cycles = 0
         self.async_write_ha_state()
         _LOGGER.info("Grid Feed-In Optimizer OFF (charge limit restored to %.0f W)", restore)
 
@@ -154,8 +170,11 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                 home_grid = await self._read_float("home_from_grid")
 
                 if pv_power is None:
+                    self._modbus_read_failed_cycles += 1
                     await asyncio.sleep(CONTROL_INTERVAL)
                     continue
+
+                self._modbus_read_failed_cycles = 0
 
                 home = sum_home_consumption_power_w(
                     home_pv, home_bat, home_grid
@@ -221,6 +240,8 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                     "Failed to restore charge limit on optimizer exit: %s",
                     restore_err,
                 )
+            finally:
+                release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
 
     async def _read_float(self, name: str) -> float | None:
         reg = REGISTER_BY_NAME.get(name)
@@ -247,6 +268,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         if self._is_on:
             self._is_on = False
             await self._write_charge_limit(self._restore_limit())
+            release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         await super().async_will_remove_from_hass()
 
 
