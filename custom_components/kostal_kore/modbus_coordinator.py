@@ -353,6 +353,11 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Persist the most recent isolation resistance value."""
         import time
 
+        from .helper import is_isolation_sentinel_ohm
+
+        if is_isolation_sentinel_ohm(iso_ohm):
+            return
+
         if self._last_persisted_isolation_ohm == iso_ohm:
             return
         try:

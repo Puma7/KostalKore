@@ -353,6 +353,10 @@ class BatterySocController:
             self._task = None
             self._status = self._status if "error" in self._status else "idle"
             await self._write_normal()
+            hass = getattr(self, "_hass", None)
+            entry_id = getattr(self, "_entry_id", "")
+            if hass is not None and entry_id:
+                release_reg_1038(hass, entry_id, OWNER_SOC_CONTROLLER)
 
     # ------------------------------------------------------------------
     # Register I/O

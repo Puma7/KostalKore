@@ -38,7 +38,7 @@ async def test_entry_diagnostics(
 
     assert diagnostics["config_entry"]["entry_id"] == "2ab8dd92a62787ddfe213a67e09406bd"
     assert diagnostics["config_entry"]["title"] == "scb"
-    assert diagnostics["config_entry"]["data"] == {"host": "192.168.1.2", "password": REDACTED}
+    assert diagnostics["config_entry"]["data"] == {"host": REDACTED, "password": REDACTED}
 
     assert diagnostics["client"]["version"].api_version == "0.2.0"
     assert diagnostics["client"]["me"].role == "USER"

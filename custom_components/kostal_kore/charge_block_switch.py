@@ -198,6 +198,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         if self._is_on:
             self._is_on = False
             await self._write_normal(self._restore_limit())
+            release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
             if self._hass_ref:
                 try:
                     await self._hass_ref.services.async_call(

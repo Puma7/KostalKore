@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.system_info import async_get_system_info
 
-from .const import CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
+from .const import CONF_HOST, CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
 from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
 from .coordinator import PlenticoreConfigEntry
 
@@ -34,8 +34,12 @@ SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
 TO_REDACT: Final[set[str]] = {
     CONF_PASSWORD,
     CONF_SERVICE_CODE,
+    CONF_HOST,
     "password",
     "service_code",
+    "host",
+    "ip",
+    "ip_address",
     "api_key",
     "token",
     "secret",

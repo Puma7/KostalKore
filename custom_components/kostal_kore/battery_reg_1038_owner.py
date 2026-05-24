@@ -17,6 +17,7 @@ from .helper import integration_entry_store
 OWNER_GRID_FEEDIN: Final[str] = "grid_feedin_optimizer"
 OWNER_SOC_CONTROLLER: Final[str] = "soc_controller"
 OWNER_CHARGE_BLOCK: Final[str] = "charge_block"
+OWNER_BATTERY_TEST: Final[str] = "battery_test"
 
 KEY_REG_1038_OWNER: Final[str] = "reg_1038_owner"
 
@@ -24,6 +25,7 @@ _OWNER_LABELS: Final[dict[str, str]] = {
     OWNER_GRID_FEEDIN: "Grid Feed-In Optimizer",
     OWNER_SOC_CONTROLLER: "SoC Controller",
     OWNER_CHARGE_BLOCK: "Block Battery Charging",
+    OWNER_BATTERY_TEST: "Battery Charge/Discharge Test",
 }
 
 

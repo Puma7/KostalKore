@@ -362,6 +362,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 endianness=endianness,
                 soc_controller=soc_controller,
                 installer_access=installer_access,
+                hass=hass,
+                entry_id=entry.entry_id,
             )
             try:
                 await modbus_proxy.start()

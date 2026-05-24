@@ -271,6 +271,7 @@ class BatteryTestSuite:
         self._log.clear()
         self._dbg.clear()
         results: list[PhaseResult] = []
+        reg_1038_acquired = False
         if phases is None:
             phases = list(DEFAULT_PHASES)
 
@@ -299,6 +300,21 @@ class BatteryTestSuite:
                 self._emit(f"   ✓ {c}")
 
             await self._notify("Test gestartet", f"{len(phases)} Phasen | SoC {pf.battery_soc:.0f}%")
+
+            if (
+                self._hass
+                and self._entry_id
+                and getattr(self._hass, "data", None) is not None
+            ):
+                from .battery_reg_1038_owner import (
+                    OWNER_BATTERY_TEST,
+                    acquire_reg_1038_or_raise,
+                )
+
+                acquire_reg_1038_or_raise(
+                    self._hass, self._entry_id, OWNER_BATTERY_TEST
+                )
+                reg_1038_acquired = True
 
             for i, phase in enumerate(phases, 1):
                 if self._abort_requested:
@@ -343,6 +359,18 @@ class BatteryTestSuite:
                     await asyncio.sleep(3)
 
         finally:
+            if (
+                reg_1038_acquired
+                and self._hass
+                and self._entry_id
+                and getattr(self._hass, "data", None) is not None
+            ):
+                from .battery_reg_1038_owner import (
+                    OWNER_BATTERY_TEST,
+                    release_reg_1038,
+                )
+
+                release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
             await self._write_normal()
             self._running = False
             self._emit("")

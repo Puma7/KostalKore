@@ -78,6 +78,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._feed_in_limit_w: float = default_feed_in_limit_w(self._device_power_limit_w)
         self._current_charge_limit: float = 0.0
         self._original_charge_limit: float | None = None
+        self._restore_handled_in_turn_off: bool = False
 
     @property
     def is_on(self) -> bool:
@@ -120,8 +121,9 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             _LOGGER.debug("Could not snapshot charge limit: %s", err)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+        self._restore_handled_in_turn_off = False
         await self._snapshot_charge_limit()
+        acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         self._is_on = True
         self._start_control()
         self.async_write_ha_state()
@@ -139,6 +141,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         restore = self._restore_limit()
         await self._write_charge_limit(restore)
         release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+        self._restore_handled_in_turn_off = True
         self._current_charge_limit = 0.0
         self._modbus_read_failed_cycles = 0
         self.async_write_ha_state()
@@ -234,13 +237,15 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             self._is_on = False
             self.async_write_ha_state()
             try:
-                await self._write_charge_limit(self._restore_limit())
+                if not getattr(self, "_restore_handled_in_turn_off", False):
+                    await self._write_charge_limit(self._restore_limit())
             except Exception as restore_err:  # pragma: no cover
                 _LOGGER.error(
                     "Failed to restore charge limit on optimizer exit: %s",
                     restore_err,
                 )
             finally:
+                self._restore_handled_in_turn_off = False
                 release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
 
     async def _read_float(self, name: str) -> float | None:
