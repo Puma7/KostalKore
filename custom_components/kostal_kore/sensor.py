@@ -36,7 +36,11 @@ from .coordinator import (
     PlenticoreConfigEntry,
     ProcessDataUpdateCoordinator,
 )
-from .helper import PlenticoreDataFormatter, parse_modbus_exception
+from .helper import (
+    PlenticoreDataFormatter,
+    battery_efficiency_measurement_quality,
+    parse_modbus_exception,
+)
 from .ksem_coordinator import KsemDataUpdateCoordinator
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .startup_trace import log_entity_batch
@@ -2164,6 +2168,35 @@ class PlenticoreCalculatedSensor(
             _LOGGER.debug("Error calculating %s: %s", self.data_id, e)
             return None
         return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """Expose measurement-plane metadata for hybrid efficiency sensors."""
+        if ":" not in self.data_id:
+            return {}
+        metric, period = self.data_id.split(":", 1)
+        if metric not in ("BatteryEfficiency", "BatteryNetEfficiency"):
+            return {}
+        charge_pv = self._get_sensor_value(
+            "scb:statistic:EnergyFlow", f"Statistic:EnergyChargePv:{period}"
+        )
+        charge_grid = self._get_sensor_value(
+            "scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}"
+        )
+        if charge_pv is None or charge_grid is None:
+            return {}
+        try:
+            pv_kwh = float(charge_pv)
+            grid_kwh = float(charge_grid)
+        except (TypeError, ValueError):
+            return {}
+        return {
+            "measurement_quality": battery_efficiency_measurement_quality(
+                pv_kwh, grid_kwh
+            ),
+            "charge_pv_kwh": round(pv_kwh, 3),
+            "charge_grid_kwh": round(grid_kwh, 3),
+        }
 
     def _get_sensor_value(self, module_id: str, data_id: str) -> str | None:
         """Get value from another sensor."""

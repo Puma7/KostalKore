@@ -275,15 +275,13 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
 
         # Home power: REST single value vs Modbus sum of three registers
         rest_home = self._get_rest_float("devices:local", "Home_P")
-        home_pv = _to_float(modbus_data.get("home_from_pv")) or 0.0
-        home_bat = _to_float(modbus_data.get("home_from_battery")) or 0.0
-        home_grid = _to_float(modbus_data.get("home_from_grid")) or 0.0
-        modbus_home: float | None = None
-        if any(
-            modbus_data.get(k) is not None
-            for k in ("home_from_pv", "home_from_battery", "home_from_grid")
-        ):
-            modbus_home = abs(home_pv) + abs(home_bat) + abs(home_grid)
+        from .helper import sum_home_consumption_power_w
+
+        modbus_home = sum_home_consumption_power_w(
+            _to_float(modbus_data.get("home_from_pv")),
+            _to_float(modbus_data.get("home_from_battery")),
+            _to_float(modbus_data.get("home_from_grid")),
+        )
         home_pair = self._check_pair("home_power_w", rest_home, modbus_home)
 
         return [soc_pair, dc_pair, home_pair]

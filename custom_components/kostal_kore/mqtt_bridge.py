@@ -24,7 +24,9 @@ Topic structure:
     {prefix}/{id}/modbus/config                    → register metadata (retained)
 
     Simplified proxy topics for evcc/iobroker:
-    {prefix}/{id}/proxy/pv_power                   → total PV power (W)
+    {prefix}/{id}/proxy/pv_power                   → LEGACY alias for pv_power_dc
+    {prefix}/{id}/proxy/pv_power_dc                → Modbus total_dc_power (W, DC)
+    {prefix}/{id}/proxy/pv_power_ac_est            → DC × efficiency estimate (W, AC)
     {prefix}/{id}/proxy/grid_power                 → grid power (W, +import/-export)
     {prefix}/{id}/proxy/battery_power              → battery power (W, +discharge/-charge)
     {prefix}/{id}/proxy/battery_soc                → battery SoC (%)
@@ -46,6 +48,11 @@ from typing import Any, Final
 
 from homeassistant.core import HomeAssistant, callback
 
+from .helper import (
+    dc_pv_power_to_ac_estimate_w,
+    optional_float,
+    sum_home_consumption_power_w,
+)
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
     INVERTER_STATES,
@@ -260,20 +267,25 @@ class KostalMqttBridge:
         # Vorher wurde nur home_from_pv (PV→Haus-Anteil) verwendet, was bei Netz-
         # oder Batteriebezug zu massiv zu niedrigen Werten führte und externe EMS
         # (evcc/iobroker) zu falschen Lade-/Entladeentscheidungen verleitete.
-        home_pv = data.get("home_from_pv")
-        home_bat = data.get("home_from_battery")
-        home_grid = data.get("home_from_grid")
-        parts = [home_pv, home_bat, home_grid]
-        if all(p is None for p in parts):
-            home_total: float | None = None
-        else:
-            try:
-                home_total = sum(float(p) for p in parts if p is not None)
-            except (TypeError, ValueError):
-                home_total = None
+        home_total = sum_home_consumption_power_w(
+            optional_float(data.get("home_from_pv")),
+            optional_float(data.get("home_from_battery")),
+            optional_float(data.get("home_from_grid")),
+        )
+
+        dc_pv = optional_float(data.get("total_dc_power"))
+        pv_dc_fmt = self._fmt(dc_pv)
+        pv_ac_est_fmt = (
+            self._fmt(dc_pv_power_to_ac_estimate_w(dc_pv))
+            if dc_pv is not None
+            else None
+        )
 
         proxy_map: dict[str, str | None] = {
-            "pv_power": self._fmt(data.get("total_dc_power")),
+            # Legacy key kept for evcc/ioBroker configs; same value as pv_power_dc.
+            "pv_power": pv_dc_fmt,
+            "pv_power_dc": pv_dc_fmt,
+            "pv_power_ac_est": pv_ac_est_fmt,
             "grid_power": self._fmt(data.get("pm_total_active")),
             "battery_power": self._fmt(data.get("battery_cd_power")),
             "battery_soc": self._fmt(data.get("battery_soc")),
@@ -332,11 +344,20 @@ class KostalMqttBridge:
                 "proxy_commands": proxy_meta,
                 "proxy_topics": {
                     "pv_power": f"{self._proxy_base}/pv_power",
+                    "pv_power_dc": f"{self._proxy_base}/pv_power_dc",
+                    "pv_power_ac_est": f"{self._proxy_base}/pv_power_ac_est",
                     "grid_power": f"{self._proxy_base}/grid_power",
                     "battery_power": f"{self._proxy_base}/battery_power",
                     "battery_soc": f"{self._proxy_base}/battery_soc",
                     "home_power": f"{self._proxy_base}/home_power",
                     "inverter_state": f"{self._proxy_base}/inverter_state",
+                },
+                "proxy_topic_notes": {
+                    "pv_power": "Legacy alias for pv_power_dc (Modbus register 100, DC side)",
+                    "pv_power_dc": "total_dc_power [W] before inverter conversion",
+                    "pv_power_ac_est": "DC PV scaled by inverter efficiency (~0.96)",
+                    "grid_power": "pm_total_active at KSEM [W], AC",
+                    "home_power": "Sum of home_from_pv+battery+grid; omitted if any register missing",
                 },
                 "state_topic": f"{self._topic_base}/state",
                 "available_topic": f"{self._topic_base}/available",
