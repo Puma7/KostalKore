@@ -192,16 +192,48 @@ def log_setup_entry_lifecycle(
         and secs_since_unload < RAPID_CYCLE_THRESHOLD_S
         and unload_n > 0
     ):
-        _LOGGER.warning(
-            "%s [%s] RAPID RELOAD CYCLE: setup #%d started %.1fs after unload #%d "
-            "(threshold=%.0fs) — check logs for 'reload REQUEST' or HA/core reload",
-            LIFECYCLE_PREFIX,
-            title,
-            setup_n,
-            secs_since_unload,
-            unload_n,
-            RAPID_CYCLE_THRESHOLD_S,
-        )
+        reload_source = stats["last_reload_source"]
+        if isinstance(reload_source, str) and reload_source.startswith("ha_core:"):
+            _LOGGER.info(
+                "%s [%s] setup #%d started %.1fs after unload #%d "
+                "(expected HA entity-registry reload, source=%r)",
+                LIFECYCLE_PREFIX,
+                title,
+                setup_n,
+                secs_since_unload,
+                unload_n,
+                reload_source,
+            )
+        else:
+            _LOGGER.warning(
+                "%s [%s] RAPID RELOAD CYCLE: setup #%d started %.1fs after unload #%d "
+                "(threshold=%.0fs) — check logs for 'reload REQUEST' or HA/core reload",
+                LIFECYCLE_PREFIX,
+                title,
+                setup_n,
+                secs_since_unload,
+                unload_n,
+                RAPID_CYCLE_THRESHOLD_S,
+            )
+
+
+def mark_lifecycle_reload_source(
+    hass: HomeAssistant,
+    entry_id: str,
+    source: str,
+    *,
+    only_if_unset: bool = False,
+) -> bool:
+    """Record who triggered the most recent unload/reload (for lifecycle diagnostics).
+
+    Returns True when the source was stored. With ``only_if_unset``, an existing
+    value (e.g. set by ``async_request_config_reload``) is left unchanged.
+    """
+    stats = _lifecycle_stats(hass, entry_id)
+    if only_if_unset and stats.get("last_reload_source") is not None:
+        return False
+    stats["last_reload_source"] = source
+    return True
 
 
 def log_unload_entry_lifecycle(

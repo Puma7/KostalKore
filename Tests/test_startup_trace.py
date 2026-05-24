@@ -103,7 +103,7 @@ def test_lifecycle_setup_and_rapid_cycle_warning(
             "setup_count": 0,
             "unload_count": 1,
             "last_unload_mono": time.monotonic(),
-            "last_reload_source": "external:test",
+            "last_reload_source": "options_listener:options changed",
         }
     }
     with caplog.at_level(logging.INFO):
@@ -116,6 +116,44 @@ def test_lifecycle_setup_and_rapid_cycle_warning(
     assert LIFECYCLE_PREFIX in caplog.text
     assert "setup BEGIN #1" in caplog.text
     assert "RAPID RELOAD CYCLE" in caplog.text
+
+
+def test_mark_lifecycle_reload_source_only_if_unset(hass: HomeAssistant) -> None:
+    from custom_components.kostal_kore.startup_trace import (
+        _lifecycle_stats,
+        mark_lifecycle_reload_source,
+    )
+
+    entry_id = "only_if_unset"
+    assert mark_lifecycle_reload_source(hass, entry_id, "first") is True
+    assert mark_lifecycle_reload_source(
+        hass, entry_id, "second", only_if_unset=True
+    ) is False
+    stats = _lifecycle_stats(hass, entry_id)
+    assert stats["last_reload_source"] == "first"
+
+
+def test_lifecycle_expected_ha_reload_is_info_not_rapid_warning(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    entry_id = "test_entry_ha_reload"
+    hass.data.setdefault(DOMAIN, {})["_entry_lifecycle"] = {
+        entry_id: {
+            "setup_count": 0,
+            "unload_count": 1,
+            "last_unload_mono": time.monotonic(),
+            "last_reload_source": "ha_core:entity_registry_disabled_by",
+        }
+    }
+    with caplog.at_level(logging.INFO):
+        log_setup_entry_lifecycle(
+            hass,
+            entry_id=entry_id,
+            title="WR",
+            entry_state="loaded",
+        )
+    assert "RAPID RELOAD CYCLE" not in caplog.text
+    assert "expected HA entity-registry reload" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -1465,11 +1465,20 @@ async def async_setup_entry(
             description.data_id in FORCE_CREATE_KEYS
             or description_to_use.data_id in FORCE_CREATE_KEYS
         ):
-            forced_id = f"{entry.entry_id}_{description_to_use.module_id}_{description_to_use.data_id}"
+            forced_id = (
+                f"{entry.entry_id}_{description_to_use.module_id}_"
+                f"{description_to_use.data_id}"
+            )
+            canonical_uid = (
+                f"{entry.entry_id}_{description.module_id}_{description.data_id}"
+            )
             forced_unique_ids.add(forced_id)
-            forced_unique_ids_by_data_id.setdefault(
-                description_to_use.data_id, set()
-            ).add(forced_id)
+            forced_bucket = forced_unique_ids_by_data_id.setdefault(
+                description.data_id, set()
+            )
+            forced_bucket.add(forced_id)
+            if canonical_uid != forced_id:
+                forced_bucket.add(canonical_uid)
             forced_fetch_pairs.add(
                 (description_to_use.module_id, description_to_use.data_id)
             )
