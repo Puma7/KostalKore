@@ -467,22 +467,6 @@ class ModbusTcpProxyServer:
                 _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
                 return self._error_response(FC_WRITE_SINGLE, 0x04)
 
-        reg_fwd = REGISTER_BY_ADDRESS.get(address)
-        if reg_fwd is not None and reg_fwd.access == Access.RW and reg_fwd.count == 1:
-            try:
-                await self._coordinator.async_write_by_address(
-                    address, value, audit_source="proxy_fc06_forward"
-                )
-                self._log_audit(reg_fwd.name, value, "forwarded_via_coordinator", "FC06")
-                return pdu[:5]
-            except Exception as err:
-                _LOGGER.warning(
-                    "Proxy write via coordinator failed at address %d: %s",
-                    address,
-                    err,
-                )
-                return self._error_response(FC_WRITE_SINGLE, 0x04)
-
         raw_result = await self._forward_write_single(address, value)
         if raw_result:
             self._log_audit(f"addr:{address}", value, "forwarded_direct", "FC06")

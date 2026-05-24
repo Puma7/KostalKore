@@ -29,8 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are redacted via `async_redact_data` before writing JSON to `/config/www/`.
 - **Config flow / number audit labels** — `write_access` and write-audit `user_type`
   use `CONF_INSTALLER_ACCESS` only (no `CONF_SERVICE_CODE` fallback).
-- **Modbus proxy FC06** — Single-register writes try
-  `coordinator.async_write_by_address` with audit when the address maps to RW.
+- **Modbus proxy REG 1038 arbitration** — External FC06/FC16 writes to register
+  1038 are rejected while an integration feature holds the owner lock (evcc,
+  iobroker, etc.).
 - **Grid Feed-In Optimizer** — `modbus_read_degraded` attribute; control-loop
   `finally` always restores charge limit and releases REG 1038.
 
@@ -38,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Debug bundle secret leak** — `modbus_snapshot` / `rest_snapshot` were written
   unredacted; now covered by the same `TO_REDACT` set as config diagnostics.
 - **Isolation restore poisoning** — Persisted isolation sentinel values are no
-  longer seeded into the health-monitor deque on startup.
+  longer seeded into the health-monitor deque on startup or re-saved to disk.
 - **REG 1038 contention** — Three features could overwrite each other's charge
   limit without coordination.
 - **Dead lifecycle keys** — Removed unused `KEY_SETUP_IN_PROGRESS` /
