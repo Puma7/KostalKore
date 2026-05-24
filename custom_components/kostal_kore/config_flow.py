@@ -761,6 +761,12 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
             if normalized.get(CONF_MODBUS_ENABLED, False):
                 self._user_input = normalized
                 return await self.async_step_modbus_test()
+            # HA 2026.6+ auto-reloads via OptionsFlowManager; older HA needs explicit
+            # reload. Scheduling here is safe on all versions — the reload task runs
+            # after the FlowManager calls async_update_entry with the new options.
+            self.hass.config_entries.async_schedule_reload(
+                self.config_entry.entry_id
+            )
             return self.async_create_entry(title="", data=normalized)
 
         defaults = _normalize_options(self.config_entry.options)
@@ -798,6 +804,9 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
                 options=self._user_input,
             )
             if test_passed:
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
                 return self.async_create_entry(title="", data=self._user_input)
             return self.async_show_form(
                 step_id="modbus_test",

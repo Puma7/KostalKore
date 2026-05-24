@@ -25,7 +25,6 @@ from typing import Final
 from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException
 
-from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -77,8 +76,6 @@ from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  
 from .write_audit import WriteAuditLog
 from .startup_trace import (
     SetupTrace,
-    async_request_config_reload,
-    log_reload_skipped_lifecycle,
     log_setup_entry_lifecycle,
     log_unload_entry_lifecycle,
 )
@@ -256,8 +253,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         clear_issue(hass, "battery_capacity_unit_migration", entry_id=entry.entry_id)
 
     entry.runtime_data = plenticore
-
-    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     # Event intelligence coordinator (REST /events/latest), independent from
     # process/settings coordinators so transient event API failures don't impact
@@ -614,12 +609,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     from .entity_registry_helpers import run_post_setup_entity_registry_maintenance
 
     run_post_setup_entity_registry_maintenance(hass, entry)
-    # Save normalized options AFTER successful setup so the options-update
-    # listener can compare like-for-like and not retrigger reloads when HA
-    # canonicalizes the dict between writes.
-    from .config_flow import _normalize_options
     entry_store[KEY_SETUP_IN_PROGRESS] = False
-    entry_store["_setup_options"] = _normalize_options(entry.options)
     trace.phase_end("setup_entry", success=True)
     _log_setup_metrics(start_time, True, trace)
     return True
@@ -711,93 +701,6 @@ async def _rollback_setup(
         )
     await plenticore.async_unload()
     _LOGGER.warning("Rolled back partial setup for %s", entry.title)
-
-
-async def _async_options_updated(
-    hass: HomeAssistant, entry: PlenticoreConfigEntry
-) -> None:
-    """Reload integration when options actually change.
-
-    HA fires options updates during the unload-reload gap and while setup
-    is still in progress. Triggering async_reload in those windows produced
-    a self-sustaining reload loop where each cycle's teardown immediately
-    spawned another reload (visible as "Config entry was never loaded!"
-    for binary_sensor right after a successful setup). Guard the listener
-    so it only fires when there are actual, normalized option changes.
-    """
-    domain_data = hass.data.get(DOMAIN, {})
-    entry_data = domain_data.get(entry.entry_id)
-
-    if entry_data is None:
-        # Unload/reload gap: hass.data was popped but HA may still emit updates.
-        log_reload_skipped_lifecycle(
-            hass,
-            entry_id=entry.entry_id,
-            title=entry.title,
-            reason="integration not loaded (unload/reload gap)",
-            entry_state=entry.state,
-        )
-        return
-
-    trace_obj = entry_data.get("_setup_trace")
-    trace = trace_obj if isinstance(trace_obj, SetupTrace) else None
-    if entry_data.get(KEY_SETUP_IN_PROGRESS):
-        if trace is not None:
-            trace.log_reload_skipped("setup still in progress")
-        else:
-            _LOGGER.debug(
-                "Options update for %s ignored (setup still in progress)",
-                entry.entry_id,
-            )
-        return
-    if entry_data.get(KEY_UNLOAD_IN_PROGRESS):
-        if trace is not None:
-            trace.log_reload_skipped("unload in progress")
-        else:
-            _LOGGER.debug(
-                "Options update for %s ignored (unload in progress)",
-                entry.entry_id,
-            )
-        return
-    if entry.state is not ConfigEntryState.LOADED:
-        if trace is not None:
-            trace.log_reload_skipped(f"entry state={entry.state}")
-        else:
-            _LOGGER.debug(
-                "Options update for %s ignored (entry state=%s)",
-                entry.entry_id,
-                entry.state,
-            )
-        return
-
-    from .config_flow import _normalize_options
-
-    new_options = _normalize_options(entry.options)
-    prev = entry_data.get("_setup_options")
-    if prev is not None and new_options == prev:
-        if trace is not None:
-            trace.log_reload_skipped("options unchanged after normalize")
-        else:
-            _LOGGER.debug(
-                "Config entry %s updated but options unchanged – skipping reload",
-                entry.entry_id,
-            )
-        return
-    if trace is not None:
-        trace.log_reload_trigger(
-            reason="options changed",
-            entry_state=entry.state,
-            setup_in_progress=bool(entry_data.get(KEY_SETUP_IN_PROGRESS)),
-            unload_in_progress=bool(entry_data.get(KEY_UNLOAD_IN_PROGRESS)),
-        )
-    else:
-        _LOGGER.info("Options changed for %s, reloading integration", entry.title)
-    await async_request_config_reload(
-        hass,
-        entry.entry_id,
-        source="options_listener:options changed",
-        title=entry.title,
-    )
 
 
 def _log_unload_caller(
