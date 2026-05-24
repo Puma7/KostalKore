@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any, Final
@@ -28,6 +29,45 @@ from .helper import normalize_isolation_resistance_ohm
 _LOGGER: Final = logging.getLogger(__name__)
 
 MAX_HISTORY_SIZE: Final[int] = 2000
+
+
+def resolve_active_error_warning_counts(
+    process_data: Mapping[str, Any] | None,
+    *,
+    event_snapshot: Mapping[str, Any] | None = None,
+) -> tuple[int, int] | None:
+    """Map REST/event counters to (errors, warnings) for the health binary sensor.
+
+    Primary source is scb:event process data (Event:ActiveErrorCnt /
+    Event:ActiveWarningCnt). When the error counter is missing, fall back to
+    the event coordinator's active_error_events_count (warnings default to 0).
+    """
+    errors: int | None = None
+    warnings: int | None = None
+
+    if process_data:
+        event_mod = process_data.get("scb:event")
+        if isinstance(event_mod, Mapping):
+            errors = _safe_int(event_mod.get("Event:ActiveErrorCnt"))
+            warnings = _safe_int(event_mod.get("Event:ActiveWarningCnt"))
+
+    if errors is None and event_snapshot is not None:
+        errors = _safe_int(event_snapshot.get("active_error_events_count"))
+
+    if errors is None:
+        return None
+    if warnings is None:
+        warnings = 0
+    return errors, warnings
+
+
+def _safe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_float(value: Any) -> float | None:

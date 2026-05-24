@@ -1528,6 +1528,10 @@ async def async_setup_entry(
         _entry_store_pc.get("degradation_tracker")
         if isinstance(_entry_store_pc, dict) else None
     )
+    _event_coordinator_obj = (
+        _entry_store_pc.get("event_coordinator")
+        if isinstance(_entry_store_pc, dict) else None
+    )
     if _health_monitor_obj is not None or _degradation_tracker_obj is not None:
         def _feed_rest_soh() -> None:
             data = process_data_update_coordinator.data
@@ -1559,6 +1563,33 @@ async def async_setup_entry(
         # methods firing on already-torn-down trackers).
         _unsub_soh = process_data_update_coordinator.async_add_listener(_feed_rest_soh)
         entry.async_on_unload(_unsub_soh)
+
+    if _health_monitor_obj is not None:
+        from .health_monitor import resolve_active_error_warning_counts
+
+        def _feed_active_error_counts() -> None:
+            counts = resolve_active_error_warning_counts(
+                process_data_update_coordinator.data,
+                event_snapshot=(
+                    _event_coordinator_obj.data
+                    if _event_coordinator_obj is not None
+                    else None
+                ),
+            )
+            if counts is None:
+                return
+            errors, warnings = counts
+            _health_monitor_obj.update_error_counts(errors, warnings)
+
+        _unsub_errors = process_data_update_coordinator.async_add_listener(
+            _feed_active_error_counts
+        )
+        entry.async_on_unload(_unsub_errors)
+        if _event_coordinator_obj is not None:
+            _unsub_errors_ev = _event_coordinator_obj.async_add_listener(
+                _feed_active_error_counts
+            )
+            entry.async_on_unload(_unsub_errors_ev)
 
     # Performance optimization: Batch entity creation to reduce overhead
     def create_entities_batch(
