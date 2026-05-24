@@ -385,6 +385,9 @@ class InverterHealthMonitor:
                             inverter_state=inverter_state,
                         )
                         if not expects_measurement:
+                            # Night/standby: no valid Modbus isolation for HA.
+                            self._isolation_modbus_unavailable = True
+                            self._isolation_modbus_off_scale = False
                             continue
                         if is_isolation_sentinel_ohm(fval):
                             if isolation_sentinel_as_off_scale_high(
@@ -397,8 +400,10 @@ class InverterHealthMonitor:
                                 self._isolation_modbus_unavailable = False
                                 self._isolation_modbus_off_scale = True
                                 self.isolation.record(ISOLATION_SENTINEL_OHM)
+                            else:
+                                self._isolation_modbus_unavailable = True
+                                self._isolation_modbus_off_scale = False
                             continue
-                        self._isolation_modbus_unavailable = False
                         self._isolation_modbus_off_scale = False
                         normalized_ohm = normalize_isolation_resistance_ohm(
                             val,
@@ -406,7 +411,9 @@ class InverterHealthMonitor:
                             inverter_state=inverter_state,
                         )
                         if normalized_ohm is None:
+                            self._isolation_modbus_unavailable = True
                             continue
+                        self._isolation_modbus_unavailable = False
                         fval = normalized_ohm
                     tracker.record(fval)
                 except (TypeError, ValueError):

@@ -344,6 +344,9 @@ class TestInverterHealthMonitor:
         m = InverterHealthMonitor()
         m.update_from_modbus({"isolation_resistance": 2000000.0, "total_dc_power": 0.0})
         assert m.isolation.current is None
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+        assert m.isolation_modbus_attributes()["modbus_measurement_unavailable"] is True
 
     def test_isolation_sentinel_recorded_as_off_scale_during_pv(self) -> None:
         """Sentinel during PV matches Kostal ~65.5 MΩ off-scale display."""
@@ -361,6 +364,7 @@ class TestInverterHealthMonitor:
         attrs = m.isolation_modbus_attributes()
         assert attrs["modbus_sentinel"] is True
         assert attrs["kostal_display_mohm"] == 65.5
+        assert attrs["modbus_measurement_unavailable"] is False
 
     def test_isolation_sentinel_skipped_at_night(self) -> None:
         """Sentinel without PV must not seed a fake high reading."""
@@ -373,6 +377,40 @@ class TestInverterHealthMonitor:
             }
         )
         assert m.isolation.current is None
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+
+    def test_isolation_sentinel_unavailable_when_not_off_scale(self) -> None:
+        m = InverterHealthMonitor()
+        with patch(
+            "custom_components.kostal_kore.health_monitor.isolation_sentinel_as_off_scale_high",
+            return_value=False,
+        ):
+            m.update_from_modbus(
+                {
+                    "isolation_resistance": 65_535_000.0,
+                    "total_dc_power": 5000.0,
+                    "inverter_state": 6,
+                }
+            )
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
+
+    def test_isolation_unavailable_when_normalization_fails(self) -> None:
+        m = InverterHealthMonitor()
+        with patch(
+            "custom_components.kostal_kore.health_monitor.normalize_isolation_resistance_ohm",
+            return_value=None,
+        ):
+            m.update_from_modbus(
+                {
+                    "isolation_resistance": 5000.0,
+                    "total_dc_power": 5000.0,
+                    "inverter_state": 6,
+                }
+            )
+        assert m.get_isolation_resistance_ohm() is None
+        assert m._isolation_modbus_unavailable is True
 
     @pytest.mark.asyncio
     async def test_restore_isolation_skips_expired_persisted_sample(
