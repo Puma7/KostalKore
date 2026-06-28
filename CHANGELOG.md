@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] — 2026-06-28 — Self-healing MQTT bridge startup
+
+### Fixed
+- **MQTT bridge no longer aborts integration setup when the broker is briefly
+  unavailable.** If the MQTT broker was not connected at setup time (e.g. the
+  MQTT integration finished connecting *after* this one, or a CPU-loaded startup
+  delayed the broker), the bridge's first publish raised
+  `HomeAssistantError: mqtt_broker_error`, which propagated out of
+  `async_setup_entry` and failed the **whole** integration (`Error setting up
+  entry … for kostal_kore`) — and Home Assistant did not retry, so it stayed
+  broken until a manual reload.
+- The bridge now **self-heals**: the first start is attempted immediately, and
+  on a broker error it retries in the background with exponential backoff
+  (5 s → capped at 5 min, up to 12 attempts), starting automatically as soon as
+  the broker becomes reachable. A failed start never aborts setup; partial
+  wiring is rolled back, and the retry task is cancelled cleanly on unload.
+- `async_setup_entry` additionally guards the bridge start so any unexpected
+  error is logged and setup continues without the optional bridge.
+
 ## [3.0.1] — 2026-06-28 — Current-HA compatibility & hardening
 
 Stable patch release. Fixes a crash when opening the integration options on

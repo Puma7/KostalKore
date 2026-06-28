@@ -337,7 +337,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 soc_controller=soc_controller,
                 installer_access=installer_access,
             )
-            await mqtt_bridge.async_start()
+            # The MQTT bridge is optional: a broker that is unreachable or
+            # misbehaving at setup time must never abort the whole integration.
+            # async_start() already self-heals broker errors in the background;
+            # this guard additionally swallows any unexpected error so setup
+            # always proceeds.
+            try:
+                await mqtt_bridge.async_start()
+            except Exception:  # noqa: BLE001 - optional bridge must not break setup
+                _LOGGER.exception(
+                    "MQTT bridge failed to start; continuing without it."
+                )
 
         if modbus_coordinator and entry.options.get(  # pragma: no cover
             CONF_MODBUS_PROXY_ENABLED, False
