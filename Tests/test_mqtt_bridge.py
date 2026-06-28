@@ -214,7 +214,7 @@ class TestBridgeStartSelfHealing:
             await bridge._start_retry_loop()
 
         assert bridge._started is True
-        coord.async_add_listener.assert_called_once()
+        assert bridge._unsub_coordinator is not None
 
 
 class TestCommandHandling:

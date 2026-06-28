@@ -172,17 +172,16 @@ class KostalMqttBridge:
     async def _try_start(self) -> bool:
         """Attempt to bring the bridge up. Return True on success.
 
-        On a broker error (e.g. not connected) any partial wiring is rolled back
-        and False is returned so the caller can retry; the exception never
-        escapes, so it can never abort integration setup.
+        Ordering matters: subscriptions and the retained register config are
+        wired up first, and the retained ``available = online`` is published
+        **last** as the commit point. On any error every partial step is rolled
+        back, so a failed attempt never leaves a stale retained "online" or
+        orphaned subscriptions, and the exception never escapes to abort
+        integration setup.
         """
         from homeassistant.components import mqtt  # noqa: E402
 
         try:
-            await mqtt.async_publish(  # type: ignore[attr-defined]
-                self._hass, f"{self._topic_base}/available", "online", QOS, retain=True,
-            )
-
             for reg in SAFE_WRITABLE_REGISTERS:
                 topic = f"{self._topic_base}/command/{reg.name}"
                 unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
@@ -200,9 +199,21 @@ class KostalMqttBridge:
             self._unsub_coordinator = self._coordinator.async_add_listener(
                 self._on_coordinator_update
             )
-            self._started = True
 
             await self._publish_register_metadata()
+
+            # Announce availability LAST, after everything is wired up, so a
+            # failure in any step above never leaves a stale retained "online"
+            # behind once the partial start is rolled back.
+            await mqtt.async_publish(  # type: ignore[attr-defined]
+                self._hass, f"{self._topic_base}/available", "online", QOS, retain=True,
+            )
+            self._started = True
+        except asyncio.CancelledError:
+            # Unload/cancel during a retry attempt: undo any partial wiring so no
+            # stale subscriptions stay attached to a coordinator being torn down.
+            self._rollback_partial_start()
+            raise
         except HomeAssistantError as err:
             _LOGGER.debug(
                 "MQTT bridge start attempt failed (broker not ready yet): %s", err
