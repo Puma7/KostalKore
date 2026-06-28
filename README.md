@@ -68,7 +68,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
   - `number.<device>_grid_feed_in_limit`
 - Control logic runs periodically and writes Modbus register `1038` (`bat_max_charge_limit`) so battery charging absorbs PV surplus above the configured feed-in cap.
 - Turning the switch OFF restores normal charging limits.
-- Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations + optimizer), or they can conflict.
+- Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations, **evcc `batteryMode`**, or the optimizer), or they can conflict. evcc's `kostal-plenticore-gen2` template (`batteryMode`) cyclically writes registers `1034`/`1038`/`1040` — the same registers KORE controls — so use **one** controller per battery. KORE rejects competing external writes with Modbus exception `0x06` while an internal controller is active.
 
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting

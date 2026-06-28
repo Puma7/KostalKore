@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+- **evcc proxy guide** — `PROXY_SETUP.md` now recommends the `kostal-plenticore-gen2`
+  template for **all** inverter generations (G1/G2/G3); the legacy `kostal-plenticore`
+  name is still accepted by evcc via `covers:` (evcc PR #30854) but no longer advised.
+- **evcc `batteryMode` conflict note** — Documented that evcc's gen2 `batteryMode`
+  cyclically writes registers 1034/1038/1040 — the same registers KORE controls — so
+  evcc battery control and an internal KORE controller (SoC controller, GridGuard,
+  Block Battery Charging) must not run simultaneously (`PROXY_SETUP.md`, `README.md`).
+
 ## [3.0.0] — 2026-05-24 — Production readiness
 
 ### Added
