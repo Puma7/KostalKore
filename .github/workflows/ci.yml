@@ -6,6 +6,10 @@ on:
     branches:
       - "**"
 
+# Least-privilege token: this workflow only checks out and runs tests/mypy.
+permissions:
+  contents: read
+
 jobs:
   test-and-typecheck:
     runs-on: ubuntu-latest

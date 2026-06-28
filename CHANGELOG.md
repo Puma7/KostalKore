@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   property, and consistent with the `DataUpdateCoordinator` `config_entry`
   support the integration already assumes.
 
+### Security
+- **Workflow token least-privilege** — `ci.yml` and `hacs-validation.yml` now declare
+  `permissions: contents: read`, resolving the two CodeQL "workflow does not contain
+  permissions" alerts.
+- **Removed vendored `pykoplenti-master/uv.lock`** — the upstream library's dev
+  lockfile was the sole source of all 25 Dependabot alerts (aiohttp, black, pytest,
+  virtualenv, uv, filelock, idna). It is never installed or used by KORE (CI installs
+  `pykoplenti==1.5.0` from PyPI; `aiohttp` comes from Home Assistant core), so
+  removing it clears every alert without changing any shipped dependency.
+
 ### CI
 - **Test against current Home Assistant Python** — the CI test/typecheck job now runs
   on a Python matrix: `3.14` (the version current Home Assistant requires, ADR-0020)
