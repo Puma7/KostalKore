@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
 import hashlib
 import logging
 import time
+from collections import Counter
+from dataclasses import dataclass
 from typing import Any, Final, cast
 
 import voluptuous as vol
-from sqlalchemy import select
-
+from homeassistant.components.recorder.core import Recorder
 from homeassistant.components.recorder.db_schema import (
     States,
     StatesMeta,
@@ -19,10 +18,10 @@ from homeassistant.components.recorder.db_schema import (
     StatisticsMeta,
     StatisticsShortTerm,
 )
-from homeassistant.components.recorder.core import Recorder
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from sqlalchemy import select
 
 from .const import (
     DATA_KEY_HISTORY_MIGRATION_GUARDS,

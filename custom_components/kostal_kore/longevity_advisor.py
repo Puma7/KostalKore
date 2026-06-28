@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Final
 
-from .battery_chemistry import BatteryThresholds, detect_chemistry
+from .battery_chemistry import BatteryThresholds, detect_chemistry  # noqa: F401
 from .health_monitor import InverterHealthMonitor
 
 _LOGGER: Final = logging.getLogger(__name__)

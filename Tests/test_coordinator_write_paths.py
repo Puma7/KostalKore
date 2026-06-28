@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401
 import logging
 import time
 from datetime import timedelta
@@ -10,13 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pykoplenti import ApiException
 from aiohttp import ClientError
-
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.update_coordinator import UpdateFailed
-
+from homeassistant.helpers.update_coordinator import UpdateFailed  # noqa: F401
+from pykoplenti import ApiException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
@@ -321,7 +319,6 @@ async def test_plenticore_cache_helpers_and_write_edge_paths(
         assert await mix.async_write_data("devices:local", {"Battery:MinSoc": "10"}) is True
 
         import kostal_plenticore.coordinator as coordinator_module
-
         from kostal_plenticore.coordinator import (
             ModbusIllegalDataAddressError,
             ModbusIllegalDataValueError,

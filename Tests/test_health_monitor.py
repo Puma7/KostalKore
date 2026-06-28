@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kostal_plenticore.health_monitor import (
+    MAX_HISTORY_SIZE,
     HealthLevel,
-    HealthSample,
+    HealthSample,  # noqa: F401
     InverterHealthMonitor,
     ParameterTracker,
-    MAX_HISTORY_SIZE,
 )
 
 
@@ -416,8 +416,7 @@ class TestInverterHealthMonitor:
     async def test_restore_isolation_skips_expired_persisted_sample(
         self, hass: HomeAssistant
     ) -> None:
-        import time
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
 
         from custom_components.kostal_kore.modbus_coordinator import (
             ModbusDataUpdateCoordinator,
@@ -442,8 +441,7 @@ class TestInverterHealthMonitor:
     async def test_restore_isolation_skips_sentinel_persisted_sample(
         self, hass: HomeAssistant
     ) -> None:
-        import time
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
 
         from custom_components.kostal_kore.helper import ISOLATION_SENTINEL_OHM
         from custom_components.kostal_kore.modbus_coordinator import (

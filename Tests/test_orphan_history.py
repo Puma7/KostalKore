@@ -6,16 +6,15 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.kostal_kore import orphan_history as orphan_history_mod
 from custom_components.kostal_kore.const import (
     DOMAIN,
     SERVICE_APPLY_ORPHAN_HISTORY_MAPPING,
     SERVICE_SCAN_ORPHAN_HISTORY,
 )
-from custom_components.kostal_kore import orphan_history as orphan_history_mod
 from custom_components.kostal_kore.orphan_history import (
     OrphanCandidate,
     OrphanMergeReport,
@@ -31,7 +30,6 @@ from custom_components.kostal_kore.orphan_history import (
     async_unregister_orphan_history_services_if_unused,
     scan_orphan_history,
 )
-
 
 # ---------------------------------------------------------------------------
 # Pure-function helpers — fast unit tests, no recorder

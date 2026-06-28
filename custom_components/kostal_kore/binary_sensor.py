@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Final
 
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
-
-from .const import AddConfigEntryEntitiesCallback, CONF_MODBUS_ENABLED, DOMAIN
+from .const import CONF_MODBUS_ENABLED, DOMAIN, AddConfigEntryEntitiesCallback
 from .coordinator import PlenticoreConfigEntry
 
 _LOGGER: Final = logging.getLogger(__name__)

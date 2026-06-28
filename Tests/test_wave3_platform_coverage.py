@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 import asyncio
+import sys
 import time
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pykoplenti import SettingsData
-
 from homeassistant.helpers.device_registry import DeviceInfo
-
+from pykoplenti import SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
@@ -84,7 +82,7 @@ def _device_info(identifier: str) -> DeviceInfo:
 
 @pytest.mark.asyncio
 async def test_mqtt_bridge_stop_and_publish_edge_paths() -> None:
-    from kostal_plenticore.mqtt_bridge import KostalMqttBridge, TOPIC_PREFIX
+    from kostal_plenticore.mqtt_bridge import TOPIC_PREFIX, KostalMqttBridge
 
     hass = _mock_mqtt_hass()
     coordinator = _mock_modbus_coordinator()
@@ -119,7 +117,7 @@ async def test_mqtt_bridge_stop_and_publish_edge_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_mqtt_bridge_publish_and_formatting_edge_paths() -> None:
-    from kostal_plenticore.mqtt_bridge import KostalMqttBridge, TOPIC_PREFIX
+    from kostal_plenticore.mqtt_bridge import TOPIC_PREFIX, KostalMqttBridge
 
     hass = _mock_mqtt_hass()
     coordinator = _mock_modbus_coordinator()
@@ -210,7 +208,7 @@ async def test_mqtt_bridge_command_validation_and_failure_paths() -> None:
         REG_BAT_MIN_SOC,
         REG_MODBUS_ENABLE,
     )
-    from kostal_plenticore.mqtt_bridge import KostalMqttBridge, TOPIC_PREFIX
+    from kostal_plenticore.mqtt_bridge import TOPIC_PREFIX, KostalMqttBridge
 
     hass = _mock_mqtt_hass()
     coordinator = _mock_modbus_coordinator()
@@ -487,8 +485,8 @@ async def test_switch_entity_fetch_lifecycle_registration() -> None:
 
 @pytest.mark.asyncio
 async def test_number_setup_empty_settings_and_modbus_extensions(hass) -> None:
-    from kostal_plenticore.const import CONF_MODBUS_ENABLED, DOMAIN
     import kostal_plenticore.number as number_module
+    from kostal_plenticore.const import CONF_MODBUS_ENABLED, DOMAIN
 
     entry = MockConfigEntry(
         domain="kostal_plenticore",
@@ -532,11 +530,11 @@ async def test_number_setup_empty_settings_and_modbus_extensions(hass) -> None:
 
 @pytest.mark.asyncio
 async def test_number_entity_remaining_keepalive_and_non_battery_paths(hass) -> None:
+    from kostal_plenticore.const_ids import SettingId
     from kostal_plenticore.number import (
         PlenticoreDataNumber,
         PlenticoreNumberEntityDescription,
     )
-    from kostal_plenticore.const_ids import SettingId
 
     entry = MockConfigEntry(domain="kostal_plenticore", title="number-entity")
     coordinator = MagicMock()
@@ -658,8 +656,8 @@ async def test_number_entity_remaining_keepalive_and_non_battery_paths(hass) -> 
 
 @pytest.mark.asyncio
 async def test_number_setup_nonempty_missing_settings_and_empty_modbus_entities(hass) -> None:
-    from kostal_plenticore.const import CONF_MODBUS_ENABLED, DOMAIN
     import kostal_plenticore.number as number_module
+    from kostal_plenticore.const import CONF_MODBUS_ENABLED, DOMAIN
 
     entry = MockConfigEntry(
         domain="kostal_plenticore",
@@ -810,13 +808,13 @@ async def test_number_setup_creates_non_forced_entity_without_forced_fetch(hass)
 
 
 def test_number_keepalive_interval_uses_valid_fallback_value() -> None:
+    from kostal_plenticore.const_ids import SettingId
     from kostal_plenticore.number import (
         G3_KEEPALIVE_MAX_SECONDS,
         G3_KEEPALIVE_MIN_SECONDS,
         PlenticoreDataNumber,
         PlenticoreNumberEntityDescription,
     )
-    from kostal_plenticore.const_ids import SettingId
 
     coordinator = MagicMock()
     coordinator.config_entry = MockConfigEntry(domain="kostal_plenticore", title="number-keepalive")

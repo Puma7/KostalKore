@@ -10,7 +10,7 @@ Exposes internal operational metrics that are normally only visible in logs:
 from __future__ import annotations
 
 import logging
-import time
+import time  # noqa: F401
 from typing import Any, Final
 
 from homeassistant.components.sensor import (

@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import json
 import sys
-from types import ModuleType
+from types import ModuleType  # noqa: F401
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kostal_plenticore.modbus_registers import (
+    REGISTER_BY_NAME,  # noqa: F401
+    WRITABLE_REGISTERS,  # noqa: F401
+    Access,  # noqa: F401
+)
 from kostal_plenticore.mqtt_bridge import (
-    KostalMqttBridge,
     SAFE_WRITABLE_REGISTERS,
     TOPIC_PREFIX,
+    KostalMqttBridge,
     _has_mqtt,
-)
-from kostal_plenticore.modbus_registers import (
-    REGISTER_BY_NAME,
-    WRITABLE_REGISTERS,
-    Access,
 )
 
 

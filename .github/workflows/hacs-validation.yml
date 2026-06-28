@@ -6,6 +6,10 @@ on:
     branches:
       - "**"
 
+# Least-privilege token: HACS validation only needs to read the repository.
+permissions:
+  contents: read
+
 jobs:
   hacs:
     runs-on: ubuntu-latest

@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import ipaddress
 import logging
 from collections.abc import Mapping
-from typing import Any, Final, TypeAlias, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Final, TypeAlias
 
-from aiohttp.client_exceptions import ClientError, ContentTypeError
-from pykoplenti import ApiClient, AuthenticationException, ApiException
 import voluptuous as vol
-
+from aiohttp.client_exceptions import ClientError, ContentTypeError
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.const import CONF_BASE, CONF_HOST, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pykoplenti import ApiClient, ApiException, AuthenticationException
 
 from .const import (
     CONF_ACCESS_ROLE,
@@ -34,11 +33,11 @@ from .const import (
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
     CONF_SERVICE_CODE,
+    DEFAULT_KSEM_PORT,
+    DEFAULT_KSEM_UNIT_ID,
     DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_PROXY_BIND,
     DEFAULT_MODBUS_UNIT_ID,
-    DEFAULT_KSEM_PORT,
-    DEFAULT_KSEM_UNIT_ID,
     DOMAIN,
 )
 from .helper import get_hostname_id
@@ -208,6 +207,22 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _normalize_bind_address(value: Any) -> str:
+    """Return a valid IP for the proxy bind, falling back to the safe default.
+
+    A malformed value (typo, hostname, stray whitespace) is coerced to the
+    loopback default so a bad entry can never silently bind the control proxy
+    to an unexpected interface. A valid but non-loopback address is preserved;
+    the proxy logs a LAN-exposure warning when it binds there.
+    """
+    text = str(value).strip()
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return DEFAULT_MODBUS_PROXY_BIND
+    return text
+
+
 def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize options and enforce valid dependencies."""
     modbus_enabled = bool(user_input.get(CONF_MODBUS_ENABLED, False))
@@ -231,7 +246,7 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_MODBUS_PROXY_PORT: int(
             user_input.get(CONF_MODBUS_PROXY_PORT, DEFAULT_MODBUS_PROXY_PORT)
         ),
-        CONF_MODBUS_PROXY_BIND: str(
+        CONF_MODBUS_PROXY_BIND: _normalize_bind_address(
             user_input.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
         ),
         CONF_KSEM_ENABLED: ksem_enabled,
@@ -553,7 +568,11 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> KostalPlenticoreOptionsFlow:
         """Return the options flow handler."""
-        return KostalPlenticoreOptionsFlow(config_entry)
+        # HA >= 2024.12 auto-provides OptionsFlow.config_entry as a framework
+        # property (assigning it is deprecated from 2024.12 and raises
+        # AttributeError since HA 2025.12). Do NOT pass or store it — the
+        # framework resolves it from the flow handler.
+        return KostalPlenticoreOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -669,8 +688,9 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors = _handle_config_flow_error(err, "reconfigure")
             else:
                 self._async_abort_entries_match({CONF_HOST: connection_result.host})
-                # _get_reconfigure_entry() was added in HA 2024.4; inline it so
-                # the integration works on HA >= 2024.1 (our declared minimum).
+                # _get_reconfigure_entry() was added in HA 2024.4; we read the
+                # entry from the flow context directly, which works on every
+                # supported HA version (declared minimum 2024.12).
                 _entry_id = self.context.get("entry_id")
                 _reconf_entry = (
                     self.hass.config_entries.async_get_entry(_entry_id)
@@ -746,9 +766,15 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 class KostalPlenticoreOptionsFlow(OptionsFlow):
     """Handle Modbus/MQTT options in the post-setup configuration panel."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+    def __init__(self) -> None:
+        """Initialize options flow.
+
+        ``config_entry`` is intentionally NOT stored: Home Assistant >= 2024.12
+        exposes it as a property on ``OptionsFlow`` (assigning it is deprecated
+        from 2024.12 and raises ``AttributeError`` since HA 2025.12). Access it
+        via ``self.config_entry``,
+        which the framework resolves from the flow handler.
+        """
         self._user_input: dict[str, Any] = {}
 
     async def async_step_init(

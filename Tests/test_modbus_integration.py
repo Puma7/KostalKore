@@ -55,7 +55,7 @@ async def test_options_flow_modbus_disabled_saves_directly(
 
     from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
-    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
     flow.handler = mock_config_entry.entry_id
 
@@ -160,7 +160,7 @@ async def test_options_flow_modbus_test_confirm_saves(
 
     from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
-    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
     flow.handler = mock_config_entry.entry_id
     flow._user_input = {
@@ -302,7 +302,7 @@ async def test_setup_entry_modbus_auto_endianness(
             "custom_components.kostal_kore.modbus_client.KostalModbusClient.detect_endianness",
             new_callable=AsyncMock,
             return_value="little",
-        ) as mock_detect,
+        ) as mock_detect,  # noqa: F841
         patch(
             "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
         ) as mock_soc_controller,
@@ -507,8 +507,10 @@ async def test_options_flow_schedules_reload_without_modbus(
     from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
     mock_config_entry.add_to_hass(hass)
-    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
+    # config_entry is resolved from the handler on HA >= 2024.12.
+    flow.handler = mock_config_entry.entry_id
 
     with patch.object(
         hass.config_entries, "async_schedule_reload"

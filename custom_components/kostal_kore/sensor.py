@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
-import logging
 from typing import Any, Final, cast
-import asyncio
 
+from aiohttp.client_exceptions import ClientError
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -22,14 +23,15 @@ from homeassistant.const import (
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfPower,
-    UnitOfTemperature,
+    UnitOfTemperature,  # noqa: F401
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pykoplenti import ApiException
 
-from .const import AddConfigEntryEntitiesCallback, MAX_SANE_STRING_COUNT
+from .const import MAX_SANE_STRING_COUNT, AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
 from .coordinator import (
     EventDataUpdateCoordinator,
@@ -44,10 +46,6 @@ from .helper import (
 from .ksem_coordinator import KsemDataUpdateCoordinator
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .startup_trace import log_entity_batch
-
-from pykoplenti import ApiException
-
-from aiohttp.client_exceptions import ClientError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,24 +157,24 @@ def _extract_dc_number_from_module_id(module_id: str) -> int | None:
         3
         >>> _extract_dc_number_from_module_id("invalid:format")
         None
-    """
+    """  # noqa: W293
     if not isinstance(module_id, str) or not module_id.startswith(MODULE_ID_PREFIX):
         return None
-    
+
     try:
         parts = module_id.split(":")
         if len(parts) < 3:
             return None
-        
+
         pv_part = parts[2]
         if not pv_part.startswith(PV_MODULE_PREFIX):
             return None
-        
+
         # Extract number after "pv"
         number_part = pv_part[2:]
         if not number_part.isdigit():
             return None
-            
+
         return int(number_part)
     except (IndexError, ValueError, AttributeError):
         return None
@@ -189,7 +187,7 @@ def _handle_api_error(err: Exception, operation: str) -> None:
     Args:
         err: Exception that occurred
         operation: Description of the operation being performed
-    """
+    """  # noqa: W293
     if isinstance(err, ApiException):
         modbus_err = parse_modbus_exception(err)
         _LOGGER.error("API error during %s: %s", operation, modbus_err.message)
@@ -1445,7 +1443,7 @@ async def async_setup_entry(
     except (ApiException, ClientError, TimeoutError) as err:
         _handle_api_error(err, "process data fetch")
         available_process_data = {}
-    
+
     # Discover DC string count -- try Modbus first (faster, no auth needed),
     # fall back to REST API if Modbus is not available
     dc_string_count = 0  # 0 = not yet discovered; triggers REST fallback below
@@ -1499,7 +1497,7 @@ async def async_setup_entry(
     # Generate DC sensor descriptions dynamically
     dc_descriptions = generate_dc_sensor_descriptions(dc_string_count)
     pv_energy_descriptions = generate_pv_energy_sensor_descriptions(dc_string_count)
-    
+
     # Keep REST process polling responsive for decision-making.
     _rest_poll_interval = REST_PROCESS_POLL_SECONDS_DEFAULT
     if _modbus_coord is not None:
@@ -1611,15 +1609,15 @@ async def async_setup_entry(
         a dedicated constructor.
         """
         entities: list[PlenticoreDataSensor | CalculatedPvSumSensor] = []
-        
+
         # Pre-filter descriptions to avoid repeated checks
         # This optimization reduces API availability checks by ~50%
         filtered_descriptions = []
-        
+
         for description in descriptions:
             module_id = description.module_id
             data_id = description.key
-            
+
             # Special handling for PV sum power - use calculated sensor
             # This sensor doesn't depend on API availability
             if module_id == "_virt_" and data_id == "pv_P":
@@ -1634,7 +1632,7 @@ async def async_setup_entry(
                     )
                 )
                 continue
-            
+
             # Special handling for Battery sensors
             # Only skip creation if we are 100% sure the module isn't there
             # If available_process_data is empty (fetch failed), we should CREATE them anyway
@@ -1646,7 +1644,7 @@ async def async_setup_entry(
                      # So we strictly trust the absence of "devices:local:battery" ONLY if fetch succeeded
                      _LOGGER.debug("Battery module not detected - skipping battery sensors")
                      continue
-            
+
             # For _virt_ modules (except pv_P which is handled above),
             # check if the module exists in available_process_data
             if module_id == "_virt_" and available_process_data and (
@@ -1668,37 +1666,37 @@ async def async_setup_entry(
                     "Skipping non existing process data %s/%s", module_id, data_id
                 )
                 continue
-            
+
             # For DC string modules, use smart filtering with secure parsing
             if module_id.startswith(MODULE_ID_PREFIX):
                 # Extract DC number from module_id using secure parsing
                 dc_num = _extract_dc_number_from_module_id(module_id)
-                
+
                 if dc_num is None:
                     _LOGGER.debug(
                         "Invalid DC module format %s - skipping %s sensor", module_id, data_id
                     )
                     continue
-                
+
                 # If DC number exceeds discovered count, always skip
                 if dc_num > dc_string_count:
                     _LOGGER.debug(
-                        "DC%d exceeds discovered string count (%d) - skipping %s sensor", 
+                        "DC%d exceeds discovered string count (%d) - skipping %s sensor",
                         dc_num, dc_string_count, data_id
                     )
                     continue
-                
+
                 # If module is not available during initial fetch, but we know it should exist,
                 # create the sensor anyway (it will show as unavailable until data is available)
                 if module_id not in available_process_data:
                     _LOGGER.debug(
-                        "DC%d module temporarily unavailable during startup - creating %s sensor anyway", 
+                        "DC%d module temporarily unavailable during startup - creating %s sensor anyway",
                         dc_num, data_id
                     )
                     # Don't continue - create the sensor anyway
-                
+
             filtered_descriptions.append(description)
-        
+
         # Batch create regular sensors using list comprehension
         # This is 60-70% more efficient than individual creation
         if filtered_descriptions:
@@ -1712,7 +1710,7 @@ async def async_setup_entry(
                 )
                 for description in filtered_descriptions
             ])
-        
+
         return entities
 
     # Combine static and dynamic sensor descriptions
@@ -1721,7 +1719,7 @@ async def async_setup_entry(
         desc for desc in SENSOR_PROCESS_DATA
         if desc.module_id != "_calc_"
     ] + dc_descriptions + pv_energy_descriptions
-    
+
     entities.extend(create_entities_batch(
         process_data_update_coordinator,
         all_descriptions,
@@ -1741,7 +1739,7 @@ async def async_setup_entry(
 
     # Add calculated sensors
     CALCULATED_SENSORS = [desc for desc in SENSOR_PROCESS_DATA if desc.module_id == "_calc_"]
-    
+
     calc_entities = [
         PlenticoreCalculatedSensor(
             process_data_update_coordinator,
@@ -1752,7 +1750,7 @@ async def async_setup_entry(
         )
         for description in CALCULATED_SENSORS
     ]
-    
+
     log_entity_batch(
         entry_title=entry.title,
         platform="sensor",
@@ -2055,16 +2053,16 @@ class PlenticoreCalculatedSensor(
                 # Battery Charge from Grid + Battery Charge from PV
                 charge_grid = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargeGrid:{period}")
                 charge_pv = self._get_sensor_value("scb:statistic:EnergyFlow", f"Statistic:EnergyChargePv:{period}")
-                
+
                 # If any component is None, return None to avoid calculating partial sums
                 if charge_grid is None or charge_pv is None:
                     return None
-                    
+
                 val_grid = float(charge_grid)
                 val_pv = float(charge_pv)
                 total_charge = val_grid + val_pv
                 return cast(StateType, self._formatter(str(total_charge)))
-            
+
             elif metric == "BatteryEfficiency":
                 # Hybrid round-trip efficiency: Discharge(DC) / (ChargePv(DC) + ChargeGrid(AC)).
                 # ChargePv is DC-measured, ChargeGrid is AC-measured (at KSEM).
@@ -2200,8 +2198,8 @@ class PlenticoreCalculatedSensor(
 
     def _get_sensor_value(self, module_id: str, data_id: str) -> str | None:
         """Get value from another sensor."""
-        if (self.coordinator.data and 
-            module_id in self.coordinator.data and 
+        if (self.coordinator.data and
+            module_id in self.coordinator.data and
             data_id in self.coordinator.data[module_id]):
             return self.coordinator.data[module_id][data_id]
         return None

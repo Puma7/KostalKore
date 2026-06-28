@@ -18,7 +18,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo  # noqa: F401
 
 from .const import CONF_MODBUS_ENABLED, DOMAIN
 from .coordinator import PlenticoreConfigEntry
@@ -610,7 +610,7 @@ class SystemHealthCheckButton(ButtonEntity):
                     )
             except (TypeError, ValueError):
                 issues.append(
-                    f"generation_energy/total_yield nicht auswertbar (ungültige Werte)"
+                    "generation_energy/total_yield nicht auswertbar (ungültige Werte)"
                 )
 
         # Pattern: battery_gross_capacity unrealistic (> 1000 Ah)
@@ -625,7 +625,7 @@ class SystemHealthCheckButton(ButtonEntity):
                     )
             except (TypeError, ValueError):
                 issues.append(
-                    f"battery_gross_capacity nicht auswertbar (ungültiger Wert)"
+                    "battery_gross_capacity nicht auswertbar (ungültiger Wert)"
                 )
 
         # Pattern: battery_net_capacity = 0 while gross > 0
@@ -641,7 +641,7 @@ class SystemHealthCheckButton(ButtonEntity):
                     )
             except (TypeError, ValueError):
                 issues.append(
-                    f"battery_net/gross_capacity nicht auswertbar (ungültige Werte)"
+                    "battery_net/gross_capacity nicht auswertbar (ungültige Werte)"
                 )
 
         if issues:

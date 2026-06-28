@@ -1,13 +1,12 @@
 """Test the Kostal Plenticore Solar Inverter select platform."""
 
-from pykoplenti import SettingsData
-import pytest
+from datetime import timedelta
 
+import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-
-from datetime import timedelta
 from homeassistant.util import dt as dt_util
+from pykoplenti import SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 pytestmark = [
@@ -137,12 +136,12 @@ async def test_select_option(
         SettingsData(min=None, max=None, default=None, access="readwrite", unit=None, id="Battery:SmartBatteryControl:Enable", type="string"),
         SettingsData(min=None, max=None, default=None, access="readwrite", unit=None, id="Battery:TimeControl:Enable", type="string"),
     ])
-    
+
     mock_get_setting_values["devices:local"].update({
         "Battery:SmartBatteryControl:Enable": "0",
         "Battery:TimeControl:Enable": "0",
     })
-    
+
     mock_config_entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)

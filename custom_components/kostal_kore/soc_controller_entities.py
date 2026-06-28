@@ -23,7 +23,7 @@ from homeassistant.const import (
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .battery_soc_controller import BatterySocController
-from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .modbus_coordinator import ModbusDataUpdateCoordinator  # noqa: F401
 
 _LOGGER: Final = logging.getLogger(__name__)
 

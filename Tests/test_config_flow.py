@@ -7,18 +7,17 @@ from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-from aiohttp.client_exceptions import ClientError
-from pykoplenti import ApiClient, AuthenticationException, SettingsData
 import pytest
-
+from aiohttp.client_exceptions import ClientError
 from homeassistant import config_entries
-from custom_components.kostal_kore import config_flow as kore_config_flow
-from custom_components.kostal_kore.const import DOMAIN
 from homeassistant.const import CONF_HOST, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-
+from pykoplenti import ApiClient, AuthenticationException, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore import config_flow as kore_config_flow
+from custom_components.kostal_kore.const import DOMAIN
 
 
 @pytest.fixture(autouse=True)

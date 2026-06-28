@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 import logging
+from collections.abc import Generator  # noqa: F401
 from datetime import timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F401
+
 import pytest
-
+from homeassistant.const import CONF_HOST, CONF_PASSWORD  # noqa: F401
 from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_HOST, CONF_PASSWORD
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 pytestmark = [
@@ -100,12 +99,12 @@ class TestPlatinumCoordinator:
         try:
             from custom_components.kostal_kore.helper import (
                 ModbusException,
-                ModbusIllegalFunctionError,
                 ModbusIllegalDataAddressError,
                 ModbusIllegalDataValueError,
-                ModbusServerDeviceFailureError,
-                ModbusServerDeviceBusyError,
+                ModbusIllegalFunctionError,
                 ModbusMemoryParityError,
+                ModbusServerDeviceBusyError,
+                ModbusServerDeviceFailureError,
             )
 
             # Test exception hierarchy
@@ -139,11 +138,12 @@ class TestPlatinumCoordinator:
     def test_modbus_exception_parsing(self):
         """Test MODBUS exception parsing."""
         try:
-            from custom_components.kostal_kore.helper import (
-                parse_modbus_exception,
-                ModbusException,
-            )
             from pykoplenti import ApiException
+
+            from custom_components.kostal_kore.helper import (
+                ModbusException,
+                parse_modbus_exception,
+            )
 
             test_cases = [
                 ("illegal function error", 0x01),

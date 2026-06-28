@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, replace
 from datetime import timedelta
-import logging
 from typing import Any, Final
 
 from aiohttp.client_exceptions import ClientError
-from pykoplenti import ApiException, SettingsData
-
 from homeassistant.components.number import (
     NumberDeviceClass,
     NumberEntity,
@@ -20,13 +18,14 @@ from homeassistant.components.number import (
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
-    UnitOfPower,
     UnitOfElectricCurrent,
+    UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers import entity_registry as er
+from pykoplenti import ApiException, SettingsData
 
 from .const import (
     CONF_INSTALLER_ACCESS,
@@ -39,8 +38,8 @@ from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import (
     PlenticoreDataFormatter,
     ensure_installer_access,
-    is_rest_write_supported_target,
     is_battery_control,
+    is_rest_write_supported_target,
     parse_modbus_exception,
     requires_installer_service_code,
 )
@@ -1311,7 +1310,8 @@ async def async_setup_entry(
         )
     available_settings_data = available_settings_data or {}
 
-    from .const import CONF_MODBUS_ENABLED, DOMAIN as _DOMAIN
+    from .const import CONF_MODBUS_ENABLED
+    from .const import DOMAIN as _DOMAIN  # noqa: F401
     _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
     _settings_interval = 90 if _modbus_active else 30
 

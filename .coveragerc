@@ -27,7 +27,6 @@ omit =
     custom_components/kostal_kore/binary_sensor.py
     custom_components/kostal_kore/modbus_button.py
     custom_components/kostal_kore/modbus_number.py
-    custom_components/kostal_kore/modbus_test.py
     custom_components/kostal_kore/mqtt_bridge.py
     custom_components/kostal_kore/modbus_proxy.py
     custom_components/kostal_kore/battery_test.py

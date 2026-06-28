@@ -15,21 +15,21 @@ Key Features:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
-from datetime import timedelta
 import logging
 import time
 import traceback
+from collections.abc import Awaitable
+from datetime import timedelta
 from typing import Final
 
 from aiohttp.client_exceptions import ClientError
-from pykoplenti import ApiException
-
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
+from pykoplenti import ApiException
 
+from .battery_chemistry import detect_chemistry
 from .const import (
     CONF_ACCESS_ROLE,
     CONF_INSTALLER_ACCESS,
@@ -40,8 +40,8 @@ from .const import (
     CONF_MODBUS_ENABLED,
     CONF_MODBUS_ENDIANNESS,
     CONF_MODBUS_PORT,
-    CONF_MODBUS_PROXY_ENABLED,
     CONF_MODBUS_PROXY_BIND,
+    CONF_MODBUS_PROXY_ENABLED,
     CONF_MODBUS_PROXY_PORT,
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
@@ -52,33 +52,32 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import EventDataUpdateCoordinator, Plenticore, PlenticoreConfigEntry
-from .helper import parse_modbus_exception
-from .battery_chemistry import detect_chemistry
 from .degradation_tracker import DegradationTracker
 from .diagnostics_engine import DiagnosticsEngine
 from .fire_safety import FireSafetyMonitor
 from .health_monitor import InverterHealthMonitor
-from .longevity_advisor import LongevityAdvisor
-from .modbus_client import KostalModbusClient, ModbusClientError
-from .request_scheduler import RequestScheduler
-from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .helper import parse_modbus_exception
 from .ksem_coordinator import KsemDataUpdateCoordinator
+from .longevity_advisor import LongevityAdvisor
 from .migration_services import (
     async_register_migration_services,
     async_unregister_migration_services_if_unused,
 )
+from .modbus_client import KostalModbusClient, ModbusClientError
+from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .mqtt_bridge import KostalMqttBridge
 from .orphan_history import (
     async_register_orphan_history_services,
     async_unregister_orphan_history_services_if_unused,
 )
-from .mqtt_bridge import KostalMqttBridge
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
-from .write_audit import WriteAuditLog
+from .request_scheduler import RequestScheduler
 from .startup_trace import (
     SetupTrace,
     log_setup_entry_lifecycle,
     log_unload_entry_lifecycle,
 )
+from .write_audit import WriteAuditLog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -344,9 +343,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             CONF_MODBUS_PROXY_ENABLED, False
         ):
             from .modbus_proxy import (
-                ModbusTcpProxyServer,
-                DEFAULT_PROXY_PORT,
                 DEFAULT_PROXY_BIND,
+                DEFAULT_PROXY_PORT,
+                ModbusTcpProxyServer,
             )
 
             proxy_port = entry.options.get(CONF_MODBUS_PROXY_PORT, DEFAULT_PROXY_PORT)

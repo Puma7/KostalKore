@@ -21,8 +21,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Final
 
-from .health_monitor import HealthLevel, InverterHealthMonitor
 from .fire_safety import FireRiskLevel, FireSafetyMonitor
+from .health_monitor import HealthLevel, InverterHealthMonitor  # noqa: F401
 
 _LOGGER: Final = logging.getLogger(__name__)
 

@@ -5,7 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.1] — 2026-06-28 — Current-HA compatibility & hardening
+
+Stable patch release. Fixes a crash when opening the integration options on
+current Home Assistant, raises the minimum HA to the version that provides the
+framework `OptionsFlow.config_entry` property, adds a current-HA-Python CI leg,
+and clears the open security alerts. No functional changes to data collection
+or control.
+
+### Fixed
+- **Options flow crash on current Home Assistant** — `KostalPlenticoreOptionsFlow`
+  assigned `self.config_entry`, which Home Assistant turned into a read-only
+  property (`AttributeError: property 'config_entry' … has no setter`, hard since
+  HA 2025.12). The flow now relies on the framework-provided `config_entry`
+  property and no longer assigns it, so opening the integration options works on
+  current HA. Surfaced by the new Python 3.14 / current-HA CI leg.
+
+### Changed
+- **Minimum Home Assistant raised to 2024.12.0** (`manifest.json`, `hacs.json`,
+  `README.md`) — required for the auto-provided `OptionsFlow.config_entry`
+  property, and consistent with the `DataUpdateCoordinator` `config_entry`
+  support the integration already assumes.
+- **Honest quality self-assessment** — `quality_scale.yaml` previously claimed
+  `platinum` with `test-coverage`/`test-coverage-full` marked done ("100% across all
+  integration modules, 133 tests"), but `.coveragerc` omits 39 of 56 modules from the
+  enforced gate. The two coverage rules are now `todo` (pointing at
+  `COVERAGE_ROADMAP.md`), the test count corrected to 906, and the tier set to the
+  honest `bronze` (gated by the open coverage rule; most higher rules are still met
+  individually).
+- **Removed coverage-padding tests** — `Tests/test_platinum_features.py` now keeps only
+  the two behaviour tests (Modbus exception hierarchy and parsing); the `assert True` /
+  `assert hasattr(...)` "platinum feature" tests that verified no behaviour were dropped.
+- **Migration forward-compat coverage** — added an end-to-end
+  migrate → `finalize_legacy_cleanup` test asserting the device ends with only the
+  `kostal_kore` identifier (the domain-scoped state HA 2026.8 requires);
+  `MIGRATION_ARCHITECTURE.md` updated to record that the rewrite is implemented + tested.
+
+### Security
+- **Workflow token least-privilege** — `ci.yml` and `hacs-validation.yml` now declare
+  `permissions: contents: read`, resolving the two CodeQL "workflow does not contain
+  permissions" alerts.
+- **Removed vendored `pykoplenti-master/uv.lock`** — the upstream library's dev
+  lockfile was the sole source of all 25 Dependabot alerts (aiohttp, black, pytest,
+  virtualenv, uv, filelock, idna). It is never installed or used by KORE (CI installs
+  `pykoplenti==1.5.0` from PyPI; `aiohttp` comes from Home Assistant core), so
+  removing it clears every alert without changing any shipped dependency.
+- **Modbus proxy bind-address guardrail** — a malformed bind value is coerced to the
+  loopback default in the options flow, and the proxy logs a clear warning when it binds
+  to a non-loopback address (LAN exposure of the inverter control proxy).
+
+### CI
+- **Test against current Home Assistant Python** — the CI test/typecheck job now runs
+  on a Python matrix: `3.14` (the version current Home Assistant requires, ADR-0020)
+  and `3.12` (the manifest floor, HA 2024.12). Smoke tests now always cover the Python
+  runtime current HA ships with; bump the upper version when HA raises its minimum
+  Python. mypy runs on the floor leg only — current HA source uses Python 3.14-only
+  syntax that mypy cannot parse under the 3.12 target.
+- **Ruff lint gate** — CI now runs `ruff check` (pyflakes, import-sort, whitespace) over
+  the integration and tests; `ruff.toml` added and `ruff` added to test requirements.
+  Adoption applied only safe autofixes (sorted imports, whitespace/f-string cleanup) and
+  baselined existing violations with inline `# noqa`. `F401`/`F841` are marked unfixable
+  so ruff never deletes the imports this codebase re-exports for `module.attr` test access.
+  The gate surfaced a dead duplicate test (`test_battery_soh_calculator.py` defined
+  `test_schedule_save_coalesces_concurrent_calls` twice — the first never ran), now removed.
+  Formatter adoption (`ruff format`) is deferred to its own PR.
+
+### Docs
+- **evcc proxy guide** — `PROXY_SETUP.md` now recommends the `kostal-plenticore-gen2`
+  template for **all** inverter generations (G1/G2/G3); the legacy `kostal-plenticore`
+  name is still accepted by evcc via `covers:` (evcc PR #30854) but no longer advised.
+- **evcc `batteryMode` conflict note** — Documented that evcc's gen2 `batteryMode`
+  cyclically writes registers 1034/1038/1040 — the same registers KORE controls — so
+  evcc battery control and an internal KORE controller (SoC controller, GridGuard,
+  Block Battery Charging) must not run simultaneously (`PROXY_SETUP.md`, `README.md`).
+- **evcc `batteryMode` register mapping** — `PROXY_SETUP.md` now documents the per-mode
+  register/value mapping (`charge`→1034 negative W, `hold`→1040=0, `holdcharge`→1038=0)
+  and advises configuring `maxchargepower` (W) instead of the deprecated `maxchargerate`
+  (%), plus a minimum-evcc-version caveat (evcc PRs #26169 / #26515 / #27161 / #30853).
+- **evcc `endianness` note** — Documented that the evcc template's `endianness` parameter
+  must match the byte order KORE auto-detects; since evcc PR #30862 a mismatch also
+  corrupts the PV-energy reading (register 1056) (`PROXY_SETUP.md`).
 
 ## [3.0.0] — 2026-05-24 — Production readiness
 

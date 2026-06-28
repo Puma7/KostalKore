@@ -74,8 +74,15 @@ meters:
 - `host` = IP-Adresse des Home-Assistant-Servers (z.B. `192.168.1.100`)
 - `port` = Proxy-Port (Standard `5502`, konfigurierbar in den Integrationsoptionen)
 - `id` = Modbus Unit-ID des Wechselrichters (Standard `71`)
-- Die `template`-Namen hängen von deinem Wechselrichter ab. Für G2-Modelle: `kostal-plenticore-gen2`,
-  für ältere G1: `kostal-plenticore`. Prüfe die aktuelle evcc-Dokumentation.
+- **Template-Name:** Für **alle** Generationen (G1/G2/G3) gilt `kostal-plenticore-gen2` – dieses
+  Template deckt G1/G2/G3 ab. Der frühere Name `kostal-plenticore` wird von evcc weiterhin
+  akzeptiert (per `covers:` auf `kostal-plenticore-gen2` gemappt, siehe evcc PR #30854), sollte
+  aber für neue Konfigurationen nicht mehr verwendet werden. Prüfe im Zweifel die aktuelle
+  evcc-Dokumentation.
+- **`endianness` (Byte-Reihenfolge):** Der `endianness`-Parameter im evcc-Template muss zu der
+  von KORE automatisch erkannten Byte-Reihenfolge des Wechselrichters passen (Default `little` =
+  `float32s`). Seit evcc PR #30862 wirkt sich eine Fehlstellung nicht nur auf die Batterie-Register,
+  sondern auch auf die **PV-Energie** (Reg 1056) aus – bei falschen Energiewerten zuerst hier prüfen.
 
 ### 3. Batteriesteuerung über evcc
 
@@ -90,6 +97,33 @@ evcc kann über den Proxy auch Batterie-Register schreiben. Die relevanten Regis
 | `bat_max_soc` | 1044 | Maximum-SoC setzen (%) |
 | `g3_max_charge` | 1280 | G3: Max. Ladeleistung (W) |
 | `g3_max_discharge` | 1282 | G3: Max. Entladeleistung (W) |
+
+> ⚠️ **evcc `batteryMode` (gen2):** Das `kostal-plenticore-gen2`-Template steuert die Batterie über
+> `batteryMode` (Modi `normal`/`hold`/`charge`/`holdcharge`) und schreibt dafür **zyklisch** (Watchdog)
+> die Power-Setpoint-Register **1034** (Lade-/Entladeleistung), **1038** (`=0` blockiert Laden) und
+> **1040** (`=0` blockiert Entladen). Das sind exakt die Register, die KORE intern bespielt.
+> Betreibe daher **nicht** gleichzeitig evcc-`batteryMode` **und** einen internen KORE-Controller
+> (SoC-Controller, GridGuard/Grid-Feed-In-Optimizer, Block Battery Charging) – sonst konkurrieren
+> beide um Register 1034/1038 und KORE lehnt die evcc-Writes mit `0x06` (Server Device Busy) ab.
+> Faustregel: **entweder** evcc **oder** ein KORE-Controller steuert die Batterie – nicht beides.
+> Siehe „Write-Arbitration" weiter unten.
+
+**`batteryMode`-Register-Mapping (evcc gen2):**
+
+| evcc-Modus | Register | Wert | Wirkung |
+|------------|----------|------|---------|
+| `normal` | 1034 | `0` | zurück zur Automatik |
+| `charge` | 1034 | `-maxchargepower` (W, **negativ = laden**) | Netzladen mit voller Leistung |
+| `hold` | 1040 | `0` | nur **Entladen** sperren, PV-Laden bleibt erlaubt (evcc PR #26169) |
+| `holdcharge` | 1038 | `0` | nur **Laden** sperren (evcc PR #30853) |
+
+**Hinweise für die evcc-Konfiguration:**
+- Im evcc-Template **`maxchargepower` (Watt)** setzen – **nicht** das veraltete `maxchargerate` (%).
+  Ohne `maxchargepower` meldet aktuelles evcc beim Laden `ErrNotAvailable`; ältere/fehlerhafte
+  evcc-Versionen luden stattdessen nur mit ~100 W (evcc PR #26515 / #27161).
+- **Mindest-evcc-Version:** Force-Charge (#26515) und „Laden während Hold" (#26169) erfordern einen
+  aktuellen evcc-Build. Auf veralteten Versionen kann das Laden im Hold-Modus blockiert bleiben
+  oder die Ladeleistung falsch sein.
 
 ### 4. So funktioniert der Proxy
 
@@ -234,6 +268,8 @@ evcc schreibt REG 1034 ──► Proxy
 **Lösung bei Konflikten:**
 1. SoC-Controller auf 0 setzen (Automatik) → externe Writes wieder möglich
 2. Oder: evcc-Template so konfigurieren, dass es den SoC-Controller via HA-API steuert
+3. Faustregel: **entweder** evcc-`batteryMode` **oder** ein interner KORE-Controller steuert die
+   Batterie – nicht beides gleichzeitig für denselben Wechselrichter.
 
 ## Troubleshooting
 

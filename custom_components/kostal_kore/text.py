@@ -7,9 +7,9 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    AddConfigEntryEntitiesCallback,
     DATA_KEY_LEGACY_CLEANUP_CODE_INPUT,
     DOMAIN,
+    AddConfigEntryEntitiesCallback,
 )
 from .coordinator import PlenticoreConfigEntry
 

@@ -232,3 +232,32 @@ Profile B is implemented in `custom_components/kostal_kore/orphan_history.py`
 (commit `bca1587`). User-facing walkthrough in
 `docs/migration_orphan_history.md`. Phase 1/2/3 from the original
 remediation timeline above remain valid for Profile A.
+
+---
+
+## Addendum: status update (2026-06) — Issues 1 & 3 implemented + forward-compat test
+
+The device-identifier rewrite described in Issues 1 and 3 **is implemented**, via
+the two-layer flow:
+
+- `migrate_legacy_plenticore_entry()` merges `(kostal_kore, serial)` onto the legacy
+  device (`merge_identifiers`) — leaving an **interim dual-identifier state** while the
+  legacy entry is kept for safe rollback.
+- `finalize_legacy_cleanup()` rewrites the device domain-clean (`new_identifiers`,
+  dropping `kostal_plenticore`) and removes the legacy entry.
+
+Regression coverage in `Tests/test_legacy_migration.py`:
+
+- `test_finalize_cleanup_strips_legacy_domain_from_device_identifiers` — cleanup in
+  isolation removes the legacy-domain identifier.
+- `test_full_migration_then_cleanup_is_forward_compatible_2026_8` — the **end-to-end**
+  migrate→cleanup pipeline ends with only the `(kostal_kore, serial)` identifier (the
+  domain-scoped state HA Core 2026.8 requires), and asserts the interim dual state.
+
+**Residual exposure:** between `migrate` and `finalize_legacy_cleanup` the device carries
+both domain identifiers (the two-layer safety window). Users should complete cleanup
+before upgrading to HA 2026.8.
+
+**Still open:** Issue 2 (transactional rollback in the migrate step) and Issue 4
+(unique-ID pattern coverage beyond `{entry_id}_*`). A forward-compatibility run against an
+HA 2026.8 release candidate is recommended once one is available.

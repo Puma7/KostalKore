@@ -12,18 +12,15 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch  # noqa: F401
 
-from pykoplenti import ApiException, ProcessData
 import pytest
-
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
-
+from pykoplenti import ApiException, ProcessData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-
 
 _TRANSLATIONS = Path(__file__).resolve().parents[1] / "custom_components" / "kostal_kore" / "translations" / "en.json"
 
@@ -43,7 +40,7 @@ def _make_process_coord(hass: HomeAssistant, fetch: dict) -> "ProcessDataUpdateC
     DataUpdateCoordinator.__init__ in HA 2024.3.3 does not accept config_entry=.
     We patch it out and set the required attributes manually.
     """
-    from kostal_plenticore.coordinator import ProcessDataUpdateCoordinator, Plenticore
+    from kostal_plenticore.coordinator import Plenticore, ProcessDataUpdateCoordinator
 
     entry = _mock_entry()
     p = Plenticore.__new__(Plenticore)
@@ -135,6 +132,7 @@ def test_bug1_full_charge_cap_unit_is_ah() -> None:
 def test_bug11_pv_energy_sensors_generated_dynamically() -> None:
     """generate_pv_energy_sensor_descriptions must emit Day/Month/Year/Total per string."""
     from homeassistant.components.sensor import SensorDeviceClass
+
     import kostal_plenticore.sensor as sensor_mod
 
     for count, expected_total in ((1, 4), (3, 12), (6, 24)):
@@ -343,8 +341,8 @@ async def test_qa1_isolation_restore_not_called_in_async_setup(
     hass: HomeAssistant,
 ) -> None:
     """_restore_isolation_sample must NOT be called during async_setup."""
-    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
     from custom_components.kostal_kore.modbus_client import KostalModbusClient
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     client = MagicMock(spec=KostalModbusClient)
     client.host = "192.168.1.2"
@@ -369,8 +367,8 @@ async def test_qa1_isolation_restore_called_after_health_monitor_injection(
     hass: HomeAssistant,
 ) -> None:
     """_restore_isolation_sample must be scheduled via async_create_task after injection."""
-    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
     from custom_components.kostal_kore.modbus_client import KostalModbusClient
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     client = MagicMock(spec=KostalModbusClient)
     client.host = "192.168.1.2"
@@ -437,7 +435,7 @@ def test_qa2_migration_unit_match_performs_rename() -> None:
     """When units match, rename and delete must still happen (no regression)."""
     from custom_components.kostal_kore.migration_services import (
         _merge_statistics_metadata,
-        _merge_statistics_table,
+        _merge_statistics_table,  # noqa: F401
     )
 
     class Scalars:
@@ -477,8 +475,9 @@ def test_qa2_migration_unit_match_performs_rename() -> None:
 
 def test_qa4_total_increasing_returns_none_not_stale() -> None:
     """TOTAL_INCREASING sensor must return None (not cached stale) when formatter yields None."""
-    import kostal_plenticore.sensor as sensor_mod
     from homeassistant.helpers.device_registry import DeviceInfo
+
+    import kostal_plenticore.sensor as sensor_mod
 
     coord = MagicMock()
     coord.data = {"devices:local:battery": {"Cycles": "NaN"}}
@@ -515,8 +514,9 @@ def test_qa4_total_increasing_returns_none_not_stale() -> None:
 
 def test_qa4_non_total_increasing_returns_stale_on_none() -> None:
     """Non-TOTAL_INCREASING sensor must return last valid value when formatter yields None."""
-    import kostal_plenticore.sensor as sensor_mod
     from homeassistant.helpers.device_registry import DeviceInfo
+
+    import kostal_plenticore.sensor as sensor_mod
     from custom_components.kostal_kore.sensor import PlenticoreSensorEntityDescription
 
     coord = MagicMock()
@@ -566,12 +566,12 @@ async def test_qa5_last_result_contains_only_fresh_values(hass: HomeAssistant) -
         def __init__(self, v):
             self.value = v
 
-    class BadValue:
+    class BadValue:  # noqa: F811
         @property
         def value(self):
             raise AttributeError("boom")
 
-    class GoodValue:
+    class GoodValue:  # noqa: F811
         def __init__(self, v):
             self.value = v
 
@@ -595,7 +595,7 @@ async def test_qa5_last_result_contains_only_fresh_values(hass: HomeAssistant) -
     client.get_process_data_values = AsyncMock(return_value={
         "mod": {"ok_field": GoodValue("200"), "bad_field": BadValue()}
     })
-    result = await proc._async_update_data()
+    result = await proc._async_update_data()  # noqa: F841
 
     # result (returned to HA) may contain backfilled bad_field if there's a cache hit
     # but _last_result must only contain fresh ok_field
@@ -700,8 +700,9 @@ async def test_qa6_clear_issue_called_on_retry_success(hass: HomeAssistant) -> N
 @pytest.mark.asyncio
 async def test_qa7_login_timeout_preserves_exception_chain(hass: HomeAssistant) -> None:
     """Login timeout must chain the original TimeoutError, not suppress it."""
-    from kostal_plenticore.coordinator import Plenticore
     from homeassistant.exceptions import ConfigEntryNotReady
+
+    from kostal_plenticore.coordinator import Plenticore
 
     entry = _mock_entry()
     p = Plenticore(hass, entry)
@@ -754,7 +755,10 @@ def test_high02_proxy_partial_coverage_returns_none() -> None:
     """
     from kostal_plenticore.modbus_proxy import _build_register_image
     from kostal_plenticore.modbus_registers import (
-        ModbusRegister, DataType, Access, RegisterGroup,
+        Access,
+        DataType,
+        ModbusRegister,
+        RegisterGroup,
     )
 
     reg_a = ModbusRegister(
@@ -785,8 +789,8 @@ def test_high02_proxy_partial_coverage_returns_none() -> None:
 async def test_high05_settings_stale_cache_expires_after_ttl(hass: HomeAssistant) -> None:
     """After STALE_DATA_MAX_AGE_SECONDS, 503 must no longer return cached data."""
     from kostal_plenticore.coordinator import (
-        SettingDataUpdateCoordinator,
         STALE_DATA_MAX_AGE_SECONDS,
+        SettingDataUpdateCoordinator,
     )
 
     entry = _mock_entry()
@@ -840,12 +844,13 @@ async def test_high05_settings_stale_cache_expires_after_ttl(hass: HomeAssistant
 @pytest.mark.asyncio
 async def test_high06_event_stale_cache_expires_after_ttl(hass: HomeAssistant) -> None:
     """Beyond STALE_DATA_MAX_AGE_SECONDS, error path must not serve old events."""
-    from kostal_plenticore.coordinator import (
-        EventDataUpdateCoordinator,
-        STALE_DATA_MAX_AGE_SECONDS,
-    )
-    from kostal_plenticore.coordinator import Plenticore
     from collections import deque
+
+    from kostal_plenticore.coordinator import (
+        STALE_DATA_MAX_AGE_SECONDS,
+        EventDataUpdateCoordinator,
+        Plenticore,
+    )
 
     entry = _mock_entry()
     p = Plenticore.__new__(Plenticore)
@@ -955,11 +960,15 @@ def test_audit_proxy_vendor_uint32_always_big_endian_on_encode() -> None:
     """Vendor UINT32 (address >= 500) must encode big-endian even when
     endianness='little' (Kostal default). SunSpec UINT32 (address < 500)
     must still word-swap under endianness='little'."""
+    import struct as _struct
+
     from kostal_plenticore.modbus_proxy import _encode_value
     from kostal_plenticore.modbus_registers import (
-        ModbusRegister, DataType, Access, RegisterGroup,
+        Access,
+        DataType,
+        ModbusRegister,
+        RegisterGroup,
     )
-    import struct as _struct
 
     sunspec_u32 = ModbusRegister(
         100, "ss_u32", "ss_u32", DataType.UINT32, 2, Access.RO, RegisterGroup.POWER
@@ -981,11 +990,15 @@ def test_audit_proxy_vendor_uint32_always_big_endian_on_encode() -> None:
 
 def test_audit_proxy_vendor_sint32_always_big_endian_on_encode() -> None:
     """Vendor SINT32 must encode big-endian; SunSpec SINT32 word-swaps under little."""
+    import struct as _struct
+
     from kostal_plenticore.modbus_proxy import _encode_value
     from kostal_plenticore.modbus_registers import (
-        ModbusRegister, DataType, Access, RegisterGroup,
+        Access,
+        DataType,
+        ModbusRegister,
+        RegisterGroup,
     )
-    import struct as _struct
 
     sunspec_s32 = ModbusRegister(
         110, "ss_s32", "ss_s32", DataType.SINT32, 2, Access.RW, RegisterGroup.CONTROL
@@ -1005,11 +1018,15 @@ def test_audit_proxy_vendor_sint32_always_big_endian_on_encode() -> None:
 def test_audit_proxy_vendor_uint32_always_big_endian_on_decode_write() -> None:
     """Round-trip: proxy receives a write for a vendor UINT32, then must
     decode it the same way the inverter would. Vendor → big-endian."""
+    import struct as _struct
+
     from kostal_plenticore.modbus_proxy import ModbusTcpProxyServer
     from kostal_plenticore.modbus_registers import (
-        ModbusRegister, DataType, Access, RegisterGroup,
+        Access,
+        DataType,
+        ModbusRegister,
+        RegisterGroup,
     )
-    import struct as _struct
 
     coord = MagicMock()
     proxy = ModbusTcpProxyServer(
@@ -1038,11 +1055,15 @@ def test_audit_proxy_float32_unaffected_by_vendor_base() -> None:
     """FLOAT32 must always follow byte_order — vendor-base check must NOT
     leak into the FLOAT32 branch (modbus_client._decode treats FLOAT32 this
     way; proxy must match)."""
-    from kostal_plenticore.modbus_proxy import _encode_value, ModbusTcpProxyServer
-    from kostal_plenticore.modbus_registers import (
-        ModbusRegister, DataType, Access, RegisterGroup,
-    )
     import struct as _struct
+
+    from kostal_plenticore.modbus_proxy import ModbusTcpProxyServer, _encode_value
+    from kostal_plenticore.modbus_registers import (
+        Access,
+        DataType,
+        ModbusRegister,
+        RegisterGroup,
+    )
 
     vendor_f32 = ModbusRegister(
         1034, "bat_charge_dc", "bat_charge_dc", DataType.FLOAT32, 2, Access.RW, RegisterGroup.BATTERY_MGMT
@@ -1073,9 +1094,9 @@ def test_audit_proxy_float32_unaffected_by_vendor_base() -> None:
 async def test_audit_select_503_serves_stale_cache_within_ttl(hass: HomeAssistant) -> None:
     """503 burst on select fetch → previous module result is reused (within short TTL)."""
     from kostal_plenticore.coordinator import (
-        SelectDataUpdateCoordinator,
-        SELECT_STALE_DATA_MAX_AGE_SECONDS,
+        SELECT_STALE_DATA_MAX_AGE_SECONDS,  # noqa: F401
         Plenticore,
+        SelectDataUpdateCoordinator,
     )
 
     entry = _mock_entry()
@@ -1120,9 +1141,9 @@ async def test_audit_select_503_serves_stale_cache_within_ttl(hass: HomeAssistan
 async def test_audit_select_503_after_ttl_returns_none_defaults(hass: HomeAssistant) -> None:
     """503 after the short select-TTL expiry must NOT serve ghost mode state."""
     from kostal_plenticore.coordinator import (
-        SelectDataUpdateCoordinator,
         SELECT_STALE_DATA_MAX_AGE_SECONDS,
         Plenticore,
+        SelectDataUpdateCoordinator,
     )
 
     entry = _mock_entry()
@@ -1165,8 +1186,8 @@ async def test_audit_select_404_does_not_poison_stale_cache(hass: HomeAssistant)
     """A 404 must NOT promote 'None' defaults into the stale-cache: doing so
     would mask a subsequent recovery (next success would still serve None)."""
     from kostal_plenticore.coordinator import (
-        SelectDataUpdateCoordinator,
         Plenticore,
+        SelectDataUpdateCoordinator,
     )
 
     entry = _mock_entry()
@@ -1206,8 +1227,8 @@ async def test_audit_select_404_does_not_poison_stale_cache(hass: HomeAssistant)
 async def test_audit_select_success_refreshes_per_module_cache(hass: HomeAssistant) -> None:
     """Successful batch must refresh both _module_last_result and timestamp."""
     from kostal_plenticore.coordinator import (
-        SelectDataUpdateCoordinator,
         Plenticore,
+        SelectDataUpdateCoordinator,
     )
 
     entry = _mock_entry()
@@ -1292,11 +1313,11 @@ async def test_audit_unload_entry_shuts_down_event_coordinator(
 def test_audit_runtime_installer_access_ignores_service_code_when_flag_false() -> None:
     """ensure_installer_access must NOT grant access when the persisted flag
     is False, even if a CONF_SERVICE_CODE happens to also be persisted."""
-    from kostal_plenticore.helper import ensure_installer_access
     from kostal_plenticore.const import (
         CONF_INSTALLER_ACCESS,
         CONF_SERVICE_CODE,
     )
+    from kostal_plenticore.helper import ensure_installer_access
 
     fake_entry = SimpleNamespace(
         entry_id="e1",
@@ -1315,8 +1336,8 @@ def test_audit_runtime_installer_access_ignores_service_code_when_flag_false() -
 def test_audit_runtime_installer_access_default_false_when_flag_missing() -> None:
     """If CONF_INSTALLER_ACCESS is somehow absent, the safe default is False —
     NOT a service-code-based fallback that could silently unlock writes."""
-    from kostal_plenticore.helper import ensure_installer_access
     from kostal_plenticore.const import CONF_SERVICE_CODE
+    from kostal_plenticore.helper import ensure_installer_access
 
     fake_entry = SimpleNamespace(
         entry_id="e2",
@@ -1331,13 +1352,13 @@ def test_audit_runtime_installer_access_default_false_when_flag_missing() -> Non
 def test_audit_legacy_merge_respects_target_false_over_service_code() -> None:
     """_merge_entry_data must keep CONF_INSTALLER_ACCESS=False from the
     target entry, not regrant it because source has CONF_SERVICE_CODE."""
-    from kostal_plenticore.legacy_migration import _merge_entry_data
     from kostal_plenticore.const import (
         CONF_ACCESS_ROLE,
         CONF_HOST,
         CONF_INSTALLER_ACCESS,
         CONF_PASSWORD,
     )
+    from kostal_plenticore.legacy_migration import _merge_entry_data
 
     target = SimpleNamespace(
         entry_id="t",
@@ -1369,12 +1390,12 @@ def test_audit_legacy_merge_default_false_when_target_lacks_flag() -> None:
     """If even target_data has no CONF_INSTALLER_ACCESS, default to False —
     never to bool(source_data.get(CONF_SERVICE_CODE)) which could open up
     writes without the role having been vetted."""
-    from kostal_plenticore.legacy_migration import _merge_entry_data
     from kostal_plenticore.const import (
         CONF_HOST,
         CONF_INSTALLER_ACCESS,
         CONF_PASSWORD,
     )
+    from kostal_plenticore.legacy_migration import _merge_entry_data
 
     target = SimpleNamespace(
         entry_id="t",
@@ -1734,9 +1755,8 @@ async def test_audit_grid_optimizer_restores_limit_on_exception(
     hass: HomeAssistant,
 ) -> None:
     """An exception during the loop while _is_on=True must still restore."""
-    from kostal_plenticore.grid_charge_limiter import GridFeedInLimiterSwitch
-
     from custom_components.kostal_kore.const import DOMAIN
+    from kostal_plenticore.grid_charge_limiter import GridFeedInLimiterSwitch
 
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._is_on = True
@@ -1760,7 +1780,7 @@ async def test_audit_grid_optimizer_restores_limit_on_exception(
     # Restore must have been written at least once on exit.
     assert any(
         call.args and call.args[0] == 5000.0
-        for call in sw._write_charge_limit.await_args_list
+        for call in sw._write_charge_limit.await_args_list  # noqa: F811
     ), "Charge limit must be restored to snapshot on exception exit"
     assert sw._is_on is False, "Optimizer must mark itself OFF after restore"
 
@@ -1775,9 +1795,8 @@ async def test_grid_turn_off_restore_flag_before_control_loop_finally(
     _write_charge_limit, call _restore_limit() after the snapshot was consumed,
     and restore device max instead of the user's previous limit.
     """
-    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
-
     from custom_components.kostal_kore.const import DOMAIN
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._entry_id = "race_entry"
@@ -1838,9 +1857,8 @@ async def test_grid_turn_on_releases_reg_1038_when_post_acquire_fails(
         OWNER_GRID_FEEDIN,
         get_reg_1038_owner_manager,
     )
-    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
-
     from custom_components.kostal_kore.const import DOMAIN
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._entry_id = "on_fail_entry"
@@ -1884,9 +1902,8 @@ async def test_grid_turn_off_keeps_reg_1038_lock_until_restore_write(
         OWNER_GRID_FEEDIN,
         get_reg_1038_owner_manager,
     )
-    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
-
     from custom_components.kostal_kore.const import DOMAIN
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._entry_id = "lock_entry"
@@ -1969,10 +1986,11 @@ async def test_audit_modbus_slow_poll_cache_preserves_slow_registers(
 ) -> None:
     """Slow-group register values must survive on non-slow ticks via _last_slow_data."""
     from unittest.mock import AsyncMock, MagicMock, patch
+
     from custom_components.kostal_kore.modbus_coordinator import (
+        FAST_GROUPS,  # noqa: F401
+        SLOW_GROUPS,  # noqa: F401
         ModbusDataUpdateCoordinator,
-        FAST_GROUPS,
-        SLOW_GROUPS,
     )
     from custom_components.kostal_kore.modbus_registers import (
         Access,
@@ -2079,11 +2097,11 @@ def test_audit_fire_safety_stale_data_uses_correct_controller_temp_key() -> None
 
 def test_audit_inverter_states_18_19_labels_match_helper_constants() -> None:
     """INVERTER_STATES[18] == 'BatteryCharging', [19] == 'BatteryDischarging'."""
-    from custom_components.kostal_kore.modbus_registers import INVERTER_STATES
     from custom_components.kostal_kore.helper import (
         INVERTER_STATE_BATTERY_CHARGING,
         INVERTER_STATE_BATTERY_DISCHARGING,
     )
+    from custom_components.kostal_kore.modbus_registers import INVERTER_STATES
 
     assert INVERTER_STATES[INVERTER_STATE_BATTERY_CHARGING] == "BatteryCharging", (
         "State 18 label must be 'BatteryCharging' — was previously mislabelled 'Unknown'"
@@ -2107,9 +2125,8 @@ async def test_audit_grid_limiter_uses_full_home_consumption(
     hass: HomeAssistant,
 ) -> None:
     """_control_loop must sum all three home-source registers."""
-    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
-
     from custom_components.kostal_kore.const import DOMAIN
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._is_on = True
@@ -2157,9 +2174,8 @@ async def test_audit_grid_limiter_uses_full_home_consumption(
 @pytest.mark.asyncio
 async def test_audit_grid_limiter_skips_incomplete_home() -> None:
     """When any home_from_* is missing, do not write a charge limit this cycle."""
-    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
-
     from custom_components.kostal_kore.const import DOMAIN
+    from custom_components.kostal_kore.grid_charge_limiter import GridFeedInLimiterSwitch
 
     sw = GridFeedInLimiterSwitch.__new__(GridFeedInLimiterSwitch)
     sw._is_on = True
@@ -2214,6 +2230,7 @@ async def test_audit_grid_limiter_skips_incomplete_home() -> None:
 def test_audit_migration_duplicate_source_skips_rename() -> None:
     """Old metadata row must NOT be renamed when its source is a duplicate in the target."""
     from unittest.mock import MagicMock, patch
+
     from custom_components.kostal_kore.migration_services import _merge_statistics_metadata
 
     # Simulate: new entity has TWO StatisticsMeta rows with source "recorder"

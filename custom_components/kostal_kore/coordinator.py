@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
-from collections.abc import Mapping
-from datetime import timedelta
+import asyncio
 import logging
 import random
 import time
-from typing import Any, Final, TYPE_CHECKING, TypeVar, cast
-import asyncio
+from collections import defaultdict, deque
+from collections.abc import Mapping
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from aiohttp.client_exceptions import ClientError
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pykoplenti import (
     ApiClient,
     ApiException,
@@ -20,36 +29,26 @@ from pykoplenti import (
     ExtendedApiClient,
 )
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.event import async_call_later
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
 from .const import ADVANCED_WRITE_ARM_TTL_SECONDS, CONF_SERVICE_CODE, DOMAIN
-from .repairs import (
-    clear_issue,
-    create_api_unreachable_issue,
-    create_auth_failed_issue,
-    create_inverter_busy_issue,
-)
 from .helper import (
+    ModbusException,  # noqa: F401
     ModbusIllegalDataAddressError,
     ModbusIllegalDataValueError,
+    ModbusMemoryParityError,  # noqa: F401
     ModbusServerDeviceBusyError,
-    ModbusServerDeviceFailureError,
-    ModbusMemoryParityError,
-    ModbusException,
+    ModbusServerDeviceFailureError,  # noqa: F401
     get_hostname_id,
     is_allowed_write_target,
     is_rest_write_supported_target,
     parse_modbus_exception,
     requires_advanced_write_arm,
     validate_cross_field_write_rules,
+)
+from .repairs import (
+    clear_issue,
+    create_api_unreachable_issue,
+    create_auth_failed_issue,
+    create_inverter_busy_issue,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,7 +189,7 @@ class Plenticore:
             from .scheduled_session import ScheduledSession
             session = ScheduledSession(session, self._request_scheduler)  # type: ignore[assignment]
         self._client = ExtendedApiClient(session, host=self.host)  # pyright: ignore[reportArgumentType]
-        
+
         try:
             await asyncio.wait_for(
                 self._client.login(
@@ -218,7 +217,7 @@ class Plenticore:
             _LOGGER.error("API error during login to %s: %s", self.host, modbus_err.message)
             create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
             raise ConfigEntryNotReady from err
-        
+
         _LOGGER.debug("Log-in successfully to %s", self.host)
 
         self._shutdown_remove_listener = self.hass.bus.async_listen_once(
@@ -440,7 +439,7 @@ class DataUpdateCoordinatorMixin:
         except (ApiException, ClientError, TimeoutError) as err:
             # Parse into specific MODBUS exceptions for better error handling
             error_msg = str(err)
-            
+
             # Handle 404 errors (module/setting not found) gracefully
             if "module or setting not found" in error_msg.lower() or "[404]" in error_msg:
                  _LOGGER.warning(
@@ -541,7 +540,7 @@ class DataUpdateCoordinatorMixin:
             if isinstance(err, ApiException):
                 modbus_err = parse_modbus_exception(err)
                 _LOGGER.error("MODBUS error writing %s:%s - %s", module_id, value, modbus_err.message)
-                
+
                 # For certain errors, we might want to retry
                 if isinstance(modbus_err, ModbusServerDeviceBusyError):
                     _LOGGER.warning("Inverter busy, consider retrying operation")
@@ -553,7 +552,7 @@ class DataUpdateCoordinatorMixin:
                 _LOGGER.error("Inverter API returned 500 error when writing %s:%s - feature not supported", module_id, value)
             else:
                 _LOGGER.error("Error writing %s:%s - %s", module_id, value, err)
-            
+
             # Raise translated exception to ensure UI feedback
             raise HomeAssistantError(
                 translation_domain=DOMAIN,

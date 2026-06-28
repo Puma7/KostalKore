@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-import os
-import json
+import json  # noqa: F401
+import os  # noqa: F401
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch  # noqa: F401
 
 import pytest
 
 from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.diagnostics import (
     SERVICE_EXPORT_DEBUG_BUNDLE,
+    _export_bundle_for_entry,
+    _handle_export_debug_bundle,
     async_get_config_entry_diagnostics,
     async_register_debug_bundle_service,
     async_unregister_debug_bundle_service_if_unused,
-    _handle_export_debug_bundle,
-    _export_bundle_for_entry,
 )
 from custom_components.kostal_kore.write_audit import WriteAuditLog, WriteEvent
-
 
 # ---------------------------------------------------------------------------
 # Helper: minimal entry_store for the bundle export
@@ -319,7 +318,7 @@ async def test_export_bundle_for_entry_system_info_exception_handled():
         patch("builtins.open", MagicMock()),
         patch("custom_components.kostal_kore.diagnostics.json.dump") as mock_dump,
     ):
-        path = await _export_bundle_for_entry(hass, "entry1", store)
+        path = await _export_bundle_for_entry(hass, "entry1", store)  # noqa: F841
 
     bundle = mock_dump.call_args[0][0]
     assert bundle["ha_version"] == "unknown"

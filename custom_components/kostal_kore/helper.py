@@ -9,14 +9,13 @@ import secrets
 from collections.abc import Callable
 from typing import Any, Final, cast
 
+from aiohttp.client_exceptions import ClientError
 from homeassistant.core import HomeAssistant
+from pykoplenti import ApiClient, ApiException
 
 from .const import CONF_INSTALLER_ACCESS, DOMAIN
 from .const_ids import ModuleId, SettingId
 from .repairs import clear_issue, create_installer_required_issue
-
-from aiohttp.client_exceptions import ClientError
-from pykoplenti import ApiClient, ApiException
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -16,3 +16,4 @@ respx
 syrupy
 aiohttp
 mypy
+ruff

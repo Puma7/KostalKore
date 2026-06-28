@@ -21,6 +21,7 @@ transparently forwarded to the inverter through the existing connection.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import struct
 import time
@@ -28,11 +29,11 @@ from typing import Any, Final
 
 from .modbus_registers import (
     ALL_REGISTERS,
+    DEFAULT_UNIT_ID,
+    REGISTER_BY_ADDRESS,
     Access,
     DataType,
     ModbusRegister,
-    REGISTER_BY_ADDRESS,
-    DEFAULT_UNIT_ID,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -239,6 +240,19 @@ class ModbusTcpProxyServer:
 
     async def start(self) -> None:
         """Start listening for Modbus TCP connections."""
+        try:
+            bind_ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None = (
+                ipaddress.ip_address(self._bind_host)
+            )
+        except ValueError:
+            bind_ip = None
+        if bind_ip is not None and not bind_ip.is_loopback:
+            _LOGGER.warning(
+                "Modbus TCP proxy binding to non-loopback address %s: the inverter "
+                "control proxy will be reachable from the LAN. Use 127.0.0.1 unless "
+                "external access is intended and secured.",
+                self._bind_host,
+            )
         self._server = await asyncio.start_server(
             self._handle_client, self._bind_host, self._port
         )

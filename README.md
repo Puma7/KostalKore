@@ -1,8 +1,8 @@
-# KOSTAL KORE for Home Assistant (Experimental Alpha)
+# KOSTAL KORE for Home Assistant
 
 > Powered by **KOSTAL KISS OS 2.0**
 >
-> **Alpha release notice:** This release is intended for real-world testing with early adopters.  
+> **Stable release.** Production-ready and tested on real hardware.  
 > Please report issues and attach diagnostics: <https://github.com/Puma7/Kostal/issues>
 
 KOSTAL KORE is a custom Home Assistant integration for monitoring and controlling Kostal Plenticore inverters using local interfaces (REST + optional Modbus tooling).
@@ -68,7 +68,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
   - `number.<device>_grid_feed_in_limit`
 - Control logic runs periodically and writes Modbus register `1038` (`bat_max_charge_limit`) so battery charging absorbs PV surplus above the configured feed-in cap.
 - Turning the switch OFF restores normal charging limits.
-- Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations + optimizer), or they can conflict.
+- Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations, **evcc `batteryMode`**, or the optimizer), or they can conflict. evcc's `kostal-plenticore-gen2` template (`batteryMode`) cyclically writes registers `1034`/`1038`/`1040` — the same registers KORE controls — so use **one** controller per battery. KORE rejects competing external writes with Modbus exception `0x06` while an internal controller is active.
 
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting
@@ -95,7 +95,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - Local network access to the inverter's web interface
 
 ### Software Requirements
-- Home Assistant 2024.1 or newer
+- Home Assistant 2024.12 or newer
 - Python package: `pykoplenti==1.5.0` (automatically installed)
 
 ### Network Requirements
@@ -111,9 +111,8 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 3. Open the menu (top right) and select **Custom repositories**
 4. Add repository URL: `https://github.com/Puma7/KostalKore`
 5. Category: **Integration**
-6. Install **KOSTAL KORE (Experimental Alpha)**
+6. Install **KOSTAL KORE**
 7. Restart Home Assistant
-8. If shown, allow pre-release/alpha updates in HACS update settings
 
 ### Method 2: Manual Installation
 1. Copy `custom_components/kostal_kore` to `config/custom_components/kostal_kore`
@@ -171,7 +170,7 @@ See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
 ### Initial Setup
 1. In Home Assistant, go to **Settings > Devices & Services**
 2. Click **+ Add Integration**
-3. Search for "KOSTAL KORE (Experimental Alpha)"
+3. Search for "KOSTAL KORE"
 4. Enter the required information:
    - **Host**: Optional. Leave empty for auto-discovery or enter IP/hostname manually
    - **Password**: Inverter web interface password
@@ -575,8 +574,8 @@ Contributions are welcome! Please:
 
 ## Version History
 
-- **Current**: `v2.16.0-alpha.4` (experimental release channel)
-- **Compatibility**: Home Assistant 2024.1+
+- **Current**: `v3.0.1` (stable release channel)
+- **Compatibility**: Home Assistant 2024.12+
 - **API Support**: Kostal Plenticore local API
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history
 
@@ -588,8 +587,8 @@ For issues and questions:
 3. Open an issue: <https://github.com/Puma7/Kostal/issues>
 4. Provide diagnostic data when reporting issues
 
-### Alpha Feedback Program
-- This is an **experimental alpha**. Production use is possible, but only with careful monitoring.
+### Feedback
+- This is a stable release. Production use is supported; monitor after upgrading and report anything unexpected.
 - Please include model generation (G1/G2/G3), inverter power class (e.g. 1kW, 3kW, 5kW, 20kW), and grid profile (50/60 Hz) in bug reports.
 
 ## License

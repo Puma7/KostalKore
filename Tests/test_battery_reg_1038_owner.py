@@ -12,8 +12,8 @@ from custom_components.kostal_kore.battery_reg_1038_owner import (
     Reg1038OwnerManager,
     acquire_reg_1038_or_raise,
     get_reg_1038_owner_manager,
-    release_reg_1038,
     reg_1038_owner_for_entry,
+    release_reg_1038,
 )
 from custom_components.kostal_kore.const import DOMAIN
 

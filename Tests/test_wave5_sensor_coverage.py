@@ -6,10 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.helpers.device_registry import DeviceInfo
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 

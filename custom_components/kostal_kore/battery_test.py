@@ -414,11 +414,11 @@ class BatteryTestSuite:
         if mgmt is not None:
             r.battery_mgmt_mode = int(mgmt)
             if r.battery_mgmt_mode == 2:
-                r.checks.append(f"Mgmt-Mode: 2 (Modbus ✅)")
+                r.checks.append("Mgmt-Mode: 2 (Modbus ✅)")
             elif r.battery_mgmt_mode == 0:
                 r.checks.append(
-                    f"⚠️  Mgmt-Mode: 0 (G3-Bug? Register meldet 'keine externe Steuerung', "
-                    f"Schreibtest prüft ob es trotzdem funktioniert)"
+                    "⚠️  Mgmt-Mode: 0 (G3-Bug? Register meldet 'keine externe Steuerung', "
+                    "Schreibtest prüft ob es trotzdem funktioniert)"
                 )
             else:
                 r.checks.append(f"Mgmt-Mode: {r.battery_mgmt_mode}")

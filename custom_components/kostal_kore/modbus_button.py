@@ -20,10 +20,10 @@ from .modbus_client import ModbusClientError, ModbusPermanentError
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
     ALL_REGISTERS,
-    Access,
     BATTERY_MGMT_MODES,
     BATTERY_TYPES,
     INVERTER_STATES,
+    Access,
     RegisterGroup,
 )
 

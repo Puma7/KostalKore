@@ -19,8 +19,8 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
-    EntityCategory,
     PERCENTAGE,
+    EntityCategory,
     UnitOfTemperature,
 )
 from homeassistant.helpers.device_registry import DeviceInfo

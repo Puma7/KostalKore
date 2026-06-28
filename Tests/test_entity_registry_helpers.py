@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from traceback import FrameSummary
 from unittest.mock import MagicMock, patch
 
@@ -13,8 +14,6 @@ from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore import entity_registry_helpers as erh
-from dataclasses import replace
-
 from custom_components.kostal_kore.const_ids import ModuleId, SettingId
 from custom_components.kostal_kore.number import FORCE_CREATE_KEYS, NUMBER_SETTINGS_DATA
 from custom_components.kostal_kore.select import SELECT_SETTINGS_DATA

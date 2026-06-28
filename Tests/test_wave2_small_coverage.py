@@ -6,7 +6,7 @@ import time
 from types import SimpleNamespace
 
 from kostal_plenticore.battery_chemistry import LFP_THRESHOLDS, NO_BATTERY_THRESHOLDS
-from kostal_plenticore.diagnostics_engine import DiagStatus, DiagnosticsEngine
+from kostal_plenticore.diagnostics_engine import DiagnosticsEngine, DiagStatus
 from kostal_plenticore.fire_safety import FireRiskLevel, FireSafetyMonitor, SafetyAlert
 from kostal_plenticore.health_monitor import HealthLevel, InverterHealthMonitor, ParameterTracker
 from kostal_plenticore.longevity_advisor import LongevityAdvisor

@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, call, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er, issue_registry as ir
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.const import DOMAIN
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
 
@@ -140,6 +140,7 @@ async def test_async_remove_config_entry_device(
 ) -> None:
     """Test that stale devices can be removed from the registry."""
     from unittest.mock import MagicMock
+
     from kostal_plenticore import async_remove_config_entry_device
 
     mock_config_entry.add_to_hass(hass)

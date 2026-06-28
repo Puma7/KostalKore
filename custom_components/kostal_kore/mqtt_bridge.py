@@ -56,13 +56,13 @@ from .helper import (
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
     INVERTER_STATES,
-    ModbusRegister,
+    REG_BAT_CHARGE_DC_ABS_POWER,
+    REG_BAT_MAX_SOC,
+    REG_BAT_MIN_SOC,
     REGISTER_BY_NAME,
     WRITABLE_REGISTERS,
     Access,
-    REG_BAT_CHARGE_DC_ABS_POWER,
-    REG_BAT_MIN_SOC,
-    REG_BAT_MAX_SOC,
+    ModbusRegister,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -535,6 +535,7 @@ class KostalMqttBridge:
         if audit is None:
             return
         import time
+
         from .write_audit import WriteEvent
         audit.log(WriteEvent(
             ts=time.monotonic(),

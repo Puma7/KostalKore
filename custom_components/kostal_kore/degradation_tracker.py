@@ -19,7 +19,7 @@ subsequent measurements are compared against this baseline.
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401
 import logging
 import time
 from dataclasses import dataclass, field
@@ -409,7 +409,7 @@ class DegradationTracker:
 
         for name, param in self.all_parameters.items():
             rate = param.degradation_rate_per_month
-            dev = param.baseline_deviation_pct
+            dev = param.baseline_deviation_pct  # noqa: F841
             if rate is None:
                 continue
 
