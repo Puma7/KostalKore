@@ -2,7 +2,7 @@
 
 > Powered by **KOSTAL KISS OS 2.0**
 >
-> **Alpha release notice:** This release is intended for real-world testing with early adopters.  
+> **Stable release.** Production-ready and tested on real hardware.  
 > Please report issues and attach diagnostics: <https://github.com/Puma7/Kostal/issues>
 
 KOSTAL KORE is a custom Home Assistant integration for monitoring and controlling Kostal Plenticore inverters using local interfaces (REST + optional Modbus tooling).
@@ -113,7 +113,6 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 5. Category: **Integration**
 6. Install **KOSTAL KORE**
 7. Restart Home Assistant
-8. If shown, allow pre-release/alpha updates in HACS update settings
 
 ### Method 2: Manual Installation
 1. Copy `custom_components/kostal_kore` to `config/custom_components/kostal_kore`
@@ -588,8 +587,8 @@ For issues and questions:
 3. Open an issue: <https://github.com/Puma7/Kostal/issues>
 4. Provide diagnostic data when reporting issues
 
-### Alpha Feedback Program
-- This is an **experimental alpha**. Production use is possible, but only with careful monitoring.
+### Feedback
+- This is a stable release. Production use is supported; monitor after upgrading and report anything unexpected.
 - Please include model generation (G1/G2/G3), inverter power class (e.g. 1kW, 3kW, 5kW, 20kW), and grid profile (50/60 Hz) in bug reports.
 
 ## License
