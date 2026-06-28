@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a Python matrix: `3.14` (the version current Home Assistant requires, ADR-0020)
   and `3.12` (the manifest floor, HA 2024.11). Smoke tests now always cover the Python
   runtime current HA ships with; bump the upper version when HA raises its minimum
-  Python.
+  Python. mypy runs on the floor leg only — current HA source uses Python 3.14-only
+  syntax that mypy cannot parse under the 3.12 target.
 
 ### Docs
 - **evcc proxy guide** — `PROXY_SETUP.md` now recommends the `kostal-plenticore-gen2`

@@ -39,5 +39,11 @@ jobs:
       - name: Run tests
         run: python -m pytest Tests/ -v --timeout=60
 
+      # Type-check against the floor leg only. Current Home Assistant source uses
+      # Python 3.14-only syntax (PEP 758) that mypy cannot parse under our 3.12
+      # target, and strict `warn_unused_ignores` cannot be satisfied against two
+      # different HA stub sets at once. The 3.14 leg still runs the full test
+      # suite as the current-HA runtime smoke test.
       - name: Run mypy
+        if: matrix.python-version == '3.12'
         run: python -m mypy custom_components/kostal_kore/
