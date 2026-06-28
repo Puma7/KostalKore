@@ -9,21 +9,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.kostal_kore.battery_reg_1038_owner import (
-    OWNER_SOC_CONTROLLER,
+    OWNER_SOC_CONTROLLER,  # noqa: F401
     get_reg_1038_owner_manager,
 )
-from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.battery_soc_controller import (
-    BatterySocController,
-    KEEPALIVE_INTERVAL,
+    KEEPALIVE_INTERVAL,  # noqa: F401
     MAX_CONSECUTIVE_FAILURES,
-    POLL_INTERVAL,
+    POLL_INTERVAL,  # noqa: F401
+    BatterySocController,
 )
+from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.grid_charge_limiter import (
-    CONTROL_INTERVAL,
-    GridFeedInLimiterSwitch,
-    FeedInLimitNumber,
+    CONTROL_INTERVAL,  # noqa: F401
     MIN_CHARGE_POWER_W,
+    FeedInLimitNumber,
+    GridFeedInLimiterSwitch,
 )
 
 

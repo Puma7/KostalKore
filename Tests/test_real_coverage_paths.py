@@ -9,15 +9,13 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiohttp.client_exceptions import ClientError
-from pykoplenti import ApiException, ProcessData, SettingsData
 import pytest
-
+from aiohttp.client_exceptions import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import UpdateFailed
-
+from pykoplenti import ApiException, ProcessData, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
@@ -33,8 +31,9 @@ def _mock_entry() -> MockConfigEntry:
 @pytest.mark.asyncio
 async def test_plenticore_async_setup_and_unload_error_paths(hass: HomeAssistant) -> None:
     """Cover login/metadata/module error branches and unload branches."""
-    from kostal_plenticore.coordinator import Plenticore
     from pykoplenti import AuthenticationException
+
+    from kostal_plenticore.coordinator import Plenticore
 
     entry = _mock_entry()
     p = Plenticore(hass, entry)
@@ -378,6 +377,8 @@ async def test_number_and_sensor_targeted_gap_paths(hass: HomeAssistant) -> None
         PlenticoreCalculatedSensor,
         _extract_dc_number_from_module_id,
         _sensor_translation_key,
+    )
+    from kostal_plenticore.sensor import (
         async_setup_entry as sensor_setup_entry,
     )
 
@@ -572,6 +573,7 @@ async def test_switch_helper_and_setup_error_branches(hass: HomeAssistant) -> No
 async def test_number_setup_migration_and_error_branches(hass: HomeAssistant) -> None:
     """Drive number setup through migration/exception branches."""
     from homeassistant.helpers import entity_registry as er
+
     from kostal_plenticore import number as number_mod
     from kostal_plenticore.number import (
         PlenticoreNumberEntityDescription,
@@ -679,7 +681,7 @@ async def test_number_setup_migration_and_error_branches(hass: HomeAssistant) ->
 @pytest.mark.asyncio
 async def test_additional_hard_branches_switch_number_coordinator(hass: HomeAssistant) -> None:
     """Cover additional hard-to-reach branches for real coverage."""
-    from kostal_plenticore import number as number_mod
+    from kostal_plenticore import number as number_mod  # noqa: F401
     from kostal_plenticore.coordinator import Plenticore, SelectDataUpdateCoordinator
     from kostal_plenticore.number import PlenticoreDataNumber, PlenticoreNumberEntityDescription
     from kostal_plenticore.switch import async_setup_entry as switch_setup_entry
@@ -1083,6 +1085,8 @@ async def test_final_gap_branches_switch_number_sensor_coordinator(hass: HomeAss
         PlenticoreDataSensor,
         PlenticoreSensorEntityDescription,
         _extract_dc_number_from_module_id,
+    )
+    from kostal_plenticore.sensor import (
         async_setup_entry as sensor_setup_entry,
     )
 

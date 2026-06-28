@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import threading
-import sys
-import os
-from pathlib import Path
-from datetime import timedelta
-from collections.abc import Generator, Iterable
 import copy
-from unittest.mock import patch, MagicMock
+import os
+import sys
+import threading
+from collections.abc import Generator, Iterable
+from datetime import timedelta  # noqa: F401
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Use SelectorEventLoop on Windows to satisfy aiodns requirements
 if sys.platform == "win32":
@@ -20,7 +20,7 @@ if sys.platform == "win32":
 os.environ.setdefault("AIOHTTP_NO_EXTENSIONS", "1")
 
 try:
-    import aiohttp
+    import aiohttp  # noqa: F401
     from aiohttp import resolver as aiohttp_resolver
 
     if sys.platform == "win32":
@@ -28,12 +28,10 @@ try:
 except Exception:
     pass
 
-from pykoplenti import ExtendedApiClient, MeData, SettingsData, VersionData, ProcessData
 import pytest
-
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-
+from pykoplenti import ExtendedApiClient, MeData, ProcessData, SettingsData, VersionData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Ensure SelectorEventLoop on Windows (aiodns requirement)
@@ -43,15 +41,16 @@ if sys.platform == "win32":
 # Pre-load local integration package and map HA component aliases.
 try:
     import importlib
+
     import custom_components.kostal_kore as kostal_kore
     import custom_components.kostal_kore.binary_sensor
     import custom_components.kostal_kore.button
     import custom_components.kostal_kore.config_flow
     import custom_components.kostal_kore.const
     import custom_components.kostal_kore.coordinator
-    import custom_components.kostal_kore.health_monitor
-    import custom_components.kostal_kore.health_sensor
     import custom_components.kostal_kore.health_binary_sensor
+    import custom_components.kostal_kore.health_monitor
+    import custom_components.kostal_kore.health_sensor  # noqa: F401
 
     # Primary component path for new domain.
     _ha_prefix = "homeassistant.components.kostal_kore"
@@ -131,6 +130,7 @@ pytest_socket.enable_socket()
 from custom_components.kostal_kore import coordinator
 from custom_components.kostal_kore.const import DOMAIN
 
+
 @pytest.fixture
 def mock_performance_coordinator():
     """Mock performance-optimized coordinator."""
@@ -158,7 +158,7 @@ def allow_all_sockets():
     
     This is required on Windows because the ProactorEventLoop uses sockets 
     internally for IPC, and pytest-socket (used by HA tests) blocks them by default.
-    """
+    """  # noqa: W291, W293
     pytest_socket.enable_socket()
 
 @pytest.fixture

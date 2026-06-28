@@ -25,19 +25,21 @@ from typing import Any, Final
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import (
     ConnectionException as PyConnectionException,
+)
+from pymodbus.exceptions import (
     ModbusException as PyModbusException,
 )
 
 from .modbus_registers import (
+    DEFAULT_MODBUS_PORT,
+    DEFAULT_UNIT_ID,
+    MONITORING_REGISTERS,
+    REG_BYTE_ORDER,
+    REGISTER_BY_ADDRESS,
+    REGISTER_BY_NAME,
     Access,
     DataType,
     ModbusRegister,
-    MONITORING_REGISTERS,
-    REGISTER_BY_ADDRESS,
-    REGISTER_BY_NAME,
-    DEFAULT_MODBUS_PORT,
-    DEFAULT_UNIT_ID,
-    REG_BYTE_ORDER,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -513,7 +515,7 @@ class KostalModbusClient:
                     raise ModbusWriteError(
                         f"Write failed after {MAX_RETRIES} retries for {register.name}: {err}"
                     ) from err
-            except (ModbusConnectionError, PyConnectionException) as err:
+            except (ModbusConnectionError, PyConnectionException) as err:  # noqa: F841
                 if attempt < MAX_RETRIES:
                     _LOGGER.warning(
                         "Connection lost writing %s, reconnecting (attempt %d/%d)",

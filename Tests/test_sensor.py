@@ -1,14 +1,13 @@
 """Test the Kostal Plenticore Solar Inverter sensor platform."""
 
+from datetime import timedelta
 from unittest.mock import Mock
 
 import pytest
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN  # noqa: F401
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from datetime import timedelta
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 pytestmark = [
@@ -70,7 +69,7 @@ async def test_pv3_sensors(
 ) -> None:
     """Test if PV3 sensors are created when string count is 3."""
     mock_get_setting_values["devices:local"]["Properties:StringCnt"] = "3"
-    
+
     mock_config_entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)

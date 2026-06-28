@@ -1,9 +1,10 @@
 """Tests for Kostal Plenticore model compatibility (G1, G2, G3)."""
-from unittest.mock import MagicMock
-from pykoplenti import SettingsData, ProcessData
+from unittest.mock import MagicMock  # noqa: F401
+
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from pykoplenti import ProcessData, SettingsData  # noqa: F401
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 pytestmark = [
@@ -36,7 +37,7 @@ async def test_hardware_configurations(
     has_battery: bool,
 ) -> None:
     """Test all valid hardware permutations (1-3 Strings, +/- Battery)."""
-    
+
     # 1. Configure String Count
     mock_get_setting_values["devices:local"].update({
         "Properties:StringCnt": str(string_count),
@@ -54,7 +55,7 @@ async def test_hardware_configurations(
         # Remove battery traces
         if "devices:local:battery" in mock_get_process_data:
             del mock_get_process_data["devices:local:battery"]
-        
+
         # Remove battery settings
         keys_to_remove = [k for k in mock_get_setting_values["devices:local"] if "Battery" in k]
         for k in keys_to_remove:

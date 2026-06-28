@@ -6,14 +6,13 @@ import asyncio
 import logging
 import struct
 from datetime import timedelta
-from typing import Any, Final
-
-from pymodbus.client import AsyncModbusTcpClient
-from pymodbus.exceptions import ModbusException as PyModbusException
+from typing import Any, Final  # noqa: F401
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from pymodbus.client import AsyncModbusTcpClient
+from pymodbus.exceptions import ModbusException as PyModbusException
 
 _LOGGER: Final = logging.getLogger(__name__)
 

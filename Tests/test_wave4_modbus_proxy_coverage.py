@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import math
+import math  # noqa: F401
 import struct
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,11 +19,11 @@ from kostal_plenticore.modbus_proxy import (
     _encode_value,
 )
 from kostal_plenticore.modbus_registers import (
+    REG_ACTIVE_POWER_SETPOINT,
+    REG_BAT_CHARGE_DC_ABS_POWER,
     Access,
     DataType,
     ModbusRegister,
-    REG_ACTIVE_POWER_SETPOINT,
-    REG_BAT_CHARGE_DC_ABS_POWER,
     RegisterGroup,
 )
 

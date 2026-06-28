@@ -24,16 +24,16 @@ directly via Developer Tools or YAML automations; documentation guides them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import difflib
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 import voluptuous as vol
-
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN,
@@ -163,9 +163,8 @@ def _scan_orphans_sync(
     kore_entity_ids: list[str],
 ) -> OrphanScanReport:
     """Synchronous Recorder scan; runs inside the recorder executor."""
-    from sqlalchemy import select
-
     from homeassistant.components.recorder.db_schema import StatesMeta, StatisticsMeta
+    from sqlalchemy import select
 
     # Imported lazily here as well so the migration_services helper stays the
     # canonical owner of backend detection (DRY).

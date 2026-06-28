@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Final, TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from homeassistant.const import CONF_HOST, CONF_PASSWORD
 

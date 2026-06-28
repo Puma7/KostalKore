@@ -4,39 +4,39 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from types import SimpleNamespace
+from types import SimpleNamespace  # noqa: F401
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pymodbus.exceptions import ConnectionException as PyConnectionException
 
 from kostal_plenticore.modbus_client import (
+    EXCEPTION_MESSAGES,
     KostalModbusClient,
     ModbusClientError,
     ModbusConnectionError,
+    ModbusExceptionCode,
     ModbusPermanentError,
     ModbusReadError,
     ModbusShutdownAbort,
     ModbusTransientError,
     ModbusWriteError,
     _classify_exception_response,
-    EXCEPTION_MESSAGES,
-    ModbusExceptionCode,
 )
 from kostal_plenticore.modbus_registers import (
+    REG_ACTIVE_POWER_SETPOINT,
+    REG_BAT_CHARGE_DC_ABS_POWER,
+    REG_BATTERY_SOC,
+    REG_BYTE_ORDER,  # noqa: F401
+    REG_INVERTER_STATE,  # noqa: F401
+    REG_MODBUS_ENABLE,
+    REG_REACTIVE_POWER_SETPOINT,
+    REG_SERIAL_NUMBER,
+    REG_TOTAL_DC_POWER,
     Access,
     DataType,
     ModbusRegister,
-    REG_BYTE_ORDER,
     RegisterGroup,
-    REG_TOTAL_DC_POWER,
-    REG_BATTERY_SOC,
-    REG_INVERTER_STATE,
-    REG_SERIAL_NUMBER,
-    REG_ACTIVE_POWER_SETPOINT,
-    REG_BAT_CHARGE_DC_ABS_POWER,
-    REG_MODBUS_ENABLE,
-    REG_REACTIVE_POWER_SETPOINT,
 )
 
 

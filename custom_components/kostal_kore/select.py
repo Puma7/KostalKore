@@ -3,26 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
-import logging
 from typing import Any, Final
 
+from aiohttp.client_exceptions import ClientError
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, UpdateFailed
+from pykoplenti import ApiException
 
 from .const import AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
 from .coordinator import PlenticoreConfigEntry, SelectDataUpdateCoordinator
-
-from pykoplenti import ApiException
-
-from aiohttp.client_exceptions import ClientError
-
 from .helper import parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,7 +48,7 @@ def _handle_select_error(err: Exception, operation: str) -> None:
     Args:
         err: Exception that occurred
         operation: Description of the operation being performed
-    """
+    """  # noqa: W293
     if isinstance(err, ApiException):
         modbus_err = parse_modbus_exception(err)
         _LOGGER.error("Could not get %s for select: %s", operation, modbus_err.message)
@@ -76,16 +73,16 @@ def _validate_select_options(
         
     Returns:
         True if all required options are available, False otherwise
-    """
+    """  # noqa: W293
     if description.module_id not in available_settings_data:
         return False
-    
+
     options = description.options or []
     needed_data_ids = {data_id for data_id in options if data_id != NONE_OPTION_VALUE}
     available_data_ids = {
         setting.id for setting in available_settings_data[description.module_id]
     }
-    
+
     return needed_data_ids <= available_data_ids
 
 
@@ -99,7 +96,7 @@ async def _get_settings_data_safe(plenticore: Any, operation: str) -> dict[str, 
         
     Returns:
         Settings data or empty dict if error occurs
-    """
+    """  # noqa: W293
     try:
         getter = (
             plenticore.async_get_settings_cached
@@ -156,7 +153,7 @@ async def async_setup_entry(
             plenticore, "settings data for select (retry)"
         )
     available_settings_data = available_settings_data or {}
-    
+
     from .const import CONF_MODBUS_ENABLED
     _modbus_active = entry.options.get(CONF_MODBUS_ENABLED, False)
     _select_interval = 90 if _modbus_active else SELECT_UPDATE_INTERVAL_SECONDS
@@ -172,7 +169,7 @@ async def async_setup_entry(
     entities = []
     for description in SELECT_SETTINGS_DATA:
         assert description.options is not None
-        
+
         # Use centralized validation function
         if not _validate_select_options(description, available_settings_data):
             if (

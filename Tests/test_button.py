@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
+import asyncio  # noqa: F401
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.helpers.device_registry import DeviceInfo
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore import button as button_platform
 from custom_components.kostal_kore.const import (
@@ -16,8 +17,6 @@ from custom_components.kostal_kore.const import (
     DATA_KEY_LEGACY_CLEANUP_GUARD,
     DOMAIN,
 )
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 async def test_setup_entry_adds_legacy_migration_button_without_modbus(hass):

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import timedelta
 import asyncio
 import logging
+from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Final, cast
 
+from aiohttp.client_exceptions import ClientError
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -15,14 +16,11 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
-from .const import AddConfigEntryEntitiesCallback
-from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
-from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
-
-from aiohttp.client_exceptions import ClientError
 from pykoplenti import ApiException
 
+from .const import AddConfigEntryEntitiesCallback
+from .const_ids import STRING_FEATURE_TEMPLATE, ModuleId, SettingId, string_feature_id
+from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import ensure_installer_access, parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
@@ -981,7 +979,8 @@ async def async_setup_entry(
 
     # Add Modbus-based charge block switch if Modbus is enabled
     try:  # pragma: no cover
-        from .const import CONF_MODBUS_ENABLED as _CME, DOMAIN as _DOM
+        from .const import CONF_MODBUS_ENABLED as _CME
+        from .const import DOMAIN as _DOM
         entry_data = hass.data.get(_DOM, {}).get(entry.entry_id, {})
         modbus_coord = entry_data.get("modbus_coordinator") if entry_data else None
         if entry.options.get(_CME, False) and modbus_coord is not None:

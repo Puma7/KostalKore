@@ -4,28 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict  # noqa: F401
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Final
 
 from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv  # noqa: F401
 from homeassistant.helpers.system_info import async_get_system_info
+from pykoplenti import ApiException
 
 from .const import CONF_HOST, CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
-from .const_ids import ModuleId, SettingId, STRING_FEATURE_TEMPLATE, string_feature_id
+from .const_ids import STRING_FEATURE_TEMPLATE, ModuleId, SettingId, string_feature_id  # noqa: F401
 from .coordinator import PlenticoreConfigEntry
-
-from pykoplenti import ApiException
 
 # Import MODBUS exception handling from coordinator
 from .helper import parse_modbus_exception
 
-import logging
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
@@ -63,7 +62,7 @@ def _handle_diagnostics_error(err: Exception, operation: str) -> Any:
         
     Returns:
         Appropriate default value for the operation
-    """
+    """  # noqa: W293
     if isinstance(err, ApiException):
         modbus_err = parse_modbus_exception(err)
         _LOGGER.warning("Could not get %s for diagnostics: %s", operation, modbus_err.message)
@@ -114,7 +113,7 @@ async def _get_diagnostics_data_safe(
         
     Returns:
         Fetched data or default value
-    """
+    """  # noqa: W293
     try:
         result = await asyncio.wait_for(fetch_func(), timeout=DIAGNOSTICS_TIMEOUT_SECONDS)
         return result
@@ -147,7 +146,7 @@ async def async_get_config_entry_diagnostics(
         "process data",
         process_getter,
     )
-    
+
     available_settings_data = await _get_diagnostics_data_safe(
         plenticore,
         "settings data",
@@ -155,15 +154,15 @@ async def async_get_config_entry_diagnostics(
     )
     available_process_data = available_process_data or {}
     available_settings_data = available_settings_data or {}
-    
+
     version = await _get_diagnostics_data_safe(
         plenticore, "version", plenticore.client.get_version, "Unknown"
     )
-    
+
     me = await _get_diagnostics_data_safe(
         plenticore, "me", plenticore.client.get_me, "Unknown"
     )
-    
+
     data["client"] = {
         "version": version,
         "me": me,
@@ -176,11 +175,11 @@ async def async_get_config_entry_diagnostics(
 
     # Add important information how the inverter is configured
     string_count_setting = await _get_diagnostics_data_safe(
-        plenticore, 
-        "string count", 
+        plenticore,
+        "string count",
         lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, STRING_COUNT_SETTING)
     )
-    
+
     string_count = 0
     try:
         raw_count = int(

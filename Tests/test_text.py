@@ -5,14 +5,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from homeassistant.helpers.device_registry import DeviceInfo
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore import text as text_platform
 from custom_components.kostal_kore.const import (
     DATA_KEY_LEGACY_CLEANUP_CODE_INPUT,
     DOMAIN,
 )
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 async def test_setup_entry_adds_cleanup_confirmation_text_entity(hass):

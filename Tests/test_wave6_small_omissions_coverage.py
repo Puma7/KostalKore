@@ -8,15 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.components.number import NumberMode
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pymodbus.exceptions import ModbusException as PyModbusException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.charge_block_switch import (
-    BatteryChargeBlockSwitch,
     KEEPALIVE_INTERVAL,
+    BatteryChargeBlockSwitch,
 )
 from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.degradation_entities import (

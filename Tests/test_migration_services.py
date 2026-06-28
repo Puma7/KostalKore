@@ -7,19 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
-
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.kostal_kore import migration_services as migration_services_mod
 from custom_components.kostal_kore.const import (
     DOMAIN,
     SERVICE_ADOPT_LEGACY_ENTITY_IDS,
     SERVICE_COPY_LEGACY_HISTORY,
 )
 from custom_components.kostal_kore.legacy_migration import LEGACY_DOMAIN, LegacyAdoptResult
-from custom_components.kostal_kore import migration_services as migration_services_mod
 from custom_components.kostal_kore.migration_services import (
-    _HistoryCopySummary,
     _build_auto_mapping,
     _copy_legacy_history,
     _copy_legacy_history_sync,
@@ -29,17 +28,16 @@ from custom_components.kostal_kore.migration_services import (
     _get_recorder_instance,
     _handle_adopt_service,
     _handle_copy_history_service,
-    _notify,
+    _HistoryCopySummary,
     _merge_states_metadata,
-    _merge_statistics_table,
     _merge_statistics_metadata,
+    _merge_statistics_table,
     _normalise_mapping_rows,
+    _notify,
     _resolve_target_entry_id,
     async_register_migration_services,
     async_unregister_migration_services_if_unused,
 )
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 async def test_register_unregister_migration_services(hass: HomeAssistant) -> None:
@@ -739,9 +737,9 @@ async def test_remaining_helper_and_service_branches(hass: HomeAssistant) -> Non
 
 def _make_sqlite_session():
     """Return a (engine, Session class) pair backed by an in-memory SQLite DB."""
+    from homeassistant.components.recorder.db_schema import Base
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
-    from homeassistant.components.recorder.db_schema import Base
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -750,8 +748,8 @@ def _make_sqlite_session():
 
 def test_merge_states_metadata_merges_old_history_into_new_entity():
     """Old StatesMeta row is renamed and its States rows all end up under new entity_id."""
-    from sqlalchemy import select as sa_select
     from homeassistant.components.recorder.db_schema import States, StatesMeta
+    from sqlalchemy import select as sa_select
 
     engine, Session = _make_sqlite_session()
 
@@ -791,8 +789,8 @@ def test_merge_states_metadata_merges_old_history_into_new_entity():
 
 def test_merge_states_metadata_returns_false_when_old_meta_absent():
     """Returns (0, False) immediately when the old entity has no States history at all."""
-    from sqlalchemy import select as sa_select
     from homeassistant.components.recorder.db_schema import States, StatesMeta
+    from sqlalchemy import select as sa_select
 
     engine, Session = _make_sqlite_session()
 
@@ -819,8 +817,12 @@ def test_merge_states_metadata_returns_false_when_old_meta_absent():
 
 def test_merge_statistics_metadata_merges_rows_into_new_entity():
     """Statistics rows from old metadata_id are reassigned to new entity after merge."""
+    from homeassistant.components.recorder.db_schema import (
+        Statistics,
+        StatisticsMeta,
+        StatisticsShortTerm,  # noqa: F401
+    )
     from sqlalchemy import select as sa_select
-    from homeassistant.components.recorder.db_schema import Statistics, StatisticsMeta, StatisticsShortTerm
 
     engine, Session = _make_sqlite_session()
 
@@ -872,8 +874,8 @@ def test_merge_statistics_metadata_merges_rows_into_new_entity():
 
 def test_merge_statistics_metadata_skips_on_unit_mismatch():
     """Merge is skipped without corrupting either row when units differ between old and new."""
-    from sqlalchemy import select as sa_select
     from homeassistant.components.recorder.db_schema import StatisticsMeta
+    from sqlalchemy import select as sa_select
 
     engine, Session = _make_sqlite_session()
 
@@ -914,8 +916,8 @@ def test_merge_statistics_metadata_skips_on_unit_mismatch():
 
 def test_merge_statistics_metadata_deduplicates_overlapping_timestamps():
     """When old and new rows share a start_ts, old row wins (new duplicate deleted)."""
-    from sqlalchemy import select as sa_select
     from homeassistant.components.recorder.db_schema import Statistics, StatisticsMeta
+    from sqlalchemy import select as sa_select
 
     engine, Session = _make_sqlite_session()
 

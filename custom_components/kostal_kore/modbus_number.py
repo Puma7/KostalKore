@@ -28,21 +28,21 @@ from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .modbus_client import ModbusClientError
+from .modbus_client import ModbusClientError  # noqa: F401
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
-    ModbusRegister,
+    REG_ACTIVE_POWER_SETPOINT,
     REG_BAT_CHARGE_DC_ABS_POWER,
     REG_BAT_MAX_CHARGE_LIMIT,
     REG_BAT_MAX_DISCHARGE_LIMIT,
-    REG_BAT_MIN_SOC,
     REG_BAT_MAX_SOC,
-    REG_ACTIVE_POWER_SETPOINT,
+    REG_BAT_MIN_SOC,
+    REG_BATTERY_MGMT_MODE,
+    REG_G3_FALLBACK_TIME,
     REG_G3_MAX_CHARGE,
     REG_G3_MAX_DISCHARGE,
-    REG_G3_FALLBACK_TIME,
     REG_INVERTER_MAX_POWER,
-    REG_BATTERY_MGMT_MODE,
+    ModbusRegister,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ async def create_modbus_number_entities(
         except (TypeError, ValueError):
             _LOGGER.warning("Invalid max power value %r, using fallback %d W", raw_max, FALLBACK_MAX_POWER)
 
-    from .notifications import notify_modbus_probe_success, notify_modbus_probe_failed
+    from .notifications import notify_modbus_probe_failed, notify_modbus_probe_success
 
     read_only = False
     bat_mgmt_mode = device_data.get(REG_BATTERY_MGMT_MODE.name)

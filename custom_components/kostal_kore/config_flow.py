@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import ipaddress
 import logging
 from collections.abc import Mapping
-from typing import Any, Final, TypeAlias, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Final, TypeAlias
 
-from aiohttp.client_exceptions import ClientError, ContentTypeError
-from pykoplenti import ApiClient, AuthenticationException, ApiException
 import voluptuous as vol
-
+from aiohttp.client_exceptions import ClientError, ContentTypeError
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.const import CONF_BASE, CONF_HOST, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pykoplenti import ApiClient, ApiException, AuthenticationException
 
 from .const import (
     CONF_ACCESS_ROLE,
@@ -34,11 +33,11 @@ from .const import (
     CONF_MODBUS_UNIT_ID,
     CONF_MQTT_BRIDGE_ENABLED,
     CONF_SERVICE_CODE,
+    DEFAULT_KSEM_PORT,
+    DEFAULT_KSEM_UNIT_ID,
     DEFAULT_MODBUS_PORT,
     DEFAULT_MODBUS_PROXY_BIND,
     DEFAULT_MODBUS_UNIT_ID,
-    DEFAULT_KSEM_PORT,
-    DEFAULT_KSEM_UNIT_ID,
     DOMAIN,
 )
 from .helper import get_hostname_id

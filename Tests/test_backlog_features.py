@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from pykoplenti import EventData
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.const import DOMAIN
@@ -24,11 +22,11 @@ from custom_components.kostal_kore.helper import (
     requires_advanced_write_arm,
     validate_cross_field_write_rules,
 )
+from custom_components.kostal_kore.ksem_coordinator import KsemDataUpdateCoordinator
 from custom_components.kostal_kore.modbus_client import (
     KostalModbusClient,
     ModbusReadError,
 )
-from custom_components.kostal_kore.ksem_coordinator import KsemDataUpdateCoordinator
 from custom_components.kostal_kore.modbus_registers import REG_INVERTER_GEN_POWER
 
 

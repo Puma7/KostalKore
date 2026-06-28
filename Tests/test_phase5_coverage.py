@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,10 +12,8 @@ from aiohttp.client_exceptions import ClientError, ContentTypeError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pykoplenti import ApiException, AuthenticationException
-
-import importlib
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
 from custom_components.kostal_kore import config_flow, diagnostics, helper, repairs, select

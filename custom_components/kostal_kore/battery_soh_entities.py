@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import Any, Final  # noqa: F401
 
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory, PERCENTAGE
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 

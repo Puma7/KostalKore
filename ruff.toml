@@ -1,0 +1,23 @@
+# Ruff configuration — enables a lint gate in CI (see .github/workflows/ci.yml).
+#
+# Scope note: this is a LINT gate only. Formatter adoption (`ruff format`) is a
+# large mechanical reformat and is intentionally deferred to its own dedicated PR.
+target-version = "py312"
+line-length = 100
+extend-exclude = ["pykoplenti-master"]
+
+[lint]
+# High-signal rules: pyflakes (F), import sorting (I), whitespace (W).
+select = ["F", "I", "W"]
+# F821 (undefined-name) currently fires only on stringised type annotations in a
+# couple of test files — harmless under `from __future__ import annotations`.
+ignore = ["F821"]
+# NEVER auto-delete code to satisfy these: this integration re-exports several
+# imports that are accessed as `module.attr` from tests (ruff cannot see that
+# usage) and removing them breaks those tests. Existing violations are baselined
+# with inline `# noqa`; the gate still blocks NEW unused imports/variables.
+unfixable = ["F401", "F841"]
+
+[lint.per-file-ignores]
+# Package re-exports are intentional.
+"__init__.py" = ["F401"]

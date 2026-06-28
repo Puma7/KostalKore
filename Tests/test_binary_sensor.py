@@ -6,11 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from homeassistant.helpers.device_registry import DeviceInfo
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore import binary_sensor as binary_sensor_platform
 from custom_components.kostal_kore.const import CONF_MODBUS_ENABLED, DOMAIN
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 def _make_entry(modbus_enabled: bool = True) -> MockConfigEntry:

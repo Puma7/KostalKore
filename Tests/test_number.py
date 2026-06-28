@@ -1,25 +1,26 @@
 """Test Kostal Plenticore number."""
 
 from datetime import timedelta
+from unittest.mock import AsyncMock, MagicMock
 
-from pykoplenti import ApiClient, SettingsData
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-
 from homeassistant.components.number import (
     ATTR_MAX,
     ATTR_MIN,
     ATTR_VALUE,
-    DOMAIN as NUMBER_DOMAIN,
     SERVICE_SET_VALUE,
+)
+from homeassistant.components.number import (
+    DOMAIN as NUMBER_DOMAIN,
 )
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from kostal_plenticore.const import DOMAIN
 from homeassistant.util import dt as dt_util
-
+from pykoplenti import ApiClient, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+
+from kostal_plenticore.const import DOMAIN
 
 pytestmark = [
     pytest.mark.usefixtures("mock_plenticore_client"),

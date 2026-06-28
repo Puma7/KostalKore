@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 import logging
 import time
+from datetime import datetime
 from typing import Any, Final
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+
 from .const import (
-    AddConfigEntryEntitiesCallback,
     CONF_MODBUS_ENABLED,
     DATA_KEY_LEGACY_CLEANUP_CODE_INPUT,
     DATA_KEY_LEGACY_CLEANUP_GUARD,
     DOMAIN,
+    AddConfigEntryEntitiesCallback,
 )
 from .coordinator import PlenticoreConfigEntry
 from .helper import generate_confirmation_code, integration_entry_store

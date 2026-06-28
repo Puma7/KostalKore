@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import time
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace  # noqa: F401
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F401
 
 import pytest
 
 from custom_components.kostal_kore.write_audit import WriteAuditLog, WriteEvent
-
 
 # ---------------------------------------------------------------------------
 # WriteAuditLog tests
@@ -284,7 +283,10 @@ def test_consistency_sensor_insufficient_data_when_no_rest_coord():
 
 
 def test_consistency_sensor_missing_modbus_key_gives_insufficient_data_for_pair():
-    from custom_components.kostal_kore.observability_entities import RestModbusConsistencySensor, _to_float
+    from custom_components.kostal_kore.observability_entities import (
+        RestModbusConsistencySensor,
+        _to_float,  # noqa: F401
+    )
 
     rest = _make_rest_coord({
         "devices:local:battery": {"SoC": "67"},
@@ -519,7 +521,8 @@ def test_consistency_sensor_extra_state_attributes_returns_pairs():
 def test_modbus_coordinator_write_hook_logs_ok(monkeypatch):
     """async_write_register should call audit.log with result='ok'."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
+
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     audit = WriteAuditLog()
@@ -546,9 +549,10 @@ def test_modbus_coordinator_write_hook_logs_ok(monkeypatch):
 
 def test_modbus_coordinator_write_hook_logs_error_on_exception(monkeypatch):
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
-    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+    from unittest.mock import MagicMock
+
     from custom_components.kostal_kore.modbus_client import ModbusClientError
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     audit = WriteAuditLog()
 
@@ -575,7 +579,8 @@ def test_modbus_coordinator_write_hook_logs_error_on_exception(monkeypatch):
 def test_modbus_coordinator_write_register_honors_audit_source():
     """audit_source parameter must override default 'modbus_coord' tag."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
+
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
     from custom_components.kostal_kore.modbus_registers import Access
 
@@ -601,7 +606,8 @@ def test_modbus_coordinator_write_register_honors_audit_source():
 def test_modbus_coordinator_write_register_logs_non_modbus_exceptions():
     """Non-ModbusClientError exceptions must still produce an audit error event."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
+
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
     from custom_components.kostal_kore.modbus_registers import Access
 
@@ -631,7 +637,8 @@ def test_modbus_coordinator_write_register_logs_non_modbus_exceptions():
 def test_modbus_coordinator_write_by_address_logs_ok():
     """async_write_by_address must audit successful writes."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
+
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     audit = WriteAuditLog()
@@ -657,7 +664,8 @@ def test_modbus_coordinator_write_by_address_logs_ok():
 def test_modbus_coordinator_write_by_address_logs_error():
     """async_write_by_address must audit write failures and re-raise."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
+
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     audit = WriteAuditLog()
@@ -738,7 +746,7 @@ def test_mqtt_bridge_logs_installer_rejection():
     bridge._command_count = 0
     bridge._rate_limited_count = 0
 
-    from custom_components.kostal_kore.mqtt_bridge import KostalMqttBridge as MQTT
+    from custom_components.kostal_kore.mqtt_bridge import KostalMqttBridge as MQTT  # noqa: F401
     reg = MagicMock()
     reg.name = "bat_charge_dc_abs_power"
 

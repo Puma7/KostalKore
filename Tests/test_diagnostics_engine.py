@@ -6,8 +6,8 @@ from kostal_plenticore.diagnostics_engine import (
     DiagnosticsEngine,
     DiagStatus,
 )
-from kostal_plenticore.health_monitor import InverterHealthMonitor
 from kostal_plenticore.fire_safety import FireSafetyMonitor
+from kostal_plenticore.health_monitor import InverterHealthMonitor
 
 
 def _make_engine() -> DiagnosticsEngine:

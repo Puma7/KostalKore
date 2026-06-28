@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Final
+from typing import Any, Final  # noqa: F401
 
 from homeassistant.core import HomeAssistant
 

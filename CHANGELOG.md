@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime current HA ships with; bump the upper version when HA raises its minimum
   Python. mypy runs on the floor leg only — current HA source uses Python 3.14-only
   syntax that mypy cannot parse under the 3.12 target.
+- **Ruff lint gate** — CI now runs `ruff check` (pyflakes, import-sort, whitespace) over
+  the integration and tests; `ruff.toml` added and `ruff` added to test requirements.
+  Adoption applied only safe autofixes (sorted imports, whitespace/f-string cleanup) and
+  baselined existing violations with inline `# noqa`. `F401`/`F841` are marked unfixable
+  so ruff never deletes the imports this codebase re-exports for `module.attr` test access.
+  The gate surfaced a dead duplicate test (`test_battery_soh_calculator.py` defined
+  `test_schedule_save_coalesces_concurrent_calls` twice — the first never ran), now removed.
+  Formatter adoption (`ruff format`) is deferred to its own PR.
 
 ### Docs
 - **evcc proxy guide** — `PROXY_SETUP.md` now recommends the `kostal-plenticore-gen2`

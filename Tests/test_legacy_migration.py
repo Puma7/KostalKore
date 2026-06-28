@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.const import (
     CONF_HOST,
@@ -26,8 +27,6 @@ from custom_components.kostal_kore.legacy_migration import (
     finalize_legacy_cleanup,
     migrate_legacy_plenticore_entry,
 )
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):

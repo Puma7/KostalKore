@@ -29,11 +29,11 @@ from typing import Any, Final
 
 from .modbus_registers import (
     ALL_REGISTERS,
+    DEFAULT_UNIT_ID,
+    REGISTER_BY_ADDRESS,
     Access,
     DataType,
     ModbusRegister,
-    REGISTER_BY_ADDRESS,
-    DEFAULT_UNIT_ID,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)

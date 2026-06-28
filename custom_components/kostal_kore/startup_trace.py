@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast  # noqa: F401
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform

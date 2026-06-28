@@ -6,10 +6,10 @@ import time
 from unittest.mock import patch
 
 from kostal_plenticore.degradation_tracker import (
+    SECONDS_PER_DAY,
     DailySnapshot,
     DegradationTracker,
     TrackedParameter,
-    SECONDS_PER_DAY,
 )
 
 

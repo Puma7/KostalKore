@@ -38,10 +38,10 @@ from custom_components.kostal_kore.health_sensor import (
     ErrorRateSensor,
     HealthLevelSensor,
     HealthScoreSensor,
+    InverterStateChangeSensor,
     IsolationResistanceSensor,
     ModbusRawSensor,
     PhaseImbalanceSensor,
-    InverterStateChangeSensor,
     create_health_sensors,
 )
 from custom_components.kostal_kore.longevity_advisor import LongevityTip

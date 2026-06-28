@@ -1,31 +1,27 @@
 """Test Kostal Plenticore helper."""
 
-from collections.abc import Generator
 import asyncio
+from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiohttp.client_exceptions import ClientError
-from pykoplenti import ApiClient, ApiException, ExtendedApiClient, SettingsData
 import pytest
-
-from custom_components.kostal_kore.const import DOMAIN
+from aiohttp.client_exceptions import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
-
+from pykoplenti import ApiClient, ApiException, ExtendedApiClient, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-
 from custom_components.kostal_kore import coordinator
-from custom_components.kostal_kore.const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE
+from custom_components.kostal_kore.const import CONF_INSTALLER_ACCESS, CONF_SERVICE_CODE, DOMAIN
 from custom_components.kostal_kore.helper import (
     ModbusException,
-    ModbusIllegalFunctionError,
     ModbusIllegalDataAddressError,
     ModbusIllegalDataValueError,
+    ModbusIllegalFunctionError,
     ModbusMemoryParityError,
-    ModbusServerDeviceFailureError,
     ModbusServerDeviceBusyError,
+    ModbusServerDeviceFailureError,
     PlenticoreDataFormatter,
     battery_efficiency_measurement_quality,
     dc_pv_power_to_ac_estimate_w,
@@ -41,6 +37,7 @@ from custom_components.kostal_kore.helper import (
     safe_home_power_w,
     sum_home_consumption_power_w,
 )
+
 
 @pytest.fixture
 def mock_apiclient() -> Generator[ApiClient]:

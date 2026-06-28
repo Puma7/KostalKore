@@ -25,7 +25,7 @@ import argparse
 import asyncio
 import json
 import struct
-import time
+import time  # noqa: F401
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -75,7 +75,7 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
             report["errors"].append(f"TCP connection to {host}:{port} failed")
             _save_report(report, output)
             return
-        print(f"  OK: TCP connection established")
+        print("  OK: TCP connection established")
         report["connection"]["status"] = "ok"
     except Exception as e:
         print(f"  FAILED: {e}")
@@ -86,22 +86,22 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
         return
 
     # Step 2: Detect endianness
-    print(f"\n[2/5] Detecting byte order...")
+    print("\n[2/5] Detecting byte order...")
     try:
         resp = await client.read_holding_registers(address=5, count=1, device_id=unit_id)
         if resp.isError():
-            print(f"  WARNING: Could not read byte order register (using little-endian default)")
+            print("  WARNING: Could not read byte order register (using little-endian default)")
             endianness = "little"
             report["endianness"]["status"] = "default"
         else:
             val = resp.registers[0]
             if val == 0:
                 endianness = "little"
-                print(f"  OK: Byte order = little-endian (CDAB), register value = 0")
+                print("  OK: Byte order = little-endian (CDAB), register value = 0")
                 report["endianness"]["status"] = "detected"
             elif val == 1:
                 endianness = "big"
-                print(f"  OK: Byte order = big-endian (ABCD), register value = 1")
+                print("  OK: Byte order = big-endian (ABCD), register value = 1")
                 report["endianness"]["status"] = "detected"
             else:
                 endianness = "little"
@@ -194,7 +194,7 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
     print(f"  OK: {ok_count} readable, {skip_count} skipped/unavailable, {error_count} errors")
 
     # Step 4: Print report
-    print(f"\n[4/5] Diagnostic Report")
+    print("\n[4/5] Diagnostic Report")
     print("-" * 70)
 
     groups_order = [
@@ -275,19 +275,19 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
             "many expected registers are not accessible on this model/firmware."
         )
 
-    print(f"\n[5/5] Summary")
+    print("\n[5/5] Summary")
     print(f"  Registers OK:          {ok_count}")
     print(f"  Skipped/Unavailable:   {skip_count}")
     print(f"  Errors:                {error_count}")
     print(f"  Endianness:            {endianness}")
 
     if error_count == 0 and not warnings:
-        print(f"\n  ✓ ALL TESTS PASSED -- safe to enable Modbus in HA integration")
+        print("\n  ✓ ALL TESTS PASSED -- safe to enable Modbus in HA integration")
     elif error_count == 0:
-        print(f"\n  ⚠ TESTS PASSED WITH WARNINGS:")
+        print("\n  ⚠ TESTS PASSED WITH WARNINGS:")
         for w in warnings:
             print(f"    - {w}")
-        print(f"  Modbus can be enabled, but check the warnings above.")
+        print("  Modbus can be enabled, but check the warnings above.")
     else:
         print(f"\n  ✗ {error_count} ERRORS -- check log above before enabling Modbus")
         for w in warnings:

@@ -302,7 +302,7 @@ async def test_setup_entry_modbus_auto_endianness(
             "custom_components.kostal_kore.modbus_client.KostalModbusClient.detect_endianness",
             new_callable=AsyncMock,
             return_value="little",
-        ) as mock_detect,
+        ) as mock_detect,  # noqa: F841
         patch(
             "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
         ) as mock_soc_controller,

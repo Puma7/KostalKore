@@ -3,9 +3,7 @@
 from datetime import timedelta
 from unittest.mock import Mock
 
-from pykoplenti import SettingsData
 import pytest
-
 from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -17,7 +15,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-
+from pykoplenti import SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 pytestmark = [

@@ -21,7 +21,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import IntEnum, StrEnum
+from enum import IntEnum, StrEnum  # noqa: F401
 from typing import Any, Final
 
 from .helper import (

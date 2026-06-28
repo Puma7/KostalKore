@@ -6,9 +6,9 @@ and provides the data to HA entities and the optional MQTT bridge.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
-import json
 import time
 from datetime import timedelta
 from typing import Any, Final
@@ -21,25 +21,25 @@ from .modbus_client import (
     KostalModbusClient,
     ModbusClientError,
     ModbusConnectionError,
-    ModbusPermanentError,
+    ModbusPermanentError,  # noqa: F401
     ModbusShutdownAbort,
-    ModbusTransientError,
+    ModbusTransientError,  # noqa: F401
 )
 from .modbus_registers import (
-    ALL_REGISTERS,
+    ALL_REGISTERS,  # noqa: F401
     MONITORING_REGISTERS,
+    REG_BATTERY_MGMT_MODE,
+    REG_BATTERY_TYPE,
+    REG_INVERTER_MAX_POWER,
+    REG_INVERTER_STATE,
+    REG_NUM_BIDIRECTIONAL,
+    REG_NUM_PV_STRINGS,
+    REG_PRODUCT_NAME,
+    REG_SERIAL_NUMBER,
+    REG_SW_VERSION,
     Access,
     ModbusRegister,
     RegisterGroup,
-    REG_INVERTER_STATE,
-    REG_INVERTER_MAX_POWER,
-    REG_SERIAL_NUMBER,
-    REG_PRODUCT_NAME,
-    REG_SW_VERSION,
-    REG_NUM_PV_STRINGS,
-    REG_NUM_BIDIRECTIONAL,
-    REG_BATTERY_TYPE,
-    REG_BATTERY_MGMT_MODE,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
