@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cyclically writes registers 1034/1038/1040 — the same registers KORE controls — so
   evcc battery control and an internal KORE controller (SoC controller, GridGuard,
   Block Battery Charging) must not run simultaneously (`PROXY_SETUP.md`, `README.md`).
+- **evcc `batteryMode` register mapping** — `PROXY_SETUP.md` now documents the per-mode
+  register/value mapping (`charge`→1034 negative W, `hold`→1040=0, `holdcharge`→1038=0)
+  and advises configuring `maxchargepower` (W) instead of the deprecated `maxchargerate`
+  (%), plus a minimum-evcc-version caveat (evcc PRs #26169 / #26515 / #27161 / #30853).
+- **evcc `endianness` note** — Documented that the evcc template's `endianness` parameter
+  must match the byte order KORE auto-detects; since evcc PR #30862 a mismatch also
+  corrupts the PV-energy reading (register 1056) (`PROXY_SETUP.md`).
 
 ## [3.0.0] — 2026-05-24 — Production readiness
 

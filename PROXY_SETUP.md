@@ -79,6 +79,10 @@ meters:
   akzeptiert (per `covers:` auf `kostal-plenticore-gen2` gemappt, siehe evcc PR #30854), sollte
   aber für neue Konfigurationen nicht mehr verwendet werden. Prüfe im Zweifel die aktuelle
   evcc-Dokumentation.
+- **`endianness` (Byte-Reihenfolge):** Der `endianness`-Parameter im evcc-Template muss zu der
+  von KORE automatisch erkannten Byte-Reihenfolge des Wechselrichters passen (Default `little` =
+  `float32s`). Seit evcc PR #30862 wirkt sich eine Fehlstellung nicht nur auf die Batterie-Register,
+  sondern auch auf die **PV-Energie** (Reg 1056) aus – bei falschen Energiewerten zuerst hier prüfen.
 
 ### 3. Batteriesteuerung über evcc
 
@@ -103,6 +107,23 @@ evcc kann über den Proxy auch Batterie-Register schreiben. Die relevanten Regis
 > beide um Register 1034/1038 und KORE lehnt die evcc-Writes mit `0x06` (Server Device Busy) ab.
 > Faustregel: **entweder** evcc **oder** ein KORE-Controller steuert die Batterie – nicht beides.
 > Siehe „Write-Arbitration" weiter unten.
+
+**`batteryMode`-Register-Mapping (evcc gen2):**
+
+| evcc-Modus | Register | Wert | Wirkung |
+|------------|----------|------|---------|
+| `normal` | 1034 | `0` | zurück zur Automatik |
+| `charge` | 1034 | `-maxchargepower` (W, **negativ = laden**) | Netzladen mit voller Leistung |
+| `hold` | 1040 | `0` | nur **Entladen** sperren, PV-Laden bleibt erlaubt (evcc PR #26169) |
+| `holdcharge` | 1038 | `0` | nur **Laden** sperren (evcc PR #30853) |
+
+**Hinweise für die evcc-Konfiguration:**
+- Im evcc-Template **`maxchargepower` (Watt)** setzen – **nicht** das veraltete `maxchargerate` (%).
+  Ohne `maxchargepower` meldet aktuelles evcc beim Laden `ErrNotAvailable`; ältere/fehlerhafte
+  evcc-Versionen luden stattdessen nur mit ~100 W (evcc PR #26515 / #27161).
+- **Mindest-evcc-Version:** Force-Charge (#26515) und „Laden während Hold" (#26169) erfordern einen
+  aktuellen evcc-Build. Auf veralteten Versionen kann das Laden im Hold-Modus blockiert bleiben
+  oder die Ladeleistung falsch sein.
 
 ### 4. So funktioniert der Proxy
 
