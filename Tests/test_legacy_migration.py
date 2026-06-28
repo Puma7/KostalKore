@@ -935,3 +935,68 @@ async def test_finalize_cleanup_strips_legacy_domain_from_device_identifiers(has
     assert updated is not None
     assert (LEGACY_DOMAIN, "SER-CLEAN-99") not in updated.identifiers
     assert (DOMAIN, "SER-CLEAN-99") in updated.identifiers
+
+
+async def test_full_migration_then_cleanup_is_forward_compatible_2026_8(hass):
+    """End-to-end migrate + cleanup leaves only the kostal_kore device identifier.
+
+    HA Core 2026.8 makes device identifiers domain-scoped, so a kostal_kore device
+    must not retain a cross-domain ``(kostal_plenticore, serial)`` identifier.
+    Unlike ``test_finalize_cleanup_strips_legacy_domain_from_device_identifiers``
+    (which pre-seeds both identifiers and tests cleanup in isolation), this drives
+    the real pipeline: ``migrate_legacy_plenticore_entry`` merges the kostal_kore
+    identifier onto a legacy-only device (interim dual-identifier state), then
+    ``finalize_legacy_cleanup`` rewrites it domain-clean. Pins that the two-step
+    flow never strands a legacy-domain identifier on the migrated device.
+    """
+    serial = "SER-FWD-2026-8"
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "10.0.0.7", CONF_PASSWORD: "new"},
+    )
+    source_entry = MockConfigEntry(
+        domain=LEGACY_DOMAIN,
+        data={CONF_HOST: "10.0.0.7", CONF_PASSWORD: "old"},
+    )
+    target_entry.add_to_hass(hass)
+    source_entry.add_to_hass(hass)
+
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_or_create(
+        config_entry_id=source_entry.entry_id,
+        identifiers={(LEGACY_DOMAIN, serial)},
+        manufacturer="Kostal",
+        name="Legacy inverter",
+    )
+
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ), patch.object(
+        hass.config_entries, "async_unload", AsyncMock(return_value=True)
+    ):
+        await migrate_legacy_plenticore_entry(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+            remove_source_entry=False,
+        )
+
+    # Interim two-layer state: the device carries BOTH identifiers until cleanup runs.
+    interim = device_registry.async_get(device.id)
+    assert interim is not None
+    assert (DOMAIN, serial) in interim.identifiers
+    assert (LEGACY_DOMAIN, serial) in interim.identifiers
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
+        await finalize_legacy_cleanup(
+            hass,
+            target_entry_id=target_entry.entry_id,
+            source_entry_id=source_entry.entry_id,
+        )
+
+    # Forward-compatible end state: kostal_kore identifier only, no legacy domain.
+    cleaned = device_registry.async_get(device.id)
+    assert cleaned is not None
+    assert (DOMAIN, serial) in cleaned.identifiers
+    assert (LEGACY_DOMAIN, serial) not in cleaned.identifiers
+    assert all(domain == DOMAIN for domain, _ in cleaned.identifiers)

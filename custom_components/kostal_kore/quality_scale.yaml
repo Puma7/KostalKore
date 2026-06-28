@@ -1,4 +1,9 @@
-quality_scale: platinum
+# Tier is gated by the lowest unmet mandatory rule. `test-coverage` (silver) is
+# NOT met: the enforced 100% branch-coverage gate currently spans ~16 of ~57
+# modules (41 are omitted in .coveragerc) — see COVERAGE_ROADMAP.md. Most
+# gold/platinum rules below are individually met; the scale reflects that one
+# open rule rather than the per-rule progress.
+quality_scale: bronze
 rules:
   # ============================================================
   # Bronze (all done)
@@ -80,8 +85,11 @@ rules:
     status: done
     comment: "Implemented via async_step_reauth and async_step_reauth_confirm."
   test-coverage:
-    status: done
-    comment: "100% test coverage across all integration modules (133 tests)."
+    status: todo
+    comment: >-
+      Enforced 100% branch coverage (913 tests) currently covers ~16 of ~57
+      modules; the rest are omitted in .coveragerc. Reaching real all-module
+      coverage is tracked in COVERAGE_ROADMAP.md (Open).
 
   # ============================================================
   # Gold
@@ -150,8 +158,10 @@ rules:
     status: done
     comment: "async_remove_config_entry_device in __init__.py allows removal of stale devices."
   test-coverage-full:
-    status: done
-    comment: "100% test coverage verified with pytest-cov."
+    status: todo
+    comment: >-
+      Not yet met: .coveragerc omits 41 modules from the enforced gate. Tracked
+      in COVERAGE_ROADMAP.md.
 
   # ============================================================
   # Platinum (all done)

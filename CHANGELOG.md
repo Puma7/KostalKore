@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `README.md`) — required for the auto-provided `OptionsFlow.config_entry`
   property, and consistent with the `DataUpdateCoordinator` `config_entry`
   support the integration already assumes.
+- **Honest quality self-assessment** — `quality_scale.yaml` previously claimed
+  `platinum` with `test-coverage`/`test-coverage-full` marked done ("100% across all
+  integration modules, 133 tests"), but `.coveragerc` omits 41 of ~57 modules from the
+  enforced gate. The two coverage rules are now `todo` (pointing at
+  `COVERAGE_ROADMAP.md`), the test count corrected to 913, and the tier set to the
+  honest `bronze` (gated by the open coverage rule; most higher rules are still met
+  individually).
+- **Removed coverage-padding tests** — `Tests/test_platinum_features.py` now keeps only
+  the two behaviour tests (Modbus exception hierarchy and parsing); the `assert True` /
+  `assert hasattr(...)` "platinum feature" tests that verified no behaviour were dropped.
+- **Migration forward-compat coverage** — added an end-to-end
+  migrate → `finalize_legacy_cleanup` test asserting the device ends with only the
+  `kostal_kore` identifier (the domain-scoped state HA 2026.8 requires);
+  `MIGRATION_ARCHITECTURE.md` updated to record that the rewrite is implemented + tested.
 
 ### Security
 - **Workflow token least-privilege** — `ci.yml` and `hacs-validation.yml` now declare
@@ -30,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   virtualenv, uv, filelock, idna). It is never installed or used by KORE (CI installs
   `pykoplenti==1.5.0` from PyPI; `aiohttp` comes from Home Assistant core), so
   removing it clears every alert without changing any shipped dependency.
+- **Modbus proxy bind-address guardrail** — a malformed bind value is coerced to the
+  loopback default in the options flow, and the proxy logs a clear warning when it binds
+  to a non-loopback address (LAN exposure of the inverter control proxy).
 
 ### CI
 - **Test against current Home Assistant Python** — the CI test/typecheck job now runs

@@ -208,6 +208,22 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _normalize_bind_address(value: Any) -> str:
+    """Return a valid IP for the proxy bind, falling back to the safe default.
+
+    A malformed value (typo, hostname, stray whitespace) is coerced to the
+    loopback default so a bad entry can never silently bind the control proxy
+    to an unexpected interface. A valid but non-loopback address is preserved;
+    the proxy logs a LAN-exposure warning when it binds there.
+    """
+    text = str(value).strip()
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return DEFAULT_MODBUS_PROXY_BIND
+    return text
+
+
 def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize options and enforce valid dependencies."""
     modbus_enabled = bool(user_input.get(CONF_MODBUS_ENABLED, False))
@@ -231,7 +247,7 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_MODBUS_PROXY_PORT: int(
             user_input.get(CONF_MODBUS_PROXY_PORT, DEFAULT_MODBUS_PROXY_PORT)
         ),
-        CONF_MODBUS_PROXY_BIND: str(
+        CONF_MODBUS_PROXY_BIND: _normalize_bind_address(
             user_input.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
         ),
         CONF_KSEM_ENABLED: ksem_enabled,
