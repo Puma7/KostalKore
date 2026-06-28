@@ -160,7 +160,7 @@ rules:
   test-coverage-full:
     status: todo
     comment: >-
-      Not yet met: .coveragerc omits 41 modules from the enforced gate. Tracked
+      Not yet met: .coveragerc omits 39 modules from the enforced gate. Tracked
       in COVERAGE_ROADMAP.md.
 
   # ============================================================

@@ -95,7 +95,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - Local network access to the inverter's web interface
 
 ### Software Requirements
-- Home Assistant 2024.11 or newer
+- Home Assistant 2024.12 or newer
 - Python package: `pykoplenti==1.5.0` (automatically installed)
 
 ### Network Requirements
@@ -576,7 +576,7 @@ Contributions are welcome! Please:
 ## Version History
 
 - **Current**: `v2.16.0-alpha.4` (experimental release channel)
-- **Compatibility**: Home Assistant 2024.11+
+- **Compatibility**: Home Assistant 2024.12+
 - **API Support**: Kostal Plenticore local API
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history
 

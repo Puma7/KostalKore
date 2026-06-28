@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   current HA. Surfaced by the new Python 3.14 / current-HA CI leg.
 
 ### Changed
-- **Minimum Home Assistant raised to 2024.11.0** (`manifest.json`, `hacs.json`,
+- **Minimum Home Assistant raised to 2024.12.0** (`manifest.json`, `hacs.json`,
   `README.md`) — required for the auto-provided `OptionsFlow.config_entry`
   property, and consistent with the `DataUpdateCoordinator` `config_entry`
   support the integration already assumes.
@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### CI
 - **Test against current Home Assistant Python** — the CI test/typecheck job now runs
   on a Python matrix: `3.14` (the version current Home Assistant requires, ADR-0020)
-  and `3.12` (the manifest floor, HA 2024.11). Smoke tests now always cover the Python
+  and `3.12` (the manifest floor, HA 2024.12). Smoke tests now always cover the Python
   runtime current HA ships with; bump the upper version when HA raises its minimum
   Python. mypy runs on the floor leg only — current HA source uses Python 3.14-only
   syntax that mypy cannot parse under the 3.12 target.

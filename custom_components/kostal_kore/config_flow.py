@@ -568,9 +568,10 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> KostalPlenticoreOptionsFlow:
         """Return the options flow handler."""
-        # HA >= 2024.11 auto-provides OptionsFlow.config_entry as a read-only
-        # property (assigning it raises AttributeError since HA 2025.12). Do NOT
-        # pass or store it — the framework resolves it from the flow handler.
+        # HA >= 2024.12 auto-provides OptionsFlow.config_entry as a framework
+        # property (assigning it is deprecated from 2024.12 and raises
+        # AttributeError since HA 2025.12). Do NOT pass or store it — the
+        # framework resolves it from the flow handler.
         return KostalPlenticoreOptionsFlow()
 
     async def async_step_user(
@@ -689,7 +690,7 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._async_abort_entries_match({CONF_HOST: connection_result.host})
                 # _get_reconfigure_entry() was added in HA 2024.4; we read the
                 # entry from the flow context directly, which works on every
-                # supported HA version (declared minimum 2024.11).
+                # supported HA version (declared minimum 2024.12).
                 _entry_id = self.context.get("entry_id")
                 _reconf_entry = (
                     self.hass.config_entries.async_get_entry(_entry_id)
@@ -768,9 +769,10 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         """Initialize options flow.
 
-        ``config_entry`` is intentionally NOT stored: Home Assistant >= 2024.11
-        exposes it as a read-only property on ``OptionsFlow`` (assigning it raises
-        ``AttributeError`` since HA 2025.12). Access it via ``self.config_entry``,
+        ``config_entry`` is intentionally NOT stored: Home Assistant >= 2024.12
+        exposes it as a property on ``OptionsFlow`` (assigning it is deprecated
+        from 2024.12 and raises ``AttributeError`` since HA 2025.12). Access it
+        via ``self.config_entry``,
         which the framework resolves from the flow handler.
         """
         self._user_input: dict[str, Any] = {}

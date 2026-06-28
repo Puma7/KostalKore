@@ -620,7 +620,7 @@ async def test_number_setup_migration_and_error_branches(hass: HomeAssistant) ->
     )
 
     entry = _mock_entry()
-    # HA >= 2024.11 rejects linking entities to an unregistered config entry.
+    # Current Home Assistant rejects linking entities to an unregistered config entry.
     entry.add_to_hass(hass)
     plenticore = SimpleNamespace(
         available_modules=["devices:local"],

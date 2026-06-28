@@ -28,7 +28,7 @@ Uses strict mode per `mypy.ini`. Should report zero issues.
 - No lockfile exists; `requirements_test.txt` lists unpinned test deps.
 
 ### CI Python versions
-CI (`.github/workflows/ci.yml`) runs the test + mypy job on a Python matrix: **3.14** — the Python version current Home Assistant requires (HA pins one Python minor at a time per ADR-0020; 3.14 since HA 2026.3) — and **3.12** — our manifest floor (`homeassistant: 2024.11.0`). The 3.14 leg keeps the smoke tests aligned with the runtime real users are on; **bump it whenever Home Assistant raises its minimum Python**. `pytest-homeassistant-custom-component` is unpinned, so the 3.12 leg resolves an older HA build (floor coverage) while 3.14 pulls current HA.
+CI (`.github/workflows/ci.yml`) runs the test + mypy job on a Python matrix: **3.14** — the Python version current Home Assistant requires (HA pins one Python minor at a time per ADR-0020; 3.14 since HA 2026.3) — and **3.12** — our manifest floor (`homeassistant: 2024.12.0`). The 3.14 leg keeps the smoke tests aligned with the runtime real users are on; **bump it whenever Home Assistant raises its minimum Python**. `pytest-homeassistant-custom-component` is unpinned, so the 3.12 leg resolves an older HA build (floor coverage) while 3.14 pulls current HA.
 
 ### Notes
 - This is not a standalone application. It is a Home Assistant plugin tested entirely via pytest with mocked HA internals.

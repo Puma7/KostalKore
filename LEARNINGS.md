@@ -2144,24 +2144,37 @@ minimum HA is 2024.11+ (already done — `b14a160`).
 2024.1–2024.3 users. The reconfigure step now reads `self.config_entry`
 directly from the context dict.
 
-### Related: `OptionsFlow.config_entry` is a read-only property since HA 2024.11
+### Related: `OptionsFlow.config_entry` became an auto-provided property in HA 2024.12
 
-**CORRECTION — this was previously documented backwards.** HA 2024.11 made
-`OptionsFlow.config_entry` an auto-provided property (resolved from the flow
-handler); HA 2025.12 made it **read-only**, so assigning `self.config_entry`
-raises `AttributeError: property 'config_entry' ... has no setter`. The earlier
-"require `config_entry` in `__init__` and assign it" approach therefore broke on
-current HA — caught only once CI started running on the Python 3.14 / current-HA
-matrix leg (the Python 3.12 leg pulls an older HA where the assignment is merely
-a `DeprecationWarning`, which `pytest.ini` ignores).
+Verified against the HA source (`homeassistant/config_entries.py` at the release
+tags): the **base** `OptionsFlow` class first gained the auto-provided
+`config_entry` property (resolved from `self.handler`) in **HA 2024.12.0** — with
+a *deprecating* setter. In **2024.11.0** only the separate
+`OptionsFlowWithConfigEntry` subclass had it; the base class did not, so reading
+`self.config_entry` from a plain `OptionsFlow` raises `AttributeError`. The setter
+was removed in **HA 2025.12.0**, making the property truly read-only, so assigning
+`self.config_entry` now raises `AttributeError: property 'config_entry' ... has no
+setter`.
+
+The earlier "require `config_entry` in `__init__` and assign it" approach therefore
+broke on current HA — caught only once CI started running on the Python 3.14 /
+current-HA matrix leg (the Python 3.12 leg pulls an older HA where the assignment
+is merely a `DeprecationWarning`, which `pytest.ini` ignores).
 
 Fix: `KostalPlenticoreOptionsFlow.__init__` takes **no** `config_entry`, never
 assigns it, and reads `self.config_entry` (the framework property);
 `async_get_options_flow` returns `KostalPlenticoreOptionsFlow()`. This relies on
-the auto-provided property, so the minimum HA was raised to **2024.11.0**
-(`manifest.json` + `hacs.json`) — which also matches the `DataUpdateCoordinator`
-`config_entry` kwarg availability discussed above. Direct test instantiations were
-updated to the no-arg constructor.
+the auto-provided property, so the minimum HA was raised to **2024.12.0**
+(`manifest.json` + `hacs.json`). That floor also covers the `DataUpdateCoordinator`
+`config_entry` kwarg (available since 2024.11) discussed above. Direct test
+instantiations were updated to the no-arg constructor.
+
+**Correction history / lesson:** this section *and the manifest floor* originally
+said **2024.11**, which was wrong — the base-class property is 2024.12. A PR
+reviewer flagged that a no-arg options flow would `AttributeError` on 2024.11, and
+diffing the 2024.11.0 vs 2024.12.0 tags of `config_entries.py` confirmed it. Pin a
+compat floor to the version you have **verified in the upstream source at that tag**,
+not the version you remember a feature "arriving around".
 
 **Lesson:** a compat assumption that only the latest HA exercises is invisible
 until CI actually runs on that HA version. This is exactly why the smoke tests
