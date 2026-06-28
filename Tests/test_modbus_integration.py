@@ -509,6 +509,8 @@ async def test_options_flow_schedules_reload_without_modbus(
     mock_config_entry.add_to_hass(hass)
     flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
+    # config_entry is resolved from the handler on HA >= 2024.11.
+    flow.handler = mock_config_entry.entry_id
 
     with patch.object(
         hass.config_entries, "async_schedule_reload"
