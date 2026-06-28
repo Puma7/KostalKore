@@ -9,6 +9,18 @@ on:
 jobs:
   test-and-typecheck:
     runs-on: ubuntu-latest
+    name: test (py${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Home Assistant pins a single Python minor version at a time (ADR-0020);
+        # since HA 2026.3 that is Python 3.14. We test against BOTH:
+        #   - "3.14": the Python version current Home Assistant ships with, so the
+        #     smoke tests always cover the runtime real users are on. Bump this
+        #     whenever Home Assistant raises its required Python version.
+        #   - "3.12": our manifest floor (homeassistant: 2024.1.0 -> Python 3.11/3.12),
+        #     so we do not regress on the oldest HA release we still support.
+        python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,7 +28,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "${{ matrix.python-version }}"
 
       - name: Install dependencies
         run: |

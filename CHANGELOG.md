@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CI
+- **Test against current Home Assistant Python** — the CI test/typecheck job now runs
+  on a Python matrix: `3.14` (the version current Home Assistant requires, ADR-0020)
+  and `3.12` (the manifest floor, HA 2024.1). Smoke tests now always cover the Python
+  runtime current HA ships with; bump the upper version when HA raises its minimum
+  Python.
+
 ### Docs
 - **evcc proxy guide** — `PROXY_SETUP.md` now recommends the `kostal-plenticore-gen2`
   template for **all** inverter generations (G1/G2/G3); the legacy `kostal-plenticore`
