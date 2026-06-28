@@ -337,7 +337,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 soc_controller=soc_controller,
                 installer_access=installer_access,
             )
-            await mqtt_bridge.async_start()
 
         if modbus_coordinator and entry.options.get(  # pragma: no cover
             CONF_MODBUS_PROXY_ENABLED, False
@@ -542,6 +541,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     entry_store = hass.data[DOMAIN][entry.entry_id]
     if battery_soh_calc is not None:
         entry.async_on_unload(battery_soh_calc.cancel_pending_save)
+
+    # Start the optional MQTT bridge only after it is registered in entry_store,
+    # so a failure in any later setup step — or an unload while the bridge is in
+    # its self-healing retry loop — can always reach and cancel its background
+    # retry task via _rollback_setup() / async_unload_entry(). async_start()
+    # itself self-heals broker errors in the background; this guard additionally
+    # swallows any unexpected error so the integration setup still proceeds
+    # without the optional bridge.
+    if mqtt_bridge is not None:
+        try:
+            await mqtt_bridge.async_start()
+        except Exception:  # noqa: BLE001 - optional bridge must not break setup
+            _LOGGER.exception("MQTT bridge failed to start; continuing without it.")
 
     trace.phase_begin("platform_forward", platforms=[p.value for p in PLATFORMS])
     try:

@@ -8,6 +8,7 @@ from types import ModuleType  # noqa: F401
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from kostal_plenticore.modbus_registers import (
     REGISTER_BY_NAME,  # noqa: F401
@@ -156,6 +157,84 @@ class TestBridgeStartWithMqtt:
                 retain=True,
             )
             assert bridge._started is False
+
+
+class TestBridgeStartSelfHealing:
+    """A broker error at start must not abort setup; the bridge self-heals."""
+
+    @pytest.mark.asyncio
+    async def test_start_defers_and_schedules_retry_on_broker_error(self) -> None:
+        hass = _mock_hass(mqtt_available=True)
+        scheduled = []
+
+        def _bg(coro, name=None):
+            scheduled.append(coro)
+            return MagicMock()
+
+        hass.async_create_background_task = MagicMock(side_effect=_bg)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+        mock_mqtt.async_publish = AsyncMock(
+            side_effect=HomeAssistantError("mqtt_broker_error")
+        )
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            # Must NOT raise even though the broker rejects the first publish.
+            await bridge.async_start()
+
+        assert bridge._started is False
+        assert bridge._start_retry_task is not None
+        assert len(scheduled) == 1
+        # No partial wiring left behind by the failed attempt.
+        assert bridge._unsub_command == []
+        assert bridge._unsub_coordinator is None
+        # Close the captured retry coroutine to avoid "never awaited" warnings.
+        scheduled[0].close()
+
+    @pytest.mark.asyncio
+    async def test_retry_loop_recovers_when_broker_returns(self) -> None:
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+        attempts = {"n": 0}
+
+        async def _publish(*_args, **_kwargs):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise HomeAssistantError("mqtt_broker_error")
+
+        mock_mqtt.async_publish = AsyncMock(side_effect=_publish)
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}), \
+                patch("asyncio.sleep", new=AsyncMock()):
+            await bridge._start_retry_loop()
+
+        assert bridge._started is True
+        assert bridge._unsub_coordinator is not None
+
+    @pytest.mark.asyncio
+    async def test_try_start_rolls_back_partial_wiring_on_unexpected_error(self) -> None:
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+        # Subscriptions + listener succeed, then an unexpected (non-broker) error
+        # occurs during metadata publish. The partial wiring must be rolled back
+        # and the error re-raised so the setup guard can log-and-continue.
+        mock_mqtt.async_publish = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            with pytest.raises(RuntimeError):
+                await bridge._try_start()
+
+        assert bridge._started is False
+        assert bridge._unsub_command == []
+        assert bridge._unsub_coordinator is None
 
 
 class TestCommandHandling:

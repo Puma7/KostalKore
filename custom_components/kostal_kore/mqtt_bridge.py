@@ -47,6 +47,7 @@ import time
 from typing import Any, Final
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 
 from .helper import (
     dc_pv_power_to_ac_estimate_w,
@@ -77,6 +78,14 @@ SAFE_WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
 
 TOPIC_PREFIX: Final[str] = "kostal_kore"
 QOS: Final[int] = 1
+
+# Self-healing start: if the MQTT broker is not reachable when the integration
+# sets up (e.g. the MQTT integration finishes connecting after this one, or a
+# CPU-loaded startup delays the broker), the bridge retries in the background
+# with exponential backoff instead of aborting the whole integration setup.
+_RETRY_INITIAL_DELAY: Final[float] = 5.0
+_RETRY_MAX_DELAY: Final[float] = 300.0
+_RETRY_MAX_ATTEMPTS: Final[int] = 12
 
 RATE_LIMIT_SECONDS: Final[float] = 1.0
 
@@ -120,6 +129,7 @@ class KostalMqttBridge:
         self._last_write: dict[str, float] = {}
         self._write_lock = asyncio.Lock()
         self._publish_task: asyncio.Task[None] | None = None
+        self._start_retry_task: asyncio.Task[None] | None = None
         self._command_count: int = 0
         self._rate_limited_count: int = 0
 
@@ -132,7 +142,14 @@ class KostalMqttBridge:
     # ------------------------------------------------------------------
 
     async def async_start(self) -> None:
-        """Start publishing data and subscribing to commands."""
+        """Start the bridge, self-healing if the broker is not yet reachable.
+
+        A broker that is briefly unavailable at setup time (e.g. the MQTT
+        integration finishing its connection after this one, or a CPU-loaded
+        startup) must never abort the whole integration. The first attempt runs
+        immediately; if it fails, a background task retries with backoff until
+        the broker is reachable.
+        """
         if self._started:
             return
 
@@ -143,40 +160,140 @@ class KostalMqttBridge:
             )
             return
 
+        if await self._try_start():
+            return
+
+        _LOGGER.warning(
+            "MQTT broker not reachable yet – the Modbus MQTT bridge will start "
+            "automatically once the broker is available (retrying in background)."
+        )
+        self._schedule_start_retry()
+
+    async def _try_start(self) -> bool:
+        """Attempt to bring the bridge up. Return True on success.
+
+        Ordering matters: subscriptions and the retained register config are
+        wired up first, and the retained ``available = online`` is published
+        **last** as the commit point. On any error every partial step is rolled
+        back, so a failed attempt never leaves a stale retained "online" or
+        orphaned subscriptions, and the exception never escapes to abort
+        integration setup.
+        """
         from homeassistant.components import mqtt  # noqa: E402
 
-        await mqtt.async_publish(  # type: ignore[attr-defined]
-            self._hass, f"{self._topic_base}/available", "online", QOS, retain=True,
-        )
+        try:
+            for reg in SAFE_WRITABLE_REGISTERS:
+                topic = f"{self._topic_base}/command/{reg.name}"
+                unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
+                    self._hass, topic, self._handle_command, QOS,
+                )
+                self._unsub_command.append(unsub)
 
-        for reg in SAFE_WRITABLE_REGISTERS:
-            topic = f"{self._topic_base}/command/{reg.name}"
-            unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
-                self._hass, topic, self._handle_command, QOS,
+            for proxy_name in PROXY_COMMAND_MAP:
+                topic = f"{self._proxy_base}/command/{proxy_name}"
+                unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
+                    self._hass, topic, self._handle_proxy_command, QOS,
+                )
+                self._unsub_command.append(unsub)
+
+            self._unsub_coordinator = self._coordinator.async_add_listener(
+                self._on_coordinator_update
             )
-            self._unsub_command.append(unsub)
 
-        for proxy_name in PROXY_COMMAND_MAP:
-            topic = f"{self._proxy_base}/command/{proxy_name}"
-            unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
-                self._hass, topic, self._handle_proxy_command, QOS,
+            await self._publish_register_metadata()
+
+            # Announce availability LAST, after everything is wired up, so a
+            # failure in any step above never leaves a stale retained "online"
+            # behind once the partial start is rolled back.
+            await mqtt.async_publish(  # type: ignore[attr-defined]
+                self._hass, f"{self._topic_base}/available", "online", QOS, retain=True,
             )
-            self._unsub_command.append(unsub)
-
-        self._unsub_coordinator = self._coordinator.async_add_listener(
-            self._on_coordinator_update
-        )
-        self._started = True
-
-        await self._publish_register_metadata()
+            self._started = True
+        except asyncio.CancelledError:
+            # Unload/cancel during a retry attempt: undo any partial wiring so no
+            # stale subscriptions stay attached to a coordinator being torn down.
+            self._rollback_partial_start()
+            raise
+        except HomeAssistantError as err:
+            _LOGGER.debug(
+                "MQTT bridge start attempt failed (broker not ready yet): %s", err
+            )
+            self._rollback_partial_start()
+            return False
+        except Exception:
+            # Any other unexpected error: roll back partial wiring before it
+            # propagates, so async_setup_entry's guard can log-and-continue
+            # without leaving stale subscriptions/listener attached to the
+            # coordinator (async_stop() returns early while _started is False).
+            self._rollback_partial_start()
+            raise
 
         _LOGGER.info(
             "MQTT proxy bridge started – publishing to %s/# and %s/#",
             self._topic_base, self._proxy_base,
         )
+        return True
+
+    def _rollback_partial_start(self) -> None:
+        """Undo any partial wiring left by a failed start attempt."""
+        if self._unsub_coordinator is not None:
+            self._unsub_coordinator()
+            self._unsub_coordinator = None
+        for unsub in self._unsub_command:
+            unsub()
+        self._unsub_command.clear()
+        self._started = False
+
+    def _schedule_start_retry(self) -> None:
+        """Schedule the background self-healing start loop (idempotent)."""
+        if self._start_retry_task is not None and not self._start_retry_task.done():
+            return
+        self._start_retry_task = self._hass.async_create_background_task(
+            self._start_retry_loop(), name="kostal_kore_mqtt_bridge_start_retry"
+        )
+
+    async def _start_retry_loop(self) -> None:
+        """Retry starting the bridge until the broker becomes reachable."""
+        delay: float = _RETRY_INITIAL_DELAY
+        attempt = 0
+        try:
+            while not self._started and attempt < _RETRY_MAX_ATTEMPTS:
+                attempt += 1
+                await asyncio.sleep(delay)
+                if not _has_mqtt(self._hass):
+                    _LOGGER.debug(
+                        "MQTT integration unloaded – stopping bridge start retry."
+                    )
+                    return
+                if await self._try_start():
+                    _LOGGER.info(
+                        "MQTT bridge recovered: started on retry attempt %d.", attempt
+                    )
+                    return
+                delay = min(delay * 2, _RETRY_MAX_DELAY)
+            if not self._started:
+                _LOGGER.warning(
+                    "MQTT bridge could not start after %d attempts. It will start "
+                    "on the next reload once the MQTT broker is healthy.", attempt
+                )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._start_retry_task = None
 
     async def async_stop(self) -> None:
         """Stop the bridge and publish offline status."""
+        retry_task = self._start_retry_task
+        if retry_task is not None and not retry_task.done():
+            retry_task.cancel()
+            try:
+                await retry_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # defensive: teardown must never raise
+                pass
+        self._start_retry_task = None
+
         if not self._started:
             return
 
