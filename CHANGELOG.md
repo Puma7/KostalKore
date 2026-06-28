@@ -22,9 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   support the integration already assumes.
 - **Honest quality self-assessment** — `quality_scale.yaml` previously claimed
   `platinum` with `test-coverage`/`test-coverage-full` marked done ("100% across all
-  integration modules, 133 tests"), but `.coveragerc` omits 41 of ~57 modules from the
+  integration modules, 133 tests"), but `.coveragerc` omits 40 of 56 modules from the
   enforced gate. The two coverage rules are now `todo` (pointing at
-  `COVERAGE_ROADMAP.md`), the test count corrected to 913, and the tier set to the
+  `COVERAGE_ROADMAP.md`), the test count corrected to 906, and the tier set to the
   honest `bronze` (gated by the open coverage rule; most higher rules are still met
   individually).
 - **Removed coverage-padding tests** — `Tests/test_platinum_features.py` now keeps only
