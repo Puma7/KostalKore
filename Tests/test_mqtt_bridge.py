@@ -216,6 +216,26 @@ class TestBridgeStartSelfHealing:
         assert bridge._started is True
         assert bridge._unsub_coordinator is not None
 
+    @pytest.mark.asyncio
+    async def test_try_start_rolls_back_partial_wiring_on_unexpected_error(self) -> None:
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+        # Subscriptions + listener succeed, then an unexpected (non-broker) error
+        # occurs during metadata publish. The partial wiring must be rolled back
+        # and the error re-raised so the setup guard can log-and-continue.
+        mock_mqtt.async_publish = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            with pytest.raises(RuntimeError):
+                await bridge._try_start()
+
+        assert bridge._started is False
+        assert bridge._unsub_command == []
+        assert bridge._unsub_coordinator is None
+
 
 class TestCommandHandling:
     """Test inbound MQTT command processing."""

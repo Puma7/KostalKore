@@ -220,6 +220,13 @@ class KostalMqttBridge:
             )
             self._rollback_partial_start()
             return False
+        except Exception:
+            # Any other unexpected error: roll back partial wiring before it
+            # propagates, so async_setup_entry's guard can log-and-continue
+            # without leaving stale subscriptions/listener attached to the
+            # coordinator (async_stop() returns early while _started is False).
+            self._rollback_partial_start()
+            raise
 
         _LOGGER.info(
             "MQTT proxy bridge started – publishing to %s/# and %s/#",
