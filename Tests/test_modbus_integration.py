@@ -55,7 +55,7 @@ async def test_options_flow_modbus_disabled_saves_directly(
 
     from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
-    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
     flow.handler = mock_config_entry.entry_id
 
@@ -160,7 +160,7 @@ async def test_options_flow_modbus_test_confirm_saves(
 
     from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
-    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
     flow.handler = mock_config_entry.entry_id
     flow._user_input = {
@@ -507,7 +507,7 @@ async def test_options_flow_schedules_reload_without_modbus(
     from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
 
     mock_config_entry.add_to_hass(hass)
-    flow = KostalPlenticoreOptionsFlow(mock_config_entry)
+    flow = KostalPlenticoreOptionsFlow()
     flow.hass = hass
 
     with patch.object(

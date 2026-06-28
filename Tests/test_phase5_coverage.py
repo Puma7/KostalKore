@@ -790,6 +790,9 @@ async def test_select_registry_migration_and_methods(
         client=SimpleNamespace(set_setting_values=AsyncMock()),
     )
     mock_config_entry.runtime_data = plenticore
+    # HA >= 2024.11 rejects linking entities to a config entry that is not
+    # registered with hass (ValueError "unknown config entry"), so register it.
+    mock_config_entry.add_to_hass(hass)
 
     async def _empty_settings(_plenticore, _op):
         return {}
@@ -1056,6 +1059,7 @@ async def test_select_registry_migration_update_error(
         client=MagicMock(),
     )
     mock_config_entry.runtime_data = plenticore
+    mock_config_entry.add_to_hass(hass)
 
     async def _empty_settings(_plenticore, _op):
         return {}
@@ -1209,6 +1213,7 @@ async def test_select_registry_migration_old_entry_only(
         client=MagicMock(),
     )
     mock_config_entry.runtime_data = plenticore
+    mock_config_entry.add_to_hass(hass)
 
     async def _empty_settings(_plenticore, _op):
         return {}

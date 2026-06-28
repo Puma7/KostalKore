@@ -553,7 +553,10 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> KostalPlenticoreOptionsFlow:
         """Return the options flow handler."""
-        return KostalPlenticoreOptionsFlow(config_entry)
+        # HA >= 2024.11 auto-provides OptionsFlow.config_entry as a read-only
+        # property (assigning it raises AttributeError since HA 2025.12). Do NOT
+        # pass or store it — the framework resolves it from the flow handler.
+        return KostalPlenticoreOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -669,8 +672,9 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors = _handle_config_flow_error(err, "reconfigure")
             else:
                 self._async_abort_entries_match({CONF_HOST: connection_result.host})
-                # _get_reconfigure_entry() was added in HA 2024.4; inline it so
-                # the integration works on HA >= 2024.1 (our declared minimum).
+                # _get_reconfigure_entry() was added in HA 2024.4; we read the
+                # entry from the flow context directly, which works on every
+                # supported HA version (declared minimum 2024.11).
                 _entry_id = self.context.get("entry_id")
                 _reconf_entry = (
                     self.hass.config_entries.async_get_entry(_entry_id)
@@ -746,9 +750,14 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 class KostalPlenticoreOptionsFlow(OptionsFlow):
     """Handle Modbus/MQTT options in the post-setup configuration panel."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+    def __init__(self) -> None:
+        """Initialize options flow.
+
+        ``config_entry`` is intentionally NOT stored: Home Assistant >= 2024.11
+        exposes it as a read-only property on ``OptionsFlow`` (assigning it raises
+        ``AttributeError`` since HA 2025.12). Access it via ``self.config_entry``,
+        which the framework resolves from the flow handler.
+        """
         self._user_input: dict[str, Any] = {}
 
     async def async_step_init(
