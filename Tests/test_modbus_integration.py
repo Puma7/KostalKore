@@ -471,6 +471,75 @@ async def test_setup_entry_mqtt_bridge_enabled(
     await hass.async_block_till_done()
 
 
+async def test_setup_entry_mqtt_bridge_start_error_does_not_fail_setup(
+    hass: HomeAssistant,
+) -> None:
+    """An unexpected bridge start error is swallowed; integration setup still succeeds."""
+    from homeassistant.helpers.device_registry import DeviceInfo
+
+    class _DummyPlenticoreWithIds:
+        def __init__(self, *_args):
+            self.device_info = DeviceInfo(
+                identifiers={(DOMAIN, "SN-START-ERR")},
+                manufacturer="Kostal",
+                name="scb",
+            )
+            self._request_scheduler = None
+
+        async def async_setup(self):
+            return True
+
+        async def async_unload(self):
+            pass
+
+    entry = MockConfigEntry(
+        entry_id="mqtt_bridge_start_error",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_enabled": True, "modbus_port": 1502, "modbus_unit_id": 71,
+                 "modbus_endianness": "little", "mqtt_bridge_enabled": True},
+    )
+    entry.add_to_hass(hass)
+
+    mock_modbus_coord = MagicMock()
+    mock_modbus_coord.async_setup = AsyncMock()
+    mock_modbus_coord.async_shutdown = AsyncMock()
+    mock_modbus_coord._restore_isolation_sample = AsyncMock()
+
+    mock_bridge = MagicMock()
+    # Simulate an unexpected (non-broker) error escaping async_start().
+    mock_bridge.async_start = AsyncMock(side_effect=RuntimeError("unexpected bridge boom"))
+    mock_bridge.async_stop = AsyncMock()
+
+    mock_soc = MagicMock()
+    mock_soc.stop = AsyncMock()
+
+    with (
+        patch("custom_components.kostal_kore.__init__.Plenticore", _DummyPlenticoreWithIds),
+        patch("custom_components.kostal_kore.__init__.KostalModbusClient"),
+        patch(
+            "custom_components.kostal_kore.__init__.ModbusDataUpdateCoordinator",
+            return_value=mock_modbus_coord,
+        ),
+        patch(
+            "custom_components.kostal_kore.battery_soc_controller.BatterySocController",
+            return_value=mock_soc,
+        ),
+        patch(
+            "custom_components.kostal_kore.__init__.KostalMqttBridge",
+            return_value=mock_bridge,
+        ),
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        # Setup must SUCCEED despite the bridge raising an unexpected error.
+        assert await kp_init.async_setup_entry(hass, entry) is True
+
+    mock_bridge.async_start.assert_called_once()
+
+
 async def test_unload_entry_with_modbus_data(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
