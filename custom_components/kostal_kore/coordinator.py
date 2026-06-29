@@ -37,9 +37,11 @@ from .helper import (
     ModbusMemoryParityError,  # noqa: F401
     ModbusServerDeviceBusyError,
     ModbusServerDeviceFailureError,  # noqa: F401
+    firmware_at_least,
     get_hostname_id,
     is_allowed_write_target,
     is_rest_write_supported_target,
+    parse_firmware_version,
     parse_modbus_exception,
     requires_advanced_write_arm,
     validate_cross_field_write_rules,
@@ -368,6 +370,18 @@ class Plenticore:
         serial_no = device_local.get("Properties:SerialNo", "unknown")
         version_ioc = device_local.get("Properties:VersionIOC", "unknown")
         version_mc = device_local.get("Properties:VersionMC", "unknown")
+
+        # Heads-up: native Smart AC Charge is default-on since FW 3.05. If KORE's
+        # Modbus battery control runs alongside it, the two can fight over the
+        # battery. We only log here; coexistence handling is tracked separately.
+        firmware_version = parse_firmware_version(version_mc)
+        if firmware_at_least(firmware_version, 3, 5):
+            _LOGGER.debug(
+                "Inverter firmware %s (>= 3.05): native battery control "
+                "(Smart AC Charge) is default-on; ensure it does not conflict "
+                "with KORE's Modbus battery control.",
+                version_mc,
+            )
 
         network_settings = settings.get("scb:network", {})
         hostname = network_settings.get(hostname_id, self.host)

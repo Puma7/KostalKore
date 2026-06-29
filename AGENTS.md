@@ -32,6 +32,7 @@ CI (`.github/workflows/ci.yml`) runs the test + mypy job on a Python matrix: **3
 
 ### Notes
 - This is not a standalone application. It is a Home Assistant plugin tested entirely via pytest with mocked HA internals.
+- **Battery-control coexistence**: KORE is single-inverter and drives the battery over Modbus (REG 1034/1038, G3 1280/1282) with a 15s keepalive, arbitrated only against itself and external Modbus clients — NOT against the inverter's own firmware control. Native Smart AC Charge (default-on since FW 3.05), native scheduling/dynamic-tariff modes, MDC battery control (FW 3.06.10+), and EEBus can all fight KORE. Items needing real-hardware validation before further coexistence work are tracked in `HARDWARE_VALIDATION_TODO.md`.
 - No GUI, no dev server, no build step. The "hello world" is running the test suite successfully.
 - `develop` is the default working branch; `main` reflects tagged releases.
 - `pymodbus>=3.6` is listed in `manifest.json` but not in `requirements_test.txt`; the update script installs it separately.

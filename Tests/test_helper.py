@@ -26,12 +26,14 @@ from custom_components.kostal_kore.helper import (
     battery_efficiency_measurement_quality,
     dc_pv_power_to_ac_estimate_w,
     ensure_installer_access,
+    firmware_at_least,
     generate_confirmation_code,
     get_hostname_id,
     integration_entry_store,
     is_battery_control,
     normalize_isolation_resistance_ohm,
     optional_float,
+    parse_firmware_version,
     parse_modbus_exception,
     requires_installer_service_code,
     safe_home_power_w,
@@ -425,3 +427,26 @@ def test_battery_efficiency_measurement_quality() -> None:
     assert battery_efficiency_measurement_quality(1.0, 95.0) == "mostly_ac"
     assert battery_efficiency_measurement_quality(5.0, 5.0) == "mixed"
     assert battery_efficiency_measurement_quality(0.0, 0.0) == "no_charge"
+
+
+def test_parse_firmware_version() -> None:
+    # Real Kostal strings (zero-padded) and a short form.
+    assert parse_firmware_version("03.05.00.20534") == (3, 5, 0)
+    assert parse_firmware_version("03.06.10.24915") == (3, 6, 10)
+    assert parse_firmware_version("3.6.10") == (3, 6, 10)
+    # Unparseable / missing -> None (treated as "unknown firmware").
+    assert parse_firmware_version(None) is None
+    assert parse_firmware_version("") is None
+    assert parse_firmware_version("unknown") is None
+    assert parse_firmware_version("03.05") is None
+    assert parse_firmware_version("a.b.c") is None
+
+
+def test_firmware_at_least() -> None:
+    assert firmware_at_least((3, 5, 0), 3, 5) is True
+    assert firmware_at_least((3, 5, 0), 3, 5, 0) is True  # equal
+    assert firmware_at_least((3, 6, 10), 3, 5) is True
+    assert firmware_at_least((3, 4, 2), 3, 5) is False
+    assert firmware_at_least((3, 5, 0), 3, 5, 1) is False  # patch gate
+    # Unknown firmware is fail-safe: never assume a newer feature is present.
+    assert firmware_at_least(None, 3, 5) is False

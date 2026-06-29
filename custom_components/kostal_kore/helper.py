@@ -26,6 +26,39 @@ _KNOWN_HOSTNAME_IDS: Final[tuple[str, ...]] = (SettingId.HOSTNAME, "Hostname")
 HOSTNAME_ID_TIMEOUT_SECONDS: Final[float] = 30.0
 DEFAULT_CONFIRMATION_CODE_LEN: Final[int] = 6
 DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def parse_firmware_version(raw: str | None) -> tuple[int, int, int] | None:
+    """Parse a Kostal firmware string like ``'03.05.00.20534'`` to ``(3, 5, 0)``.
+
+    Returns ``None`` for missing or unparseable values (e.g. ``'unknown'`` or a
+    string with fewer than three dotted parts) so callers can treat unknown
+    firmware as "no version-gated behaviour" rather than guessing.
+    """
+    if not raw:
+        return None
+    parts = raw.strip().split(".")
+    if len(parts) < 3:
+        return None
+    try:
+        return (int(parts[0]), int(parts[1]), int(parts[2]))
+    except (TypeError, ValueError):
+        return None
+
+
+def firmware_at_least(
+    version: tuple[int, int, int] | None, major: int, minor: int, patch: int = 0
+) -> bool:
+    """Return ``True`` when parsed ``version`` is >= ``(major, minor, patch)``.
+
+    An unknown (``None``) version returns ``False`` — fail-safe, so we never
+    assume a newer-firmware feature is present when we cannot prove it.
+    """
+    if version is None:
+        return False
+    return version >= (major, minor, patch)
+
+
 # Safety-first heuristic: only treat very small active-PV values as kOhm-reported.
 # This avoids masking critical low-ohm readings (e.g. 5000 Ohm).
 ISOLATION_KOHM_HEURISTIC_MAX: Final[float] = 1000.0
