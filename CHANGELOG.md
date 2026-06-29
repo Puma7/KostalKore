@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.3] — 2026-06-28 — Firmware-coexistence hardening (G3 changelog follow-ups)
+## [3.0.3] — 2026-06-29 — Firmware-coexistence hardening (G3 changelog follow-ups)
 
 Hardening based on a review of the Kostal PLENTICORE G3 firmware changelog (up to
 FW 3.06.10). No functional change to normal monitoring/control; adds awareness and
