@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.3] — 2026-06-29 — Firmware-coexistence hardening (G3 changelog follow-ups)
+
+Hardening based on a review of the Kostal PLENTICORE G3 firmware changelog (up to
+FW 3.06.10). No functional change to normal monitoring/control; adds awareness and
+diagnostics for cases where the inverter's own firmware now controls the battery.
+
+### Added
+- **Firmware-version awareness** — `parse_firmware_version()` / `firmware_at_least()`
+  helpers; the coordinator now logs a heads-up on firmware ≥ 3.05 (where native
+  Smart AC Charge is default-on) so battery-control conflicts are easier to diagnose.
+- **Setpoint-divergence warning** — the SoC controller now reads back actual battery
+  power and logs a warning (read-only, never affects control) when the battery moves
+  opposite to the commanded direction for several cycles — a likely sign that another
+  controller (native Smart AC Charge, a native battery schedule, MDC, or a §14a import
+  cap) is overriding KORE.
+
+### Changed
+- Documented battery-control coexistence limits in `README.md` (single inverter; do not
+  run KORE's Modbus battery control alongside native Smart AC Charge / time-control /
+  dynamic-tariff modes, MDC battery control, or EEBus; §14a import limit throttles
+  grid-charging). Added an `AGENTS.md` note.
+- Protective comment on Modbus register 588 (battery type): it is intentionally `UINT16`
+  (Kostal corrected it u32→u16 in FW 3.04.01); do not revert to `UINT32`.
+
+### Notes
+- Verified non-issues (no change needed): reg 588 already read as u16; the FW-3.05 Modbus
+  max charge/discharge registers (1280/1282) are already implemented; 21 kW/13.5 kW and
+  ≤820 V are not clipped.
+- Follow-ups that require real-hardware validation (auto-disabling native battery levers,
+  native-mode/MDC detection, SunSpec-802 SoH, HELIVOR mapping) are tracked in
+  `HARDWARE_VALIDATION_TODO.md`.
+
 ## [3.0.2] — 2026-06-28 — Self-healing MQTT bridge startup
 
 ### Fixed

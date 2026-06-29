@@ -237,7 +237,8 @@ itself runs the 5 s loop independently.
 - **DC string count**: The number of DC inputs (PV strings) is detected automatically on first setup. Changes require re-adding the integration.
 - **Firmware dependency**: Some advanced settings (G3 battery controls, external control registers) are only available on specific firmware versions.
 - **Installer access**: Certain controls require the installer/service code. Without it, these entities remain disabled.
-- **Single inverter per entry**: Each config entry manages exactly one inverter. Multiple inverters require separate config entries.
+- **Single inverter per entry**: Each config entry manages exactly one inverter. Multiple inverters require separate config entries. **Multi Device Control (MDC, firmware 3.06.10+)** — where one host inverter aggregates and controls up to two client inverters — is **not supported**; on an MDC host, KORE's battery control may conflict with the inverter's own MDC battery control.
+- **One battery controller at a time**: Do not run KORE's Modbus battery control (SoC controller, charge block, grid feed-in optimizer) at the same time as the inverter's own native battery features — **Smart AC Charge** (default-on since firmware 3.05), **time-controlled / dynamic-tariff charging**, or **EEBus (LPP/LPC)** control. Both sides write the same battery registers and will fight; disable the native feature when using KORE's control (KORE logs a warning if it detects the battery moving against its setpoint). The §14a EnWG import limit (`Inverter:ActivePowerConsumLimitation`) will also silently throttle grid-charging when active.
 - **API rate limits**: The inverter's local API has limited concurrency. The integration serialises all API calls to avoid overloading.
 - **Battery entities**: Battery-related sensors only appear when a compatible battery system is connected and detected by the inverter.
 

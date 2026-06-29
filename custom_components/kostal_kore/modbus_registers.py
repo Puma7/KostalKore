@@ -159,6 +159,9 @@ REG_BATTERY_ACTUAL_CURRENT = ModbusRegister(200, "battery_actual_current", "Actu
 REG_BATTERY_STATE_OF_CHARGE = ModbusRegister(210, "battery_state_of_charge", "Act. state of charge", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY, "%")
 REG_BATTERY_TEMPERATURE = ModbusRegister(214, "battery_temperature", "Battery temperature", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY, "°C")
 REG_BATTERY_VOLTAGE = ModbusRegister(216, "battery_voltage", "Battery voltage", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY, "V")
+# NOTE: register 588 is UINT16 (count=1) on purpose. Kostal corrected this register
+# from u32 to u16 in FW 3.04.01 (2025-01); KORE's u16/count=1 matches the corrected
+# firmware. Do NOT "fix" this to UINT32 — that would misread the value on current FW.
 REG_BATTERY_TYPE = ModbusRegister(588, "battery_type", "Battery Type", DataType.UINT16, 1, Access.RO, RegisterGroup.BATTERY)
 REG_BATTERY_WORK_CAPACITY = ModbusRegister(1068, "battery_work_capacity", "Battery work capacity", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY, "Wh")
 REG_BATTERY_SERIAL = ModbusRegister(1070, "battery_serial", "Battery serial number", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)

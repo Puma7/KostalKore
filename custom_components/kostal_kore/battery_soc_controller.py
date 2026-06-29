@@ -50,6 +50,12 @@ SAFE_MIN_SOC: Final[float] = 10.0
 SAFE_MAX_SOC: Final[float] = 95.0
 MAX_BATTERY_TEMP_C: Final[float] = 48.0
 MAX_CONSECUTIVE_FAILURES: Final[int] = 5
+# Setpoint-divergence detection (read-only diagnostic): warn when the battery
+# moves opposite to the commanded direction for this many consecutive poll
+# cycles — a likely sign another controller (e.g. the inverter's native Smart AC
+# Charge, default-on since FW 3.05, or a native battery schedule) is overriding us.
+DIVERGENCE_DEADBAND_W: Final[float] = 200.0
+DIVERGENCE_CYCLES: Final[int] = 4
 
 
 class BatterySocController:
@@ -80,6 +86,8 @@ class BatterySocController:
         self._last_write: float = 0.0
         self._original_charge_limit: float | None = None
         self._original_discharge_limit: float | None = None
+        self._divergence_count: int = 0
+        self._divergence_warned: bool = False
 
     @property
     def target_soc(self) -> float | None:
@@ -345,6 +353,9 @@ class BatterySocController:
                         )
                         return
 
+                # Read-only: warn if another controller is overriding our setpoint.
+                await self._check_setpoint_divergence(need_charge, need_discharge)
+
                 # Sleep, but cap at time-to-next-keepalive
                 if self._last_write > 0:
                     elapsed = time.monotonic() - self._last_write
@@ -454,6 +465,56 @@ class BatterySocController:
             return int(await self._coord.client.read_register(reg))
         except Exception:
             return None
+
+    async def _read_battery_power(self) -> float | None:
+        """Actual battery charge/discharge power in W (+discharge / -charge)."""
+        reg = REGISTER_BY_NAME.get("battery_cd_power")
+        if not reg:
+            return None
+        try:
+            return float(await self._coord.client.read_register(reg))
+        except Exception:
+            return None
+
+    async def _check_setpoint_divergence(
+        self, need_charge: bool, need_discharge: bool
+    ) -> None:
+        """Warn once if the battery moves opposite to the commanded direction.
+
+        Read-only diagnostic — never affects the control loop. ``battery_cd_power``
+        is +discharge / -charge; sustained opposite movement is a likely sign that
+        another controller (e.g. the inverter's native Smart AC Charge, default-on
+        since FW 3.05, or a native battery schedule) is overriding KORE.
+        """
+        try:
+            power = await self._read_battery_power()
+            if power is None:
+                return
+            diverging = (need_charge and power > DIVERGENCE_DEADBAND_W) or (
+                need_discharge and power < -DIVERGENCE_DEADBAND_W
+            )
+            if not diverging:
+                self._divergence_count = 0
+                self._divergence_warned = False
+                return
+            self._divergence_count += 1
+            if (
+                self._divergence_count >= DIVERGENCE_CYCLES
+                and not self._divergence_warned
+            ):
+                self._divergence_warned = True
+                _LOGGER.warning(
+                    "SoC Controller: battery is moving opposite to the commanded "
+                    "%s for %d cycles (measured %.0f W). Another controller may be "
+                    "active — e.g. the inverter's native Smart AC Charge (default-on "
+                    "since FW 3.05) or a native battery schedule. Disable it for "
+                    "reliable external battery control.",
+                    "charge" if need_charge else "discharge",
+                    self._divergence_count,
+                    power,
+                )
+        except Exception:  # diagnostic must never affect the control loop
+            _LOGGER.debug("SoC Controller: divergence check failed", exc_info=True)
 
     async def _notify(self, title: str, msg: str) -> None:
         if not self._hass:
