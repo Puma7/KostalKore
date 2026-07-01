@@ -202,7 +202,7 @@ class KostalMqttBridge:
         # first avoids wiring all subscriptions per attempt only to roll them
         # back at the first publish.
         try:
-            if not mqtt.is_connected(self._hass):  # type: ignore[attr-defined]
+            if not mqtt.is_connected(self._hass):
                 _LOGGER.debug("MQTT broker not connected – skipping start attempt")
                 return False
         except (KeyError, AttributeError):
