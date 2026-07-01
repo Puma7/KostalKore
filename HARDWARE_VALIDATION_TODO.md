@@ -82,6 +82,15 @@ thresholds — no breakage). (b) If HV2 shows non-HELIVOR loses reg 1068, wire t
 `devices:local:battery[SoH]` feed (`sensor.py:~1538`) or reg 529 as a capacity/SoH fallback into
 `BatterySohCalculator`.
 
+### Shared divergence monitor across all four battery controllers  *(altitude, no HW needed)*
+The setpoint-divergence diagnostic currently lives only in `BatterySocController`;
+`grid_charge_limiter.py`, `charge_block_switch.py`, and `battery_test.py` blind-write the
+same registers and would need the same ~50 lines copy-pasted. When extending it, move the
+mechanism to a shared home keyed off the current REG-1038 owner (`battery_reg_1038_owner.py`)
+or a small conflict-monitor on the Modbus coordinator, so all controllers are covered once.
+Also note: HV1 uses the divergence warning as its measurement instrument — it only fires for
+the SoC controller today, so validate HV1 via the SoC controller (not Charge Block).
+
 ### O3 (enhancement half) — §14a import-limit awareness  *(monitor, low)*  — no HW strictly needed
 Optional: when grid-charging, read `em_state` (reg 104) / `power_limit_evu` (reg 122) /
 `Inverter:ActivePowerConsumLimitationEnable` and emit a diagnostic when the grid-charge setpoint is

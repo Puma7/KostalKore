@@ -40,7 +40,7 @@ from .const import (
     DEFAULT_MODBUS_UNIT_ID,
     DOMAIN,
 )
-from .helper import get_hostname_id
+from .helper import get_hostname_id, validate_bind_address
 
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.config_entries import ConfigFlowResult
@@ -207,22 +207,6 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _normalize_bind_address(value: Any) -> str:
-    """Return a valid IP for the proxy bind, falling back to the safe default.
-
-    A malformed value (typo, hostname, stray whitespace) is coerced to the
-    loopback default so a bad entry can never silently bind the control proxy
-    to an unexpected interface. A valid but non-loopback address is preserved;
-    the proxy logs a LAN-exposure warning when it binds there.
-    """
-    text = str(value).strip()
-    try:
-        ipaddress.ip_address(text)
-    except ValueError:
-        return DEFAULT_MODBUS_PROXY_BIND
-    return text
-
-
 def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize options and enforce valid dependencies."""
     modbus_enabled = bool(user_input.get(CONF_MODBUS_ENABLED, False))
@@ -246,9 +230,13 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_MODBUS_PROXY_PORT: int(
             user_input.get(CONF_MODBUS_PROXY_PORT, DEFAULT_MODBUS_PROXY_PORT)
         ),
-        CONF_MODBUS_PROXY_BIND: _normalize_bind_address(
+        # NOT coerced here: an invalid bind is rejected with a visible form
+        # error in async_step_init (validate_bind_address), never silently
+        # rewritten — a pre-existing hostname bind must not be broken by
+        # merely re-saving the options.
+        CONF_MODBUS_PROXY_BIND: str(
             user_input.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
-        ),
+        ).strip(),
         CONF_KSEM_ENABLED: ksem_enabled,
         CONF_KSEM_HOST: str(user_input.get(CONF_KSEM_HOST, "")).strip(),
         CONF_KSEM_PORT: int(user_input.get(CONF_KSEM_PORT, DEFAULT_KSEM_PORT)),
@@ -782,29 +770,52 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Configure options and optionally validate Modbus connectivity."""
+        try:
+            entry = self.config_entry
+        except AttributeError:
+            # HA < 2024.12 (manual install below the declared floor): the base
+            # OptionsFlow has no config_entry property. HA does not enforce
+            # the manifest floor at runtime, so fail with a clear message
+            # instead of an unhandled AttributeError ("Unknown error").
+            return self.async_abort(reason="unsupported_ha_version")
+
+        errors: dict[str, str] = {}
         if user_input is not None:
             normalized = _normalize_options(user_input)
-            if normalized.get(CONF_MODBUS_ENABLED, False):
+            if (
+                validate_bind_address(
+                    normalized.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
+                )
+                is None
+            ):
+                # Visible error instead of silent coercion: neither break a
+                # deliberate value without telling the user, nor store a
+                # non-IP the proxy would resolve to an unexpected interface.
+                errors = {"base": "invalid_bind_address"}
+                defaults = normalized
+            elif normalized.get(CONF_MODBUS_ENABLED, False):
                 self._user_input = normalized
                 return await self.async_step_modbus_test()
-            # HA 2026.6+ auto-reloads via OptionsFlowManager; older HA needs explicit
-            # reload. Scheduling here is safe on all versions — the reload task runs
-            # after the FlowManager calls async_update_entry with the new options.
-            self.hass.config_entries.async_schedule_reload(
-                self.config_entry.entry_id
-            )
-            return self.async_create_entry(title="", data=normalized)
+            else:
+                # HA 2026.6+ auto-reloads via OptionsFlowManager; older HA
+                # needs explicit reload. Scheduling here is safe on all
+                # versions — the reload task runs after the FlowManager calls
+                # async_update_entry with the new options.
+                self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                return self.async_create_entry(title="", data=normalized)
+        else:
+            defaults = _normalize_options(entry.options)
 
-        defaults = _normalize_options(self.config_entry.options)
-        access_role = str(self.config_entry.data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
+        access_role = str(entry.data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
         write_access = (
             "enabled"
-            if bool(self.config_entry.data.get(CONF_INSTALLER_ACCESS, False))
+            if bool(entry.data.get(CONF_INSTALLER_ACCESS, False))
             else "restricted"
         )
         return self.async_show_form(
             step_id="init",
             data_schema=_options_schema(defaults),
+            errors=errors,
             description_placeholders={
                 "access_role": access_role,
                 "write_access": write_access,

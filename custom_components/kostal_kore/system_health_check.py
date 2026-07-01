@@ -572,7 +572,22 @@ class SystemHealthCheckButton(ButtonEntity):
 
         mqtt: Any = entry_data.get("mqtt_bridge")
         if mqtt is not None:
-            report.check("MQTT Bridge", True, detail="konfiguriert", level="info")
+            # Since 3.0.2 the bridge can exist without being started (broker
+            # unavailable, retry loop still waiting) — report the real state
+            # instead of "configured", which pointed diagnosis away from the
+            # actual failure.
+            running = bool(getattr(mqtt, "started", False))
+            report.check(
+                "MQTT Bridge",
+                running,
+                detail=(
+                    "aktiv"
+                    if running
+                    else "konfiguriert, aber nicht gestartet "
+                    "(MQTT-Integration/Broker nicht verfügbar? Retry läuft)"
+                ),
+                level="info" if running else "warn",
+            )
 
         proxy: Any = entry_data.get("modbus_proxy")
         if proxy is not None:

@@ -1,10 +1,18 @@
 name: CI
 
+# PR events cover all branch work; pushes to main (merges) still run. The old
+# `push: branches: ["**"]` + pull_request pair ran the whole matrix twice for
+# every PR commit.
 on:
   pull_request:
   push:
     branches:
-      - "**"
+      - main
+
+# Rapid pushes supersede each other: cancel in-progress runs of the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Least-privilege token: this workflow only checks out and runs tests/mypy.
 permissions:
@@ -22,8 +30,12 @@ jobs:
         #   - "3.14": the Python version current Home Assistant ships with, so the
         #     smoke tests always cover the runtime real users are on. Bump this
         #     whenever Home Assistant raises its required Python version.
-        #   - "3.12": our manifest floor (homeassistant: 2024.12.0, Python 3.12),
-        #     so we do not regress on the oldest HA release we still support.
+        #   - "3.12": the oldest Python we support. NOTE: this leg does NOT test
+        #     the declared HA floor (manifest: 2024.12.0) — the unpinned
+        #     pytest-homeassistant-custom-component resolves the newest HA that
+        #     still supports Python 3.12 (~2025.1), so the floor itself is not
+        #     exercised anywhere in CI. Compat below that resolved version rests
+        #     on code review; see the graceful options-flow abort for pre-2024.12.
         python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout
@@ -40,11 +52,14 @@ jobs:
           pip install -r requirements_test.txt
           pip install "pykoplenti==1.5.0" "pymodbus>=3.6"
 
+      # Ruff's result is interpreter-independent (target-version comes from
+      # ruff.toml) — one leg suffices, mirroring the mypy gate below.
       - name: Run ruff (lint gate)
+        if: matrix.python-version == '3.12'
         run: python -m ruff check custom_components/kostal_kore Tests
 
       - name: Run tests
-        run: python -m pytest Tests/ -v --timeout=60
+        run: python -m pytest Tests/ --timeout=60
 
       # Type-check against the floor leg only. Current Home Assistant source uses
       # Python 3.14-only syntax (PEP 758) that mypy cannot parse under our 3.12

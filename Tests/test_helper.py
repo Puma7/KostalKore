@@ -38,6 +38,7 @@ from custom_components.kostal_kore.helper import (
     requires_installer_service_code,
     safe_home_power_w,
     sum_home_consumption_power_w,
+    validate_bind_address,
 )
 
 
@@ -440,6 +441,25 @@ def test_parse_firmware_version() -> None:
     assert parse_firmware_version("unknown") is None
     assert parse_firmware_version("03.05") is None
     assert parse_firmware_version("a.b.c") is None
+    # ASCII digits only: signs, underscores, and non-ASCII decimal digits
+    # must hit the None fail-safe instead of parsing to nonsense tuples.
+    assert parse_firmware_version("3.5.-1") is None
+    assert parse_firmware_version("3.5.1_0") is None
+    assert parse_firmware_version("３.５.０") is None
+
+
+def test_validate_bind_address() -> None:
+    # Literal IPs pass (whitespace-tolerant); loopback and 0.0.0.0 included.
+    assert validate_bind_address("127.0.0.1") == "127.0.0.1"
+    assert validate_bind_address(" 0.0.0.0 ") == "0.0.0.0"
+    assert validate_bind_address("192.168.1.5") == "192.168.1.5"
+    assert validate_bind_address("::1") == "::1"
+    # Anything that is not an IP literal is rejected (None -> form error);
+    # it is never silently coerced to a different address.
+    assert validate_bind_address("homeassistant.local") is None
+    assert validate_bind_address("") is None
+    assert validate_bind_address("192.168.l.5") is None  # typo'd 'l'
+    assert validate_bind_address(None) is None
 
 
 def test_firmware_at_least() -> None:

@@ -23,11 +23,12 @@ from kostal_plenticore.mqtt_bridge import (
 )
 
 
-def _mock_mqtt_module() -> MagicMock:
+def _mock_mqtt_module(connected: bool = True) -> MagicMock:
     """Create a mock homeassistant.components.mqtt module."""
     mock = MagicMock()
     mock.async_publish = AsyncMock()
     mock.async_subscribe = AsyncMock(return_value=MagicMock())
+    mock.is_connected = MagicMock(return_value=connected)
     return mock
 
 
@@ -35,13 +36,18 @@ def _mock_hass(mqtt_available: bool = True) -> MagicMock:
     hass = MagicMock()
     hass.config.components = {"mqtt"} if mqtt_available else set()
 
-    def _create_task(coro):
+    def _create_task(coro, *args, **kwargs):
         # Tests only assert task creation; close the coroutine to avoid
-        # "was never awaited" warnings from the MagicMock stub.
+        # "was never awaited" warnings from the MagicMock stub. done() must
+        # return a real False so the idempotency/reentrancy guards
+        # (`not task.done()`) are actually exercised.
+        task = MagicMock()
+        task.done.return_value = False
         coro.close()
-        return MagicMock()
+        return task
 
     hass.async_create_task = MagicMock(side_effect=_create_task)
+    hass.async_create_background_task = MagicMock(side_effect=_create_task)
     return hass
 
 
@@ -80,12 +86,15 @@ class TestBridgeStartWithoutMqtt:
     """Test that the bridge gracefully handles missing MQTT."""
 
     @pytest.mark.asyncio
-    async def test_start_without_mqtt_logs_warning(self) -> None:
+    async def test_start_without_mqtt_schedules_retry(self) -> None:
+        """mqtt integration not loaded yet: no crash, retry loop scheduled."""
         hass = _mock_hass(mqtt_available=False)
         coord = _mock_coordinator()
         bridge = KostalMqttBridge(hass, coord, "INV123")
         await bridge.async_start()
         assert bridge._started is False
+        # The self-heal must also cover "mqtt loads after this integration".
+        hass.async_create_background_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_stop_without_start_is_safe(self) -> None:
@@ -235,6 +244,126 @@ class TestBridgeStartSelfHealing:
         assert bridge._started is False
         assert bridge._unsub_command == []
         assert bridge._unsub_coordinator is None
+
+    @pytest.mark.asyncio
+    async def test_retry_loop_waits_for_mqtt_integration(self) -> None:
+        """mqtt not loaded: the loop keeps waiting and starts once it appears."""
+        hass = _mock_hass(mqtt_available=False)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        mock_mqtt = _mock_mqtt_module()
+
+        async def _sleep(_delay):
+            # Simulate the mqtt integration finishing setup during the wait.
+            hass.config.components = {"mqtt"}
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}), \
+                patch("asyncio.sleep", new=AsyncMock(side_effect=_sleep)):
+            await bridge._start_retry_loop()
+
+        assert bridge._started is True
+
+    @pytest.mark.asyncio
+    async def test_retry_loop_survives_unexpected_error(self) -> None:
+        """A non-HomeAssistantError on a retry must not end self-healing."""
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+        raised = {"done": False}
+
+        async def _publish(*_args, **_kwargs):
+            if not raised["done"]:
+                raised["done"] = True
+                raise RuntimeError("unexpected mid-start explosion")
+
+        mock_mqtt.async_publish = AsyncMock(side_effect=_publish)
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}), \
+                patch("asyncio.sleep", new=AsyncMock()):
+            await bridge._start_retry_loop()
+
+        assert bridge._started is True
+
+    @pytest.mark.asyncio
+    async def test_commit_point_failure_clears_retained_state(self) -> None:
+        """If the final online publish fails, retained /config is cleared and
+        availability is corrected to offline — no ghost bridge on the broker."""
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+
+        async def _publish(_hass, topic, payload, _qos, retain=False):
+            if payload == "online":
+                raise HomeAssistantError("mqtt_broker_error")
+
+        mock_mqtt.async_publish = AsyncMock(side_effect=_publish)
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            assert await bridge._try_start() is False
+
+        assert bridge._started is False
+        published = [
+            (call.args[1], call.args[2])
+            for call in mock_mqtt.async_publish.call_args_list
+        ]
+        assert (f"{TOPIC_PREFIX}/INV123/modbus/config", "") in published
+        assert (f"{TOPIC_PREFIX}/INV123/modbus/available", "offline") in published
+
+    @pytest.mark.asyncio
+    async def test_stop_after_failed_attempt_clears_retained_state(self) -> None:
+        """Unload after a failed start attempt clears leaked retained topics."""
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge._start_attempted = True  # a start attempt ran and failed
+
+        mock_mqtt = _mock_mqtt_module()
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            await bridge.async_stop()
+
+        published = [
+            (call.args[1], call.args[2])
+            for call in mock_mqtt.async_publish.call_args_list
+        ]
+        assert (f"{TOPIC_PREFIX}/INV123/modbus/config", "") in published
+        assert (f"{TOPIC_PREFIX}/INV123/modbus/available", "offline") in published
+        assert bridge._start_attempted is False
+
+
+class TestCommandGating:
+    """Inbound commands must never execute before the bridge commit point."""
+
+    @pytest.mark.asyncio
+    async def test_handle_command_ignored_before_start(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        assert bridge._started is False
+
+        msg = MagicMock()
+        msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/active_power_setpoint"
+        msg.payload = "80"
+
+        await bridge._handle_command(msg)
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_proxy_command_ignored_before_start(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
+        assert bridge._started is False
+
+        msg = MagicMock()
+        msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/battery_charge"
+        msg.payload = "2000"
+
+        await bridge._handle_proxy_command(msg)
+        coord.async_write_register.assert_not_called()
 
 
 class TestCommandHandling:

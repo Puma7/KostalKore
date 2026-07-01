@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
@@ -469,6 +470,30 @@ async def test_setup_entry_mqtt_bridge_enabled(
     mock_start.assert_called_once()
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_options_flow_rejects_invalid_bind_address(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A non-IP proxy bind is rejected with a visible form error — neither
+    silently coerced to loopback nor stored for the proxy to resolve."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
+    mock_config_entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = mock_config_entry.entry_id
+
+    result = await flow.async_step_init(
+        user_input={
+            "modbus_enabled": False,
+            "modbus_proxy_bind": "homeassistant.local",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_bind_address"}
 
 
 async def test_setup_entry_mqtt_bridge_start_error_does_not_fail_setup(

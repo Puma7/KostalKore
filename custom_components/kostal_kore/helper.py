@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import math
+import re
 import secrets
 from collections.abc import Callable
 from typing import Any, Final, cast
@@ -28,22 +30,45 @@ DEFAULT_CONFIRMATION_CODE_LEN: Final[int] = 6
 DEFAULT_CONFIRMATION_CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
+def validate_bind_address(value: Any) -> str | None:
+    """Return the cleaned bind IP for the Modbus proxy, or None if invalid.
+
+    Single validation authority for ``CONF_MODBUS_PROXY_BIND``: only literal
+    IP addresses are accepted so a typo can never silently bind the inverter
+    control proxy to an unexpected interface. The options flow surfaces None
+    as a visible form error instead of silently rewriting the stored value;
+    the proxy itself logs a warning for anything non-loopback it binds.
+    """
+    text = str(value).strip()
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    return text
+
+
+# ASCII digits only: bare int() also accepts signs, underscores, and non-ASCII
+# decimal digits ('3.5.-1' -> (3, 5, -1)), which would silently bypass the
+# documented None fail-safe for malformed vendor strings.
+_VERSION_PART_RE: Final = re.compile(r"[0-9]+")
+
+
 def parse_firmware_version(raw: str | None) -> tuple[int, int, int] | None:
     """Parse a Kostal firmware string like ``'03.05.00.20534'`` to ``(3, 5, 0)``.
 
-    Returns ``None`` for missing or unparseable values (e.g. ``'unknown'`` or a
-    string with fewer than three dotted parts) so callers can treat unknown
-    firmware as "no version-gated behaviour" rather than guessing.
+    Returns ``None`` for missing or unparseable values (e.g. ``'unknown'``, a
+    string with fewer than three dotted parts, or non-ASCII-digit components)
+    so callers can treat unknown firmware as "no version-gated behaviour"
+    rather than guessing.
     """
     if not raw:
         return None
     parts = raw.strip().split(".")
     if len(parts) < 3:
         return None
-    try:
-        return (int(parts[0]), int(parts[1]), int(parts[2]))
-    except (TypeError, ValueError):
+    if any(not _VERSION_PART_RE.fullmatch(part) for part in parts[:3]):
         return None
+    return (int(parts[0]), int(parts[1]), int(parts[2]))
 
 
 def firmware_at_least(

@@ -25,7 +25,11 @@
             }
         },
         "error": {
-            "modbus_test_failed": "Modbus connection test failed – check settings and network"
+            "modbus_test_failed": "Modbus connection test failed – check settings and network",
+            "invalid_bind_address": "Proxy bind address must be a literal IP address (e.g. 127.0.0.1 for local-only or 0.0.0.0 for all interfaces)"
+        },
+        "abort": {
+            "unsupported_ha_version": "This integration requires Home Assistant 2024.12.0 or newer (the installed version does not provide the options-flow config_entry property)"
         }
     },
     "config": {

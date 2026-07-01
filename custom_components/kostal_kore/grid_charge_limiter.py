@@ -24,13 +24,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import time  # noqa: F401
 from typing import Any, Final
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory, UnitOfPower
-from homeassistant.exceptions import HomeAssistantError  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .battery_reg_1038_owner import (
