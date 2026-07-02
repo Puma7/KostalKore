@@ -9,12 +9,6 @@ remains are the two tests that actually exercise behaviour in ``helper.py``.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [
-    pytest.mark.usefixtures("mock_plenticore_client"),
-]
-
 
 class TestModbusExceptionHandling:
     """Behaviour tests for the Modbus exception classes in ``helper.py``."""

@@ -246,11 +246,31 @@ class ModbusTcpProxyServer:
             )
         except ValueError:
             bind_ip = None
-        if bind_ip is not None and not bind_ip.is_loopback:
+        # Warn for EVERY potentially exposed bind, not only IP literals:
+        # asyncio.start_server resolves hostnames and treats '' as "all
+        # interfaces", so an unparseable value must not silently skip the
+        # LAN-exposure warning (values stored before validation existed
+        # reach this point unmodified).
+        if bind_ip is not None:
+            if not bind_ip.is_loopback:
+                _LOGGER.warning(
+                    "Modbus TCP proxy binding to non-loopback address %s: the "
+                    "inverter control proxy will be reachable from the LAN. Use "
+                    "127.0.0.1 unless external access is intended and secured.",
+                    self._bind_host,
+                )
+        elif not self._bind_host:
             _LOGGER.warning(
-                "Modbus TCP proxy binding to non-loopback address %s: the inverter "
-                "control proxy will be reachable from the LAN. Use 127.0.0.1 unless "
-                "external access is intended and secured.",
+                "Modbus TCP proxy bind address is empty: binding ALL interfaces — "
+                "the inverter control proxy will be reachable from the LAN. Use "
+                "127.0.0.1 unless external access is intended and secured."
+            )
+        else:
+            _LOGGER.warning(
+                "Modbus TCP proxy bind address %r is not an IP literal: it will "
+                "be resolved and may expose the inverter control proxy beyond "
+                "loopback. Use a literal IP (e.g. 127.0.0.1) unless external "
+                "access is intended and secured.",
                 self._bind_host,
             )
         self._server = await asyncio.start_server(

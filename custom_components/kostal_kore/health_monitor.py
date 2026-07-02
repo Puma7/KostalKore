@@ -22,6 +22,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum  # noqa: F401
+from statistics import median
 from typing import Any, Final
 
 from .helper import (
@@ -36,6 +37,35 @@ from .helper import (
 _LOGGER: Final = logging.getLogger(__name__)
 
 MAX_HISTORY_SIZE: Final[int] = 2000
+
+# --- DC string share baseline learning ---
+# Shares are sampled on every Modbus poll (~5s). The long window (~24h)
+# captures the installation's typical share pattern including its daily
+# variation; the short window (~5min) smooths transients.
+DC_SHARE_LONG_MAXLEN: Final[int] = 17280  # ~24h at 5s polls
+DC_SHARE_SHORT_MAXLEN: Final[int] = 60  # ~5min at 5s polls
+DC_SHARE_MIN_SAMPLES: Final[int] = 720  # ~1h of production before judging
+DC_SHARE_MIN_TOTAL_W: Final[float] = 200.0  # below this, shares are noise
+# While a string deviates this hard (fraction of total, 0.20 = 20pp) from its
+# learned share, its samples are NOT added to the baseline — otherwise a
+# sustained fault would gradually BECOME the baseline and clear the warning
+# while the fault persists.
+DC_SHARE_FREEZE_THRESHOLD: Final[float] = 0.20
+# A string producing below this share of total DC power while the others
+# produce is treated as collapsed (fuse/connector/cable, or fully covered),
+# not as a share pattern: even a fully shaded string still receives diffuse
+# light well above 2% of total. Collapsed samples never train the baseline
+# and are surfaced directly via ``dc_string_collapsed`` — no learned
+# baseline needed.
+DC_SHARE_COLLAPSE_FLOOR: Final[float] = 0.02
+# An input only participates in the share model after it has produced at
+# least this share of total DC power once in the current session. Unused /
+# not-connected inputs report 0 W and are indistinguishable from a string
+# that died before startup — without this gate they would freeze baseline
+# learning forever and read as collapsed strings. Kept well above the
+# collapse floor so a borderline string cannot flap between "unused" and
+# "collapsed".
+DC_SHARE_ACTIVITY_FLOOR: Final[float] = 0.05
 
 
 def resolve_active_error_warning_counts(
@@ -212,8 +242,22 @@ class InverterHealthMonitor:
     tracks trends, and generates health assessments.
     """
 
-    def __init__(self, *, num_bidirectional: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        num_bidirectional: int = 0,
+        dc_share_min_samples: int = DC_SHARE_MIN_SAMPLES,
+    ) -> None:
         self._num_bidirectional: int = num_bidirectional
+        # DC string share baseline learning: learns each PV string's typical
+        # share of total DC power, so PERMANENT asymmetry (south/north
+        # orientation, different string sizes) is treated as normal and only
+        # a shift away from the learned pattern is flagged. In-memory only:
+        # resets on reload and relearns within ~1h of production.
+        self._dc_share_min_samples: int = dc_share_min_samples
+        self._dc_share_long: dict[str, deque[float]] = {}
+        self._dc_share_short: dict[str, deque[float]] = {}
+        self._dc_share_active: set[str] = set()
         # --- Electrical Safety ---
         self.isolation = ParameterTracker(
             name="Isolation Resistance", unit="Ω",
@@ -418,6 +462,125 @@ class InverterHealthMonitor:
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass
+
+        self._record_dc_shares(data)
+
+    def _record_dc_shares(self, data: dict[str, Any]) -> None:
+        """Sample each PV string's share of total DC power for baseline learning."""
+        keys = ["dc1_power", "dc2_power"]
+        if self._num_bidirectional < 1:
+            keys.append("dc3_power")
+        powers: dict[str, float] = {}
+        for key in keys:
+            val = _safe_float(data.get(key))
+            if val is not None:
+                powers[key] = max(val, 0.0)
+        if len(powers) < 2:
+            return
+        total = sum(powers.values())
+        if total < DC_SHARE_MIN_TOTAL_W:
+            # Dawn/dusk/night: shares are numerically meaningless noise.
+            return
+        shares = {key: power / total for key, power in powers.items()}
+        # Only inputs that have produced a meaningful share this session are
+        # strings: an unused / not-connected input reports 0 W permanently
+        # (mirrors the >50 W active filter of the raw imbalance metric) and
+        # is indistinguishable from a string that died before startup — such
+        # inputs are excluded from the share model instead of being flagged.
+        for key, share in shares.items():
+            if share >= DC_SHARE_ACTIVITY_FLOOR:
+                self._dc_share_active.add(key)
+        shares = {k: s for k, s in shares.items() if k in self._dc_share_active}
+        if len(shares) < 2:
+            return
+        # A collapsed string is a fault state, not a share pattern: such
+        # samples may describe the PRESENT (short window) but must never
+        # train the baseline — neither while still learning (a string dying
+        # in the first hour would otherwise become the baseline and read as
+        # "no deviation") nor afterwards (a sub-freeze-threshold collapse
+        # would slowly seep into the 24h median).
+        suspect = any(s < DC_SHARE_COLLAPSE_FLOOR for s in shares.values())
+        for key, share in shares.items():
+            long_q = self._dc_share_long.setdefault(
+                key, deque(maxlen=DC_SHARE_LONG_MAXLEN)
+            )
+            short_q = self._dc_share_short.setdefault(
+                key, deque(maxlen=DC_SHARE_SHORT_MAXLEN)
+            )
+            short_q.append(share)
+            if suspect:
+                continue
+            # Freeze baseline learning while this string already deviates hard
+            # from its learned share: a sustained fault must not gradually
+            # become the new baseline (the median would flip once faulty
+            # samples outnumber the learned ones, silently clearing the
+            # warning while the fault persists). A DELIBERATE permanent change
+            # re-baselines via an integration reload (~1h relearn).
+            if (
+                len(long_q) >= self._dc_share_min_samples
+                and len(short_q) >= 5
+                and abs(median(short_q) - median(long_q))
+                > DC_SHARE_FREEZE_THRESHOLD
+            ):
+                continue
+            long_q.append(share)
+
+    @property
+    def dc_string_baseline_deviation(self) -> float | None:
+        """Max deviation (percentage points) of any string's recent share of
+        total DC power from its own LEARNED share.
+
+        Unlike ``dc_string_imbalance`` (raw instantaneous spread, which is
+        permanently high for mixed orientations like south/north), this metric
+        only rises when the installation's established share pattern SHIFTS —
+        the signal for new shading, soiling, or a failing string/panel.
+        Returns None until enough production samples were learned.
+        """
+        devs: list[float] = []
+        for key, long_q in self._dc_share_long.items():
+            short_q = self._dc_share_short.get(key)
+            if len(long_q) < self._dc_share_min_samples:
+                continue
+            if not short_q or len(short_q) < 5:
+                continue
+            devs.append(abs(median(short_q) - median(long_q)) * 100.0)
+        return max(devs) if devs else None
+
+    @property
+    def dc_string_collapsed(self) -> list[str]:
+        """PV strings whose recent share of total DC power sits below the
+        collapse floor — effectively dead while the other strings produce.
+
+        Raw fallback that needs NO learned baseline: collapsed samples are
+        excluded from baseline learning (see ``_record_dc_shares``), so a
+        string dying during the learning hour would otherwise never be
+        reported by ``dc_string_baseline_deviation``. Only strings that have
+        produced this session can collapse — an input at ~0 W since startup
+        is indistinguishable from an unused input and stays silent (it never
+        enters the share windows). Median over the short window; empty list
+        when all strings produce.
+        """
+        collapsed: list[str] = []
+        for key, short_q in self._dc_share_short.items():
+            if len(short_q) < 5:
+                continue
+            if median(short_q) < DC_SHARE_COLLAPSE_FLOOR:
+                collapsed.append(key)
+        return collapsed
+
+    @property
+    def dc_share_baseline(self) -> dict[str, dict[str, float]]:
+        """Learned vs. recent share per PV string (percent), for diagnostics."""
+        result: dict[str, dict[str, float]] = {}
+        for key, long_q in self._dc_share_long.items():
+            short_q = self._dc_share_short.get(key)
+            if len(long_q) < self._dc_share_min_samples or not short_q:
+                continue
+            result[key] = {
+                "learned_share_pct": round(median(long_q) * 100.0, 1),
+                "recent_share_pct": round(median(short_q) * 100.0, 1),
+            }
+        return result
 
     def get_isolation_resistance_ohm(self) -> float | None:
         """Return isolation for HA display; None when Modbus has no valid reading."""
@@ -626,8 +789,11 @@ class InverterHealthMonitor:
             score -= 10
         if self.communication_reliability < 95:
             score -= 10
-        imb = self.dc_string_imbalance
-        if imb is not None and imb > 30:
+        # Baseline-aware: permanent asymmetry (south/north strings) does not
+        # cost points — only a shift away from the learned share pattern, or
+        # a collapsed string (which needs no learned baseline), does.
+        bdev = self.dc_string_baseline_deviation
+        if (bdev is not None and bdev > 25) or self.dc_string_collapsed:
             score -= 5
         return max(0, min(100, score))
 
@@ -643,6 +809,9 @@ class InverterHealthMonitor:
             "event_count": self.event_count,
             "state_changes": self.state_change_count,
             "dc_string_imbalance": round(self.dc_string_imbalance, 1) if self.dc_string_imbalance is not None else None,
+            "dc_string_baseline_deviation": round(self.dc_string_baseline_deviation, 1) if self.dc_string_baseline_deviation is not None else None,
+            "dc_share_baseline": self.dc_share_baseline,
+            "dc_string_collapsed": self.dc_string_collapsed,
             "phase_voltage_imbalance": round(self.phase_voltage_imbalance, 1) if self.phase_voltage_imbalance is not None else None,
             "trackers": {},
         }

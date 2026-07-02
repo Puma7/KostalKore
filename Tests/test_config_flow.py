@@ -500,6 +500,27 @@ async def test_run_modbus_connection_test_all_register_reads_fail() -> None:
     assert "All 6 register reads failed." in log
 
 
+async def test_setup_wizard_rejects_invalid_bind(hass: HomeAssistant) -> None:
+    """The first-run wizard validates the proxy bind unconditionally — a new
+    entry must never be created with a non-IP bind (no stored value exists
+    that could be grandfathered, unlike in the options flow)."""
+    flow = kore_config_flow.KostalPlenticoreConfigFlow()
+    flow.hass = hass
+    flow._pending_entry_data = {
+        CONF_HOST: "1.2.3.4",
+        "access_role": "USER",
+        "installer_access": False,
+    }
+    flow._pending_entry_title = "host"
+
+    result = await flow.async_step_setup_options(
+        {"modbus_enabled": False, "modbus_proxy_bind": "homeassistant.local"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_bind_address"}
+    assert flow._pending_options == {}
+
+
 async def test_flow_step_helpers_cover_remaining_branches(hass: HomeAssistant) -> None:
     """Direct step invocation covers wizard branches not hit by end-to-end flows."""
     flow = kore_config_flow.KostalPlenticoreConfigFlow()

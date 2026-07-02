@@ -13,6 +13,7 @@ from custom_components.kostal_kore.battery_reg_1038_owner import (
     get_reg_1038_owner_manager,
 )
 from custom_components.kostal_kore.battery_soc_controller import (
+    DIVERGENCE_CYCLES,
     KEEPALIVE_INTERVAL,  # noqa: F401
     MAX_CONSECUTIVE_FAILURES,
     POLL_INTERVAL,  # noqa: F401
@@ -399,6 +400,42 @@ async def test_battery_soc_controller_run_loop_paths() -> None:
     ):
         await controller._run_loop()
     controller._write_normal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_divergence_streaks_reset_on_missing_power_sample() -> None:
+    """A missing battery power sample breaks both divergence streaks: the
+    warning must only latch from CONSECUTIVE divergent readings, never from
+    fragments separated by gaps in the fast-poll cache."""
+    coord = _coord_stub()
+    coord.data = {"battery_cd_power": 500.0}  # +discharge while charge is commanded
+    controller = BatterySocController(coord, hass=None, entry_id="entry")
+
+    for _ in range(DIVERGENCE_CYCLES - 1):
+        await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == DIVERGENCE_CYCLES - 1
+
+    # Sample gap: register missing from the coordinator cache.
+    coord.data = {}
+    await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == 0
+    assert controller._divergence_clear_count == 0
+
+    # One more divergent sample after the gap must NOT complete the streak.
+    coord.data = {"battery_cd_power": 500.0}
+    await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == 1
+    assert controller._divergence_warned is False
+
+    # A stale cache (failed poll cycle left old data behind) counts as a gap
+    # too — the same frozen sample must not be judged repeatedly.
+    coord.last_update_success = False
+    await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == 0
+    coord.last_update_success = True
+    await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == 1
+    assert controller._divergence_warned is False
 
 
 @pytest.mark.asyncio

@@ -103,6 +103,11 @@ def _health_monitor() -> SimpleNamespace:
             SimpleNamespace(category="b", message="m2", level=HealthLevel.WARNING),
         ],
         dc_string_imbalance=12.34,
+        dc_string_baseline_deviation=8.76,
+        dc_string_collapsed=[],
+        dc_share_baseline={
+            "dc1_power": {"learned_share_pct": 52.6, "recent_share_pct": 51.0},
+        },
         dc1_power=_tracker(current=1000.0),
         dc2_power=_tracker(current=900.0),
         dc3_power=_tracker(current=None),
@@ -264,15 +269,26 @@ def test_health_binary_sensor_entities_cover_unknown_warning_and_error_branches(
     monitor._total_polls = 10
 
     dc_warning = DCStringImbalanceWarning(monitor, "entry", device_info)
+    # is_on keys off the LEARNED-baseline deviation, not the raw spread —
+    # a permanently asymmetric (south/north) setup must not trip it.
     assert dc_warning.is_on is False
     assert dc_warning.icon == "mdi:solar-panel-large"
-    monitor.dc_string_imbalance = 35.0
+    monitor.dc_string_baseline_deviation = 35.0
     assert dc_warning.is_on is True
     assert dc_warning.icon == "mdi:alert"
-    assert dc_warning.extra_state_attributes["imbalance_percent"] == pytest.approx(35.0)
-    monitor.dc_string_imbalance = None
+    assert dc_warning.extra_state_attributes["baseline_deviation_pp"] == pytest.approx(35.0)
+    assert dc_warning.extra_state_attributes["imbalance_percent"] == pytest.approx(12.3)
+    monitor.dc_string_baseline_deviation = None
     assert dc_warning.is_on is None
+    assert dc_warning.extra_state_attributes["baseline_deviation_pp"] is None
+    monitor.dc_string_imbalance = None
     assert dc_warning.extra_state_attributes["imbalance_percent"] is None
+    # Collapsed string trips the warning even before a baseline is learned
+    # (collapsed samples never train the baseline, so bdev stays None).
+    monitor.dc_string_collapsed = ["dc2_power"]
+    assert dc_warning.is_on is True
+    assert dc_warning.extra_state_attributes["collapsed_strings"] == ["dc2_power"]
+    monitor.dc_string_collapsed = []
 
     active_errors = ActiveErrorsWarning(monitor, "entry", device_info)
     assert active_errors.available is True

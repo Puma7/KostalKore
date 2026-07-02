@@ -16,4 +16,6 @@ respx
 syrupy
 aiohttp
 mypy
-ruff
+# Pinned: new ruff releases stabilize additional F/W rules and can turn CI red
+# with zero repo changes. Bump deliberately together with ruff.toml.
+ruff==0.15.20

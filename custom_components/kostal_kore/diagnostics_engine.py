@@ -91,6 +91,15 @@ class DiagnosticsEngine:
         if imbalance is not None:
             raw["imbalance_pct"] = round(imbalance, 1)
 
+        baseline_dev = h.dc_string_baseline_deviation
+        if baseline_dev is not None:
+            raw["baseline_deviation_pp"] = round(baseline_dev, 1)
+            raw["share_baseline"] = h.dc_share_baseline
+
+        collapsed = h.dc_string_collapsed
+        if collapsed:
+            raw["collapsed_strings"] = collapsed
+
         dc_arc_alerts = [
             a for a in self._safety.active_alerts
             if a.category in ("dc_arc_indicator", "dc_imbalance")
@@ -117,13 +126,32 @@ class DiagnosticsEngine:
                 raw,
             )
 
-        if imbalance is not None and imbalance > 40:
+        # A collapsed string needs no learned baseline (it is excluded from
+        # baseline learning, so the deviation metric can never report it).
+        if collapsed:
+            names = ", ".join(k.replace("_power", "").upper() for k in collapsed)
+            return AreaDiagnosis(
+                "dc_solar", DiagStatus.WARNUNG,
+                "DC-String liefert keine Leistung",
+                f"{names}: praktisch keine Leistung, während die anderen "
+                "Strings produzieren.",
+                "String-Sicherung, MC4-Stecker und Verkabelung des betroffenen "
+                "Strings prüfen. Auch vollständige Abdeckung (Schnee, Laub) "
+                "möglich.",
+                raw,
+            )
+
+        # Baseline-aware: raw imbalance is permanently high for mixed
+        # orientations (south/north) — only a shift away from the LEARNED
+        # share pattern is a diagnosis-worthy signal.
+        if baseline_dev is not None and baseline_dev > 20:
             return AreaDiagnosis(
                 "dc_solar", DiagStatus.HINWEIS,
-                "DC-Strings leicht ungleichmäßig",
-                f"Leistungsunterschied zwischen den Strings: {imbalance:.0f}%.",
-                "Prüfen ob ein String verschattet oder verschmutzt ist. "
-                "Bei gleichmäßiger Besonnung alle MC4-Stecker auf festen Sitz prüfen.",
+                "DC-String-Verhältnis verschoben",
+                f"Abweichung vom gelernten String-Verhältnis: "
+                f"{baseline_dev:.0f} Prozentpunkte.",
+                "Prüfen ob ein String neu verschattet oder verschmutzt ist. "
+                "MC4-Stecker des abweichenden Strings auf festen Sitz prüfen.",
                 raw,
             )
 

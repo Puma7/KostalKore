@@ -62,12 +62,41 @@ class TestInverterTips:
 
 class TestPVTips:
 
-    def test_tip_dc_imbalance(self) -> None:
-        h = InverterHealthMonitor()
-        h.update_from_modbus({"dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 3000.0})
+    def test_tip_dc_baseline_shift(self) -> None:
+        """Tip fires when the learned string share pattern SHIFTS."""
+        h = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        for _ in range(40):
+            h.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
         a = LongevityAdvisor(h, LFP_THRESHOLDS)
         tips = [t for t in a.get_tips() if t.component == "pv"]
-        assert any("String" in t.title or "ungleich" in t.title for t in tips)
+        assert any("String" in t.title or "verschoben" in t.title for t in tips)
+
+    def test_tip_for_collapsed_string(self) -> None:
+        """A string dying during the learning hour produces a high-priority
+        tip even before a baseline is learned (collapsed samples never train
+        the baseline)."""
+        h = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        for _ in range(60):
+            h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        a = LongevityAdvisor(h, LFP_THRESHOLDS)
+        tips = [t for t in a.get_tips() if t.component == "pv"]
+        assert any("ohne Leistung" in t.title for t in tips)
+        assert any(t.priority == "hoch" for t in tips)
+
+    def test_no_tip_for_stable_asymmetric_strings(self) -> None:
+        """South/north setups: a PERMANENT 75/25 split is learned as normal
+        and must not produce an imbalance tip (raw imbalance is ~50%)."""
+        h = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert h.dc_string_imbalance is not None and h.dc_string_imbalance > 20
+        a = LongevityAdvisor(h, LFP_THRESHOLDS)
+        tips = [t for t in a.get_tips() if t.component == "pv"]
+        assert not any("String" in t.title or "verschoben" in t.title for t in tips)
 
 
 class TestAssessments:

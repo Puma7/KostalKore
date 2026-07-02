@@ -145,8 +145,9 @@ Orphan recorder history (long-time KORE users without legacy entry): [docs/migra
 ## Development
 
 ### Branches
-- `develop` is the default branch for ongoing work.
-- `main` reflects tagged release snapshots.
+- `main` is the default branch: all work lands via pull requests into `main`,
+  and releases are tagged from it.
+- `develop` is a historical branch (stale since early 2026) and no longer used.
 
 ### Release Notes
 See `RELEASE_NOTES.md` for the latest release highlights.
@@ -575,7 +576,7 @@ Contributions are welcome! Please:
 
 ## Version History
 
-- **Current**: `v3.0.1` (stable release channel)
+- **Current**: see [GitHub Releases](https://github.com/Puma7/KostalKore/releases) — the authoritative version is `manifest.json`
 - **Compatibility**: Home Assistant 2024.12+
 - **API Support**: Kostal Plenticore local API
 - **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history
