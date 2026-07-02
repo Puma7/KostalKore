@@ -25,6 +25,23 @@ diagnostics for cases where the inverter's own firmware now controls the battery
   after sustained clean cycles, resets between control sessions, and is skipped on
   failed writes (a rejected command is our fault, not another controller's).
 
+### Changed (imbalance & temperature validity for asymmetric setups)
+- **DC-string imbalance is now baseline-aware.** The health monitor learns each
+  PV string's typical share of total DC power (~24h rolling median) and all
+  warning surfaces — longevity tip, DC diagnosis, health-score penalty, and the
+  "DC String Imbalance Warning" problem sensor — now trigger on a **shift away
+  from the learned pattern** (in percentage points), not on the raw
+  instantaneous spread. Permanently asymmetric setups (south/north strings,
+  different string sizes) previously produced constant false "strings
+  ungleichmäßig" warnings; the raw spread remains visible as the sensor value
+  and a `baseline_deviation_pp` / `share_baseline` attribute set was added.
+  The baseline is in-memory (relearns within ~1h of production after reload)
+  and only samples above 200 W total, so dawn/dusk noise is ignored.
+- **Battery average-temperature tip is now tiered**: above the chemistry's
+  *acceptable* limit it stays a "hoch" warning; between *optimal* and
+  *acceptable* it is a low-key "info" nudge instead of a warning (most
+  installations sit there in summer).
+
 ### Fixed (review follow-ups — full audit of all changes since 3.0.0)
 - **MQTT bridge: no register writes from a half-started bridge.** Inbound and
   retained MQTT commands are now ignored until the bridge reaches its commit

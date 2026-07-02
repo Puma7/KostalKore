@@ -276,6 +276,46 @@ class TestInverterHealthMonitor:
         assert imb is not None
         assert imb >= 0
 
+    def test_dc_baseline_none_before_learning(self) -> None:
+        """No judgement until enough production samples were learned."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert m.dc_string_baseline_deviation is None
+
+    def test_dc_baseline_stable_asymmetry_is_normal(self) -> None:
+        """A permanent 75/25 split (south/north strings) must NOT deviate —
+        the raw imbalance is high, but the learned-baseline deviation is ~0."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        raw = m.dc_string_imbalance
+        assert raw is not None and raw > 20  # raw metric stays honest (50%)
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev < 5.0  # ...but the learned pattern shows no shift
+
+    def test_dc_baseline_detects_pattern_shift(self) -> None:
+        """A real shift away from the learned share pattern is flagged."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # String 1 collapses (e.g. failed panel/string): shares flip hard.
+        for _ in range(40):
+            m.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev > 25.0
+        shares = m.dc_share_baseline
+        assert shares["dc1_power"]["learned_share_pct"] > shares["dc1_power"]["recent_share_pct"]
+
+    def test_dc_baseline_ignores_low_light(self) -> None:
+        """Below the minimum total, shares are noise and are not recorded."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=5)
+        for _ in range(20):
+            m.update_from_modbus({"dc1_power": 60.0, "dc2_power": 40.0})
+        assert m.dc_string_baseline_deviation is None
+
     def test_inverter_state_tracking(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"inverter_state": 6})

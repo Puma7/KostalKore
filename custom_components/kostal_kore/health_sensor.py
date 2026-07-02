@@ -276,10 +276,16 @@ class DCStringImbalanceSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        bdev = self._monitor.dc_string_baseline_deviation
         return {
             "dc1_power": self._monitor.dc1_power.current,
             "dc2_power": self._monitor.dc2_power.current,
             "dc3_power": self._monitor.dc3_power.current,
+            # The sensor VALUE is the raw instantaneous spread (permanently
+            # high for mixed orientations, e.g. south/north); the learned
+            # baseline deviation below is what the warning entities act on.
+            "baseline_deviation_pp": round(bdev, 1) if bdev is not None else None,
+            "share_baseline": self._monitor.dc_share_baseline,
         }
 
 

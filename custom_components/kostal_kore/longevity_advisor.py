@@ -100,15 +100,27 @@ class LongevityAdvisor:
         bt = self._bat_thresholds
 
         avg_temp = h.battery_temp.avg_value
-        if avg_temp is not None and avg_temp > bt.temp_optimal_max:
+        if avg_temp is not None and avg_temp > bt.temp_acceptable_max:
             tips.append(LongevityTip(
                 "battery", "hoch",
                 f"Batterie-Durchschnittstemperatur zu hoch ({avg_temp:.1f}°C)",
-                f"Optimaler Bereich für {bt.chemistry}: unter {bt.temp_optimal_max}°C. "
+                f"Akzeptabler Bereich für {bt.chemistry}: bis {bt.temp_acceptable_max}°C. "
                 f"Aktuelle Durchschnittstemperatur: {avg_temp:.1f}°C.",
                 "Aufstellort der Batterie überprüfen. Ein kühlerer Raum (Keller statt Dachboden) "
                 "kann die Lebensdauer um Jahre verlängern. "
                 f"{bt.longevity_tip}",
+            ))
+        elif avg_temp is not None and avg_temp > bt.temp_optimal_max:
+            # Between optimal and acceptable: an informational nudge, not a
+            # warning — in summer most installations sit here temporarily.
+            tips.append(LongevityTip(
+                "battery", "info",
+                f"Batterie-Durchschnittstemperatur über Optimum ({avg_temp:.1f}°C)",
+                f"Optimaler Bereich für {bt.chemistry}: unter {bt.temp_optimal_max}°C "
+                f"(akzeptabel bis {bt.temp_acceptable_max}°C). Leicht erhöhte "
+                "Temperaturen verkürzen die Lebensdauer geringfügig.",
+                "Kein dringender Handlungsbedarf. Ein kühlerer Aufstellort "
+                f"verlängert die Lebensdauer. {bt.longevity_tip}",
             ))
 
         max_temp = h.battery_temp.max_value
@@ -175,14 +187,21 @@ class LongevityAdvisor:
         tips: list[LongevityTip] = []
         h = self._health
 
-        imbalance = h.dc_string_imbalance
-        if imbalance is not None and imbalance > 20:
+        # Baseline-aware: permanent asymmetry (south/north orientation,
+        # different string sizes) is learned as normal — only a SHIFT away
+        # from the installation's own share pattern produces a tip.
+        bdev = h.dc_string_baseline_deviation
+        if bdev is not None and bdev > 20:
             tips.append(LongevityTip(
                 "pv", "mittel",
-                f"DC-Strings {imbalance:.0f}% ungleichmäßig",
-                "Ungleichmäßige Leistung kann auf Verschmutzung, Verschattung oder Degradation hinweisen.",
-                "Module reinigen. Verschattungsquellen entfernen (Bäume, Antennen). "
-                "Bei anhaltender Differenz Modulzustand prüfen lassen.",
+                f"DC-String-Verhältnis um {bdev:.0f} Prozentpunkte verschoben",
+                "Das gelernte Leistungsverhältnis der Strings hat sich deutlich "
+                "verschoben. Dauerhafte Unterschiede durch Ausrichtung oder "
+                "String-Größe sind bereits herausgerechnet — eine Verschiebung "
+                "deutet auf neue Verschattung, Verschmutzung oder einen Defekt hin.",
+                "Module des abweichenden Strings prüfen (Verschmutzung, neue "
+                "Verschattung, MC4-Stecker). Bei anhaltender Abweichung "
+                "Modulzustand prüfen lassen.",
             ))
 
         iso = h.isolation.current

@@ -26,6 +26,12 @@ against your FW 3.06.10 G3.
   `battery_work_capacity` (Modbus reg 1068)?** The changelog says "battery capacity only for
   HELIVOR". If reg 1068 returns 0 / `ILLEGAL_DATA_ADDRESS`, KORE's computed SoH + degradation
   projection go unavailable for non-HELIVOR. → Gates the **O2** capacity fallback.
+- **HV2b — Owner's battery chemistry mapping:** the owner's G3 shows the tight 35 °C
+  battery-temperature thresholds, i.e. it is classified as NMC or "Unknown → conservative".
+  Capture the **Battery Chemistry / Battery Type sensor value** (Modbus reg 588 code) from the
+  live system; if it reads "Unknown (0x…)", add the code to `BATTERY_TYPES`
+  (`modbus_registers.py`), the dict in `helper.py`, and `_TYPE_TO_CHEMISTRY`
+  (`battery_chemistry.py`) so an LFP pack gets its correct 40 °C acceptable threshold.
 - **HV3 — Exact Modbus address + datatype of the SunSpec model-802 battery SoH field**
   (from the updated *BA_KOSTAL Interface MODBUS-TCP / SunSpec* document). The changelog only says
   "SoH via SunSpec 802", not an address. → Blocks **O1**.

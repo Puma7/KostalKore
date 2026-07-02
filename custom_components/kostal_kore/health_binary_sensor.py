@@ -207,10 +207,13 @@ class DCStringImbalanceWarning(BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:  # pyright: ignore[reportIncompatibleVariableOverride]
-        imb = self._monitor.dc_string_imbalance
-        if imb is None:
+        # Baseline-aware: permanent asymmetry (south/north strings) stays off;
+        # only a shift away from the learned share pattern turns the problem
+        # sensor on. None until the baseline is learned (~1h of production).
+        bdev = self._monitor.dc_string_baseline_deviation
+        if bdev is None:
             return None
-        return imb > 30.0
+        return bdev > 25.0
 
     @property
     def icon(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -218,8 +221,10 @@ class DCStringImbalanceWarning(BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+        bdev = self._monitor.dc_string_baseline_deviation
         return {
             "imbalance_percent": round(self._monitor.dc_string_imbalance, 1) if self._monitor.dc_string_imbalance is not None else None,
+            "baseline_deviation_pp": round(bdev, 1) if bdev is not None else None,
         }
 
 

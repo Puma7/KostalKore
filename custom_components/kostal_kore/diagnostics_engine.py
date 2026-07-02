@@ -91,6 +91,11 @@ class DiagnosticsEngine:
         if imbalance is not None:
             raw["imbalance_pct"] = round(imbalance, 1)
 
+        baseline_dev = h.dc_string_baseline_deviation
+        if baseline_dev is not None:
+            raw["baseline_deviation_pp"] = round(baseline_dev, 1)
+            raw["share_baseline"] = h.dc_share_baseline
+
         dc_arc_alerts = [
             a for a in self._safety.active_alerts
             if a.category in ("dc_arc_indicator", "dc_imbalance")
@@ -117,13 +122,17 @@ class DiagnosticsEngine:
                 raw,
             )
 
-        if imbalance is not None and imbalance > 40:
+        # Baseline-aware: raw imbalance is permanently high for mixed
+        # orientations (south/north) — only a shift away from the LEARNED
+        # share pattern is a diagnosis-worthy signal.
+        if baseline_dev is not None and baseline_dev > 20:
             return AreaDiagnosis(
                 "dc_solar", DiagStatus.HINWEIS,
-                "DC-Strings leicht ungleichmäßig",
-                f"Leistungsunterschied zwischen den Strings: {imbalance:.0f}%.",
-                "Prüfen ob ein String verschattet oder verschmutzt ist. "
-                "Bei gleichmäßiger Besonnung alle MC4-Stecker auf festen Sitz prüfen.",
+                "DC-String-Verhältnis verschoben",
+                f"Abweichung vom gelernten String-Verhältnis: "
+                f"{baseline_dev:.0f} Prozentpunkte.",
+                "Prüfen ob ein String neu verschattet oder verschmutzt ist. "
+                "MC4-Stecker des abweichenden Strings auf festen Sitz prüfen.",
                 raw,
             )
 

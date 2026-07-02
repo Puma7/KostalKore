@@ -22,9 +22,18 @@ class TestDCDiagnostics:
         d = e.diagnose_dc_solar()
         assert d.status == DiagStatus.OK
 
-    def test_dc_hinweis_on_imbalance(self) -> None:
+    def test_dc_hinweis_on_baseline_shift(self) -> None:
+        """HINWEIS only when the LEARNED share pattern shifts — a permanent
+        asymmetric split (south/north) alone must stay OK."""
         e = _make_engine()
-        e._health.update_from_modbus({"dc1_power": 5000.0, "dc2_power": 5000.0, "dc3_power": 2000.0})
+        e._health._dc_share_min_samples = 50
+        for _ in range(200):
+            e._health.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # Stable asymmetry: raw imbalance ~50%, but no diagnosis.
+        assert e.diagnose_dc_solar().status == DiagStatus.OK
+        # Pattern shift: string 1 collapses.
+        for _ in range(40):
+            e._health.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
         d = e.diagnose_dc_solar()
         assert d.status == DiagStatus.HINWEIS
         assert "MC4" in d.action or "String" in d.action or "verschattet" in d.action

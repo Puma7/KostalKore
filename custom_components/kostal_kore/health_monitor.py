@@ -22,6 +22,7 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum  # noqa: F401
+from statistics import median
 from typing import Any, Final
 
 from .helper import (
@@ -36,6 +37,15 @@ from .helper import (
 _LOGGER: Final = logging.getLogger(__name__)
 
 MAX_HISTORY_SIZE: Final[int] = 2000
+
+# --- DC string share baseline learning ---
+# Shares are sampled on every Modbus poll (~5s). The long window (~24h)
+# captures the installation's typical share pattern including its daily
+# variation; the short window (~5min) smooths transients.
+DC_SHARE_LONG_MAXLEN: Final[int] = 17280  # ~24h at 5s polls
+DC_SHARE_SHORT_MAXLEN: Final[int] = 60  # ~5min at 5s polls
+DC_SHARE_MIN_SAMPLES: Final[int] = 720  # ~1h of production before judging
+DC_SHARE_MIN_TOTAL_W: Final[float] = 200.0  # below this, shares are noise
 
 
 def resolve_active_error_warning_counts(
@@ -212,8 +222,21 @@ class InverterHealthMonitor:
     tracks trends, and generates health assessments.
     """
 
-    def __init__(self, *, num_bidirectional: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        num_bidirectional: int = 0,
+        dc_share_min_samples: int = DC_SHARE_MIN_SAMPLES,
+    ) -> None:
         self._num_bidirectional: int = num_bidirectional
+        # DC string share baseline learning: learns each PV string's typical
+        # share of total DC power, so PERMANENT asymmetry (south/north
+        # orientation, different string sizes) is treated as normal and only
+        # a shift away from the learned pattern is flagged. In-memory only:
+        # resets on reload and relearns within ~1h of production.
+        self._dc_share_min_samples: int = dc_share_min_samples
+        self._dc_share_long: dict[str, deque[float]] = {}
+        self._dc_share_short: dict[str, deque[float]] = {}
         # --- Electrical Safety ---
         self.isolation = ParameterTracker(
             name="Isolation Resistance", unit="Ω",
@@ -418,6 +441,68 @@ class InverterHealthMonitor:
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass
+
+        self._record_dc_shares(data)
+
+    def _record_dc_shares(self, data: dict[str, Any]) -> None:
+        """Sample each PV string's share of total DC power for baseline learning."""
+        keys = ["dc1_power", "dc2_power"]
+        if self._num_bidirectional < 1:
+            keys.append("dc3_power")
+        powers: dict[str, float] = {}
+        for key in keys:
+            val = _safe_float(data.get(key))
+            if val is not None:
+                powers[key] = max(val, 0.0)
+        if len(powers) < 2:
+            return
+        total = sum(powers.values())
+        if total < DC_SHARE_MIN_TOTAL_W:
+            # Dawn/dusk/night: shares are numerically meaningless noise.
+            return
+        for key, power in powers.items():
+            share = power / total
+            self._dc_share_long.setdefault(
+                key, deque(maxlen=DC_SHARE_LONG_MAXLEN)
+            ).append(share)
+            self._dc_share_short.setdefault(
+                key, deque(maxlen=DC_SHARE_SHORT_MAXLEN)
+            ).append(share)
+
+    @property
+    def dc_string_baseline_deviation(self) -> float | None:
+        """Max deviation (percentage points) of any string's recent share of
+        total DC power from its own LEARNED share.
+
+        Unlike ``dc_string_imbalance`` (raw instantaneous spread, which is
+        permanently high for mixed orientations like south/north), this metric
+        only rises when the installation's established share pattern SHIFTS —
+        the signal for new shading, soiling, or a failing string/panel.
+        Returns None until enough production samples were learned.
+        """
+        devs: list[float] = []
+        for key, long_q in self._dc_share_long.items():
+            short_q = self._dc_share_short.get(key)
+            if len(long_q) < self._dc_share_min_samples:
+                continue
+            if not short_q or len(short_q) < 5:
+                continue
+            devs.append(abs(median(short_q) - median(long_q)) * 100.0)
+        return max(devs) if devs else None
+
+    @property
+    def dc_share_baseline(self) -> dict[str, dict[str, float]]:
+        """Learned vs. recent share per PV string (percent), for diagnostics."""
+        result: dict[str, dict[str, float]] = {}
+        for key, long_q in self._dc_share_long.items():
+            short_q = self._dc_share_short.get(key)
+            if len(long_q) < self._dc_share_min_samples or not short_q:
+                continue
+            result[key] = {
+                "learned_share_pct": round(median(long_q) * 100.0, 1),
+                "recent_share_pct": round(median(short_q) * 100.0, 1),
+            }
+        return result
 
     def get_isolation_resistance_ohm(self) -> float | None:
         """Return isolation for HA display; None when Modbus has no valid reading."""
@@ -626,8 +711,10 @@ class InverterHealthMonitor:
             score -= 10
         if self.communication_reliability < 95:
             score -= 10
-        imb = self.dc_string_imbalance
-        if imb is not None and imb > 30:
+        # Baseline-aware: permanent asymmetry (south/north strings) does not
+        # cost points — only a shift away from the learned share pattern does.
+        bdev = self.dc_string_baseline_deviation
+        if bdev is not None and bdev > 25:
             score -= 5
         return max(0, min(100, score))
 
@@ -643,6 +730,8 @@ class InverterHealthMonitor:
             "event_count": self.event_count,
             "state_changes": self.state_change_count,
             "dc_string_imbalance": round(self.dc_string_imbalance, 1) if self.dc_string_imbalance is not None else None,
+            "dc_string_baseline_deviation": round(self.dc_string_baseline_deviation, 1) if self.dc_string_baseline_deviation is not None else None,
+            "dc_share_baseline": self.dc_share_baseline,
             "phase_voltage_imbalance": round(self.phase_voltage_imbalance, 1) if self.phase_voltage_imbalance is not None else None,
             "trackers": {},
         }
