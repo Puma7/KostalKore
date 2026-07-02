@@ -79,13 +79,15 @@ SAFE_WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
 TOPIC_PREFIX: Final[str] = "kostal_kore"
 QOS: Final[int] = 1
 
-# Self-healing start: if the MQTT broker is not reachable when the integration
-# sets up (e.g. the MQTT integration finishes connecting after this one, or a
-# CPU-loaded startup delays the broker), the bridge retries in the background
-# with exponential backoff instead of aborting the whole integration setup.
+# Self-healing start: if the MQTT integration is not loaded yet or the broker
+# is not reachable when this integration sets up (e.g. MQTT finishes setting up
+# after this one on a cold boot, or a CPU-loaded startup delays the broker),
+# the bridge retries in the background instead of aborting the whole setup.
+# The interval backs off to _RETRY_MAX_DELAY and then keeps probing at that
+# pace indefinitely — the bridge starts whenever MQTT becomes available; only
+# unloading the entry stops the loop.
 _RETRY_INITIAL_DELAY: Final[float] = 5.0
 _RETRY_MAX_DELAY: Final[float] = 300.0
-_RETRY_MAX_ATTEMPTS: Final[int] = 12
 
 RATE_LIMIT_SECONDS: Final[float] = 1.0
 
@@ -130,6 +132,7 @@ class KostalMqttBridge:
         self._write_lock = asyncio.Lock()
         self._publish_task: asyncio.Task[None] | None = None
         self._start_retry_task: asyncio.Task[None] | None = None
+        self._start_attempted: bool = False
         self._command_count: int = 0
         self._rate_limited_count: int = 0
 
@@ -137,27 +140,38 @@ class KostalMqttBridge:
     def topic_base(self) -> str:
         return self._topic_base
 
+    @property
+    def started(self) -> bool:
+        """Whether the bridge is fully started (commit point reached)."""
+        return self._started
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def async_start(self) -> None:
-        """Start the bridge, self-healing if the broker is not yet reachable.
+        """Start the bridge, self-healing until MQTT becomes available.
 
-        A broker that is briefly unavailable at setup time (e.g. the MQTT
-        integration finishing its connection after this one, or a CPU-loaded
-        startup) must never abort the whole integration. The first attempt runs
-        immediately; if it fails, a background task retries with backoff until
-        the broker is reachable.
+        Neither blocker may abort the integration setup: the MQTT integration
+        not being loaded yet (e.g. it sets up after this one on a cold boot)
+        or the broker being unreachable. The first attempt runs immediately
+        when possible; otherwise a background task retries with backoff until
+        the bridge starts or the entry is unloaded.
         """
         if self._started:
+            return
+        if self._start_retry_task is not None and not self._start_retry_task.done():
+            # A retry loop is already driving the start; don't race it with a
+            # second concurrent _try_start over the shared subscription state.
             return
 
         if not _has_mqtt(self._hass):
             _LOGGER.warning(
-                "MQTT integration not available – Modbus MQTT bridge disabled. "
-                "Set up MQTT in HA to share inverter data with evcc/iobroker."
+                "MQTT integration not loaded yet – the Modbus MQTT bridge will "
+                "start automatically once MQTT is available "
+                "(waiting in background)."
             )
+            self._schedule_start_retry()
             return
 
         if await self._try_start():
@@ -174,13 +188,28 @@ class KostalMqttBridge:
 
         Ordering matters: subscriptions and the retained register config are
         wired up first, and the retained ``available = online`` is published
-        **last** as the commit point. On any error every partial step is rolled
-        back, so a failed attempt never leaves a stale retained "online" or
-        orphaned subscriptions, and the exception never escapes to abort
-        integration setup.
+        **last** as the commit point. Inbound commands are additionally gated
+        on ``self._started`` (see ``_handle_command``), so nothing delivered
+        into a half-started subscription window can write registers. On any
+        error every partial step is rolled back and retained topics from the
+        failed attempt are best-effort cleared, so a failed attempt never
+        leaves a stale retained state or orphaned subscriptions.
         """
         from homeassistant.components import mqtt  # noqa: E402
 
+        # Cheap fail-fast: HA queues subscriptions locally while the broker is
+        # down (async_subscribe does not raise), so probing the connection
+        # first avoids wiring all subscriptions per attempt only to roll them
+        # back at the first publish.
+        try:
+            if not mqtt.is_connected(self._hass):
+                _LOGGER.debug("MQTT broker not connected – skipping start attempt")
+                return False
+        except (KeyError, AttributeError):
+            # mqtt loaded but client state not ready; let the attempt decide.
+            pass
+
+        self._start_attempted = True
         try:
             for reg in SAFE_WRITABLE_REGISTERS:
                 topic = f"{self._topic_base}/command/{reg.name}"
@@ -213,19 +242,21 @@ class KostalMqttBridge:
             # Unload/cancel during a retry attempt: undo any partial wiring so no
             # stale subscriptions stay attached to a coordinator being torn down.
             self._rollback_partial_start()
+            await self._best_effort_clear_retained()
             raise
         except HomeAssistantError as err:
             _LOGGER.debug(
                 "MQTT bridge start attempt failed (broker not ready yet): %s", err
             )
             self._rollback_partial_start()
+            await self._best_effort_clear_retained()
             return False
         except Exception:
             # Any other unexpected error: roll back partial wiring before it
-            # propagates, so async_setup_entry's guard can log-and-continue
-            # without leaving stale subscriptions/listener attached to the
-            # coordinator (async_stop() returns early while _started is False).
+            # propagates so no stale subscriptions/listener stay attached to
+            # the coordinator; the caller decides logging/retry policy.
             self._rollback_partial_start()
+            await self._best_effort_clear_retained()
             raise
 
         _LOGGER.info(
@@ -235,14 +266,51 @@ class KostalMqttBridge:
         return True
 
     def _rollback_partial_start(self) -> None:
-        """Undo any partial wiring left by a failed start attempt."""
+        """Undo partial wiring left by a failed start attempt.
+
+        Only runs before the commit point (``_started`` is never True here),
+        so this must never be reused for teardown of a started bridge — that
+        path is ``async_stop`` (which also publishes the retained offline).
+        """
         if self._unsub_coordinator is not None:
             self._unsub_coordinator()
             self._unsub_coordinator = None
         for unsub in self._unsub_command:
             unsub()
         self._unsub_command.clear()
-        self._started = False
+
+    async def _best_effort_clear_retained(self) -> None:
+        """Clear retained topics a failed start attempt may have left behind.
+
+        ``_publish_register_metadata`` publishes the retained ``/config``
+        before the commit point, and a cancelled final ``online`` publish can
+        have reached the broker; both would otherwise advertise a bridge that
+        is not running. Publishing an empty retained payload deletes the
+        retained ``/config``; ``offline`` corrects the availability topic.
+        Errors are swallowed — the broker being unreachable is usually the
+        very reason the attempt failed.
+        """
+        if not _has_mqtt(self._hass):
+            return
+        from homeassistant.components import mqtt
+
+        for topic, payload in (
+            (f"{self._topic_base}/config", ""),
+            (f"{self._topic_base}/available", "offline"),
+        ):
+            try:
+                # Time-bounded so teardown/cancellation can never hang on a
+                # dead broker; wait_for runs the publish in its own task.
+                await asyncio.wait_for(
+                    mqtt.async_publish(  # type: ignore[attr-defined]
+                        self._hass, topic, payload, QOS, retain=True,
+                    ),
+                    timeout=2.0,
+                )
+            except Exception:  # best-effort cleanup only
+                # Each topic independently: a failed /config delete must not
+                # skip the more important /available = offline correction.
+                continue
 
     def _schedule_start_retry(self) -> None:
         """Schedule the background self-healing start loop (idempotent)."""
@@ -253,33 +321,60 @@ class KostalMqttBridge:
         )
 
     async def _start_retry_loop(self) -> None:
-        """Retry starting the bridge until the broker becomes reachable."""
+        """Keep retrying until the bridge starts or the entry is unloaded.
+
+        Waits through both blockers — the MQTT integration not being loaded
+        (yet, or during a reload of it) and the broker being unreachable. The
+        interval backs off to ``_RETRY_MAX_DELAY`` and then probes at that
+        pace indefinitely; there is deliberately no give-up so the logged
+        promise "will start automatically once the broker is available" holds.
+        Cancellation (entry unload) is the only exit besides success.
+        """
         delay: float = _RETRY_INITIAL_DELAY
         attempt = 0
         try:
-            while not self._started and attempt < _RETRY_MAX_ATTEMPTS:
-                attempt += 1
+            while not self._started:
                 await asyncio.sleep(delay)
-                if not _has_mqtt(self._hass):
-                    _LOGGER.debug(
-                        "MQTT integration unloaded – stopping bridge start retry."
-                    )
-                    return
-                if await self._try_start():
-                    _LOGGER.info(
-                        "MQTT bridge recovered: started on retry attempt %d.", attempt
-                    )
-                    return
+                attempt += 1
                 delay = min(delay * 2, _RETRY_MAX_DELAY)
-            if not self._started:
-                _LOGGER.warning(
-                    "MQTT bridge could not start after %d attempts. It will start "
-                    "on the next reload once the MQTT broker is healthy.", attempt
-                )
-        except asyncio.CancelledError:
-            raise
+                if not _has_mqtt(self._hass):
+                    # MQTT integration not (re)loaded yet – keep waiting.
+                    continue
+                try:
+                    if await self._try_start():
+                        _LOGGER.info(
+                            "MQTT bridge recovered: started on retry attempt %d.",
+                            attempt,
+                        )
+                        return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Same policy as the first attempt (guarded in
+                    # async_setup_entry): an unexpected error must not end
+                    # self-healing — log loudly and keep retrying.
+                    _LOGGER.exception(
+                        "Unexpected error in MQTT bridge start attempt %d; "
+                        "retrying.",
+                        attempt,
+                    )
         finally:
             self._start_retry_task = None
+
+    @staticmethod
+    def _reraise_if_stop_cancelled() -> None:
+        """Re-raise when the task running ``async_stop`` is itself cancelled.
+
+        Awaiting a child task we just cancelled raises ``CancelledError`` in
+        two indistinguishable cases: the child acknowledged our cancel, or the
+        caller cancelled *us* while we awaited (e.g. ``asyncio.wait_for``'s
+        unload timeout in ``_await_cleanup_step``). Swallowing the latter
+        silently defeats the caller's timeout, so re-raise when our own task
+        has a pending cancellation.
+        """
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise asyncio.CancelledError
 
     async def async_stop(self) -> None:
         """Stop the bridge and publish offline status."""
@@ -289,12 +384,18 @@ class KostalMqttBridge:
             try:
                 await retry_task
             except asyncio.CancelledError:
-                pass
+                self._reraise_if_stop_cancelled()
             except Exception:  # defensive: teardown must never raise
                 pass
         self._start_retry_task = None
 
         if not self._started:
+            # A failed or cancelled start attempt may have left retained
+            # topics on the broker; clear them so external consumers do not
+            # see a ghost bridge after unload.
+            if self._start_attempted:
+                await self._best_effort_clear_retained()
+                self._start_attempted = False
             return
 
         if self._unsub_coordinator is not None:
@@ -305,7 +406,9 @@ class KostalMqttBridge:
             self._publish_task.cancel()
             try:
                 await self._publish_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                self._reraise_if_stop_cancelled()
+            except Exception:
                 pass
             self._publish_task = None
 
@@ -321,6 +424,7 @@ class KostalMqttBridge:
             )
 
         self._started = False
+        self._start_attempted = False
         _LOGGER.debug("MQTT proxy bridge stopped")
 
     # ------------------------------------------------------------------
@@ -501,6 +605,26 @@ class KostalMqttBridge:
 
     async def _handle_command(self, msg: Any) -> None:
         """Process an inbound MQTT command to write a register value."""
+        if not self._started:
+            # Never act on messages delivered into a half-started (or rolled
+            # back) subscription window. Acting here would write real inverter
+            # registers from a bridge that is officially not running; external
+            # systems re-send cyclically.
+            _LOGGER.debug("Ignoring MQTT command before bridge start: %s", msg.topic)
+            return
+        if getattr(msg, "retain", False):
+            # Retained commands are replayed by the broker on EVERY
+            # (re)subscribe — a stale battery/register setpoint would be
+            # re-executed after each restart, long after the sender is gone.
+            # Commands must be published without the retain flag.
+            _LOGGER.warning(
+                "Ignoring RETAINED MQTT command on %s: commands must be "
+                "published without retain (a retained setpoint would replay "
+                "on every restart). Clear the retained message on the broker "
+                "and fix the publishing client.",
+                msg.topic,
+            )
+            return
         topic: str = msg.topic
         payload: str = msg.payload
 
@@ -530,6 +654,21 @@ class KostalMqttBridge:
 
     async def _handle_proxy_command(self, msg: Any) -> None:
         """Process a simplified proxy command (e.g. from evcc)."""
+        if not self._started:
+            # See _handle_command: no register writes before the commit point.
+            _LOGGER.debug(
+                "Ignoring MQTT proxy command before bridge start: %s", msg.topic
+            )
+            return
+        if getattr(msg, "retain", False):
+            # See _handle_command: retained commands replay on every restart.
+            _LOGGER.warning(
+                "Ignoring RETAINED MQTT proxy command on %s: commands must be "
+                "published without retain. Clear the retained message on the "
+                "broker and fix the publishing client.",
+                msg.topic,
+            )
+            return
         topic: str = msg.topic
         payload: str = msg.payload
 

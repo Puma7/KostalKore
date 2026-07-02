@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
@@ -469,6 +470,90 @@ async def test_setup_entry_mqtt_bridge_enabled(
     mock_start.assert_called_once()
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_options_flow_rejects_invalid_bind_address(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A non-IP proxy bind is rejected with a visible form error — neither
+    silently coerced to loopback nor stored for the proxy to resolve."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
+    mock_config_entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = mock_config_entry.entry_id
+
+    result = await flow.async_step_init(
+        user_input={
+            "modbus_enabled": False,
+            "modbus_proxy_bind": "homeassistant.local",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_bind_address"}
+
+
+async def test_options_flow_keeps_unchanged_legacy_bind(
+    hass: HomeAssistant,
+) -> None:
+    """A legacy non-IP bind stored before validation existed passes through
+    UNCHANGED when re-saved — users must not be locked out of saving unrelated
+    options (the proxy's runtime warning covers legacy binds)."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
+    entry = MockConfigEntry(
+        entry_id="legacy_bind_entry",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_proxy_bind": "nas.local"},
+    )
+    entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+
+    result = await flow.async_step_init(
+        user_input={
+            "modbus_enabled": False,
+            "modbus_proxy_bind": "nas.local",
+        }
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["modbus_proxy_bind"] == "nas.local"
+
+
+async def test_options_flow_rejects_legacy_bind_when_enabling_proxy(
+    hass: HomeAssistant,
+) -> None:
+    """The grandfather exception applies only while the proxy stays disabled:
+    ENABLING the proxy with a stored non-IP bind must surface the form error
+    instead of silently activating an all-interfaces/hostname bind."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
+    entry = MockConfigEntry(
+        entry_id="legacy_bind_enable_proxy",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_proxy_bind": "nas.local", "modbus_proxy_enabled": False},
+    )
+    entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+
+    result = await flow.async_step_init(
+        user_input={
+            "modbus_proxy_enabled": True,
+            "modbus_proxy_bind": "nas.local",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_bind_address"}
 
 
 async def test_setup_entry_mqtt_bridge_start_error_does_not_fail_setup(

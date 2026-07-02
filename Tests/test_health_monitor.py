@@ -276,6 +276,105 @@ class TestInverterHealthMonitor:
         assert imb is not None
         assert imb >= 0
 
+    def test_dc_baseline_none_before_learning(self) -> None:
+        """No judgement until enough production samples were learned."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert m.dc_string_baseline_deviation is None
+
+    def test_dc_baseline_stable_asymmetry_is_normal(self) -> None:
+        """A permanent 75/25 split (south/north strings) must NOT deviate —
+        the raw imbalance is high, but the learned-baseline deviation is ~0."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        raw = m.dc_string_imbalance
+        assert raw is not None and raw > 20  # raw metric stays honest (50%)
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev < 5.0  # ...but the learned pattern shows no shift
+
+    def test_dc_baseline_detects_pattern_shift(self) -> None:
+        """A real shift away from the learned share pattern is flagged."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # String 1 collapses (e.g. failed panel/string): shares flip hard.
+        for _ in range(40):
+            m.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev > 25.0
+        shares = m.dc_share_baseline
+        assert shares["dc1_power"]["learned_share_pct"] > shares["dc1_power"]["recent_share_pct"]
+
+    def test_dc_baseline_does_not_absorb_sustained_fault(self) -> None:
+        """A sustained fault must NOT become the new baseline: learning is
+        frozen while a string deviates hard, so the warning persists even when
+        faulty samples far outnumber the learned history."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(100):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # Fault lasts 4x longer than the learned history.
+        for _ in range(400):
+            m.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev > 25.0
+
+    def test_dc_baseline_ignores_low_light(self) -> None:
+        """Below the minimum total, shares are noise and are not recorded."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=5)
+        for _ in range(20):
+            m.update_from_modbus({"dc1_power": 60.0, "dc2_power": 40.0})
+        assert m.dc_string_baseline_deviation is None
+
+    def test_dc_collapsed_string_detected_without_baseline(self) -> None:
+        """A string that is already dead when learning starts is reported by
+        the raw collapse fallback — and never trains the baseline, so the
+        deviation metric stays None instead of learning the fault as normal."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=10)
+        for _ in range(30):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        assert m.dc_string_collapsed == ["dc2_power"]
+        assert m.dc_string_baseline_deviation is None  # suspect → not learned
+
+    def test_dc_collapsed_samples_never_train_baseline(self) -> None:
+        """After healthy learning, a sustained collapse below the freeze
+        threshold's reach must not seep into the 24h baseline median."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # dc2 collapses for far longer than the learned history.
+        for _ in range(400):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 5.0})
+        assert m.dc_string_collapsed == ["dc2_power"]
+        shares = m.dc_share_baseline
+        assert shares["dc2_power"]["learned_share_pct"] == pytest.approx(25.0, abs=1.0)
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev > 20.0
+
+    def test_dc_healthy_strings_not_collapsed(self) -> None:
+        """A permanent 75/25 split is a share pattern, not a collapse."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(20):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert m.dc_string_collapsed == []
+
+    def test_health_score_penalizes_collapsed_string(self) -> None:
+        """A collapsed string costs points even before a baseline exists."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        assert m.dc_string_baseline_deviation is None
+        assert m.dc_string_collapsed == ["dc2_power"]
+        healthy = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            healthy.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert m.health_score == healthy.health_score - 5
+
     def test_inverter_state_tracking(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"inverter_state": 6})
@@ -508,10 +607,14 @@ class TestHealthMonitorCoverageGaps:
         assert monitor.battery_soh.current is None
 
     def test_overall_health_info_and_score_penalties(self) -> None:
-        monitor = InverterHealthMonitor()
-        monitor.update_from_modbus(
-            {"controller_temp": 64.0, "dc1_power": 60.0, "dc2_power": 120.0}
-        )
+        monitor = InverterHealthMonitor(dc_share_min_samples=10)
+        # The imbalance penalty is baseline-aware: learn a stable share
+        # pattern first, then shift it hard (>25pp) so the -5 applies.
+        for _ in range(60):
+            monitor.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        for _ in range(40):
+            monitor.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
+        monitor.update_from_modbus({"controller_temp": 64.0})
         monitor._total_polls = 10
         monitor._failed_polls = 1
 

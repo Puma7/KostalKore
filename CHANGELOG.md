@@ -13,13 +13,89 @@ diagnostics for cases where the inverter's own firmware now controls the battery
 
 ### Added
 - **Firmware-version awareness** — `parse_firmware_version()` / `firmware_at_least()`
-  helpers; the coordinator now logs a heads-up on firmware ≥ 3.05 (where native
-  Smart AC Charge is default-on) so battery-control conflicts are easier to diagnose.
-- **Setpoint-divergence warning** — the SoC controller now reads back actual battery
-  power and logs a warning (read-only, never affects control) when the battery moves
-  opposite to the commanded direction for several cycles — a likely sign that another
+  helpers; the coordinator logs a debug-level heads-up on firmware ≥ 3.05 (where
+  native Smart AC Charge is default-on). The user-visible conflict signal is the
+  setpoint-divergence warning/notification below.
+- **Setpoint-divergence warning** — the SoC controller now checks actual battery
+  power (read-only, never affects control) and raises a log warning **and a
+  persistent notification** when the battery moves opposite to the commanded
+  direction for several cycles after successful writes — a likely sign that another
   controller (native Smart AC Charge, a native battery schedule, MDC, or a §14a import
-  cap) is overriding KORE.
+  cap) is overriding KORE. The warning latches once per divergence episode, re-arms
+  after sustained clean cycles, resets between control sessions, and is skipped on
+  failed writes (a rejected command is our fault, not another controller's).
+
+### Changed (imbalance & temperature validity for asymmetric setups)
+- **DC-string imbalance is now baseline-aware.** The health monitor learns each
+  PV string's typical share of total DC power (~24h rolling median) and all
+  warning surfaces — longevity tip, DC diagnosis, health-score penalty, and the
+  "DC String Imbalance Warning" problem sensor — now trigger on a **shift away
+  from the learned pattern** (in percentage points), not on the raw
+  instantaneous spread. Permanently asymmetric setups (south/north strings,
+  different string sizes) previously produced constant false "strings
+  ungleichmäßig" warnings; the raw spread remains visible as the sensor value
+  and a `baseline_deviation_pp` / `share_baseline` attribute set was added.
+  The baseline is in-memory (relearns within ~1h of production after reload)
+  and only samples above 200 W total, so dawn/dusk noise is ignored.
+- **Battery average-temperature tip is now tiered**: above the chemistry's
+  *acceptable* limit it stays a "hoch" warning; between *optimal* and
+  *acceptable* it is a low-key "info" nudge instead of a warning (most
+  installations sit there in summer).
+
+### Fixed (review follow-ups — full audit of all changes since 3.0.0)
+- **MQTT bridge: no register writes from a half-started bridge.** Inbound and
+  retained MQTT commands are now ignored until the bridge reaches its commit
+  point — previously a start attempt that later failed could execute real
+  battery-register writes from subscriptions that were then rolled back.
+- **MQTT bridge self-heal now truly self-heals.** The retry loop no longer gives
+  up (previously ~35 min / 12 attempts), waits for the MQTT integration itself to
+  load (covers "MQTT sets up after KORE" on cold boots; `after_dependencies` added),
+  survives unexpected errors on retries (same policy as the first attempt), and
+  fail-fasts via `mqtt.is_connected()` instead of wiring 26 subscriptions per
+  attempt against a down broker.
+- **MQTT bridge: no ghost bridge on the broker.** Failed or cancelled start
+  attempts now best-effort clear the retained `/config` and correct `/available`
+  to `offline`; unloading after a failed attempt cleans up likewise.
+- **MQTT bridge: unload timeout no longer defeated.** `async_stop` re-raises when
+  the task running it is itself cancelled (e.g. by the 5s unload timeout) instead
+  of swallowing the cancellation and continuing teardown unboundedly.
+- **System health check reports the real bridge state** — "aktiv" vs. a warning
+  when the bridge is configured but not started, instead of an unconditional
+  green "konfiguriert".
+- **Proxy bind address: one visible validation authority.** An invalid (non-IP)
+  bind now produces a form error instead of being silently rewritten to
+  `127.0.0.1` (which could break deliberate hostname binds on a mere re-save);
+  values stored before validation existed are no longer able to bypass the
+  LAN-exposure warning — the proxy now warns for hostnames and empty binds
+  (all-interfaces) too, not only for literal non-loopback IPs.
+- **Options flow aborts gracefully below the HA floor.** Manual installs on
+  HA < 2024.12 get a clear "unsupported HA version" message instead of an
+  unhandled `AttributeError` (HA does not enforce the manifest floor at runtime).
+- **Firmware-version parser hardened** — rejects signs, underscores, and
+  non-ASCII digits instead of parsing nonsense tuples.
+- **CI hygiene** — PR-only triggers plus main (was: double runs for every PR
+  commit), concurrency groups with cancel-in-progress, ruff gated to one matrix
+  leg, `ruff` pinned, quieter pytest output; the CI comment no longer claims the
+  3.12 leg tests the HA floor (it resolves a newer HA — documented honestly).
+- **Cleanup** — removed genuinely dead baselined imports, leftover test fixture
+  scaffolding, a stale hardcoded version in the README (now points at Releases),
+  and dead statements in the bridge lifecycle code.
+- **DC-string baseline cannot learn a dead string as "normal".** Samples in which
+  a string produces below 2% of total DC power (while the others produce) are
+  excluded from baseline learning — a string already dead at startup previously
+  trained the baseline during the first ~1h and then read as "no deviation". Such
+  collapsed strings are now reported directly (no learned baseline needed) via a
+  new `dc_string_collapsed` fallback: problem sensor, DC diagnosis (WARNUNG),
+  high-priority longevity tip, health-score penalty, and a `collapsed_strings`
+  attribute. The 2% floor is far below any real shading scenario (even a fully
+  shaded string receives diffuse light well above it), so asymmetric south/north
+  setups remain unaffected.
+- **Setpoint-divergence streaks no longer span sample gaps.** A missing battery
+  power sample (e.g. a partial fast-poll batch) now resets both the divergence
+  and the clean-re-arm streak, so the "another controller?" warning can only
+  latch from consecutive readings.
+- **MQTT retained cleanup is per-topic.** A failing retained `/config` delete no
+  longer skips the more important `/available = offline` correction.
 
 ### Changed
 - Documented battery-control coexistence limits in `README.md` (single inverter; do not
