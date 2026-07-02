@@ -345,6 +345,7 @@ class TestCommandGating:
         assert bridge._started is False
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/active_power_setpoint"
         msg.payload = "80"
 
@@ -359,6 +360,38 @@ class TestCommandGating:
         assert bridge._started is False
 
         msg = MagicMock()
+        msg.retain = False
+        msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/battery_charge"
+        msg.payload = "2000"
+
+        await bridge._handle_proxy_command(msg)
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retained_command_rejected(self) -> None:
+        """Broker-retained commands replay on every restart — never execute."""
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+        bridge._started = True
+
+        msg = MagicMock()
+        msg.retain = True
+        msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/active_power_setpoint"
+        msg.payload = "80"
+
+        await bridge._handle_command(msg)
+        coord.async_write_register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retained_proxy_command_rejected(self) -> None:
+        hass = _mock_hass()
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123", installer_access=True)
+        bridge._started = True
+
+        msg = MagicMock()
+        msg.retain = True
         msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/battery_charge"
         msg.payload = "2000"
 
@@ -377,6 +410,7 @@ class TestCommandHandling:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/active_power_setpoint"
         msg.payload = "80"
 
@@ -395,6 +429,7 @@ class TestCommandHandling:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/total_dc_power"
         msg.payload = "100"
 
@@ -409,6 +444,7 @@ class TestCommandHandling:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/nonexistent"
         msg.payload = "42"
 
@@ -423,6 +459,7 @@ class TestCommandHandling:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/bat_min_soc"
         msg.payload = json.dumps(15.0)
 
@@ -440,6 +477,7 @@ class TestCommandHandling:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/modbus/command/bat_min_soc"
         msg.payload = json.dumps(15.0)
 
@@ -454,6 +492,7 @@ class TestCommandHandling:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = "x"
         msg.payload = "42"
 
@@ -554,6 +593,7 @@ class TestProxyCommands:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/battery_charge"
         msg.payload = "-5000"
 
@@ -568,6 +608,7 @@ class TestProxyCommands:
         bridge._started = True
 
         msg = MagicMock()
+        msg.retain = False
         msg.topic = f"{TOPIC_PREFIX}/INV123/proxy/command/nonexistent"
         msg.payload = "42"
 

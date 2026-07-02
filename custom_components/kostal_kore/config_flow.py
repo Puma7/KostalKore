@@ -803,17 +803,26 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
             stored_bind = str(
                 entry.options.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
             ).strip()
-            if (
-                submitted_bind != stored_bind
-                and validate_bind_address(submitted_bind) is None
+            proxy_was_enabled = bool(
+                entry.options.get(CONF_MODBUS_PROXY_ENABLED, False)
+            )
+            enabling_proxy_now = (
+                bool(normalized.get(CONF_MODBUS_PROXY_ENABLED, False))
+                and not proxy_was_enabled
+            )
+            if validate_bind_address(submitted_bind) is None and (
+                submitted_bind != stored_bind or enabling_proxy_now
             ):
                 # Visible error instead of silent coercion: neither break a
                 # deliberate value without telling the user, nor store a
                 # non-IP the proxy would resolve to an unexpected interface.
-                # Only CHANGED input is validated — an unchanged legacy value
-                # (stored before validation existed) passes through, so those
-                # users are not locked out of saving unrelated options; the
-                # proxy's runtime LAN-exposure warning covers legacy binds.
+                # An UNCHANGED legacy value (stored before validation existed)
+                # passes through so those users are not locked out of saving
+                # unrelated options — EXCEPT when the proxy is being newly
+                # ENABLED in this submission: activating the feature that
+                # binds the address requires fixing the bind first. A legacy
+                # setup whose proxy was already running keeps working; the
+                # proxy's runtime LAN-exposure warning covers those binds.
                 errors = {"base": "invalid_bind_address"}
                 defaults = normalized
             elif normalized.get(CONF_MODBUS_ENABLED, False):

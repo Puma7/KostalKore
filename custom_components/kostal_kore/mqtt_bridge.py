@@ -605,11 +605,23 @@ class KostalMqttBridge:
         """Process an inbound MQTT command to write a register value."""
         if not self._started:
             # Never act on messages delivered into a half-started (or rolled
-            # back) subscription window — e.g. retained commands replayed by
-            # the broker during a start attempt that later fails. Acting here
-            # would write real inverter registers from a bridge that is
-            # officially not running; external systems re-send cyclically.
+            # back) subscription window. Acting here would write real inverter
+            # registers from a bridge that is officially not running; external
+            # systems re-send cyclically.
             _LOGGER.debug("Ignoring MQTT command before bridge start: %s", msg.topic)
+            return
+        if getattr(msg, "retain", False):
+            # Retained commands are replayed by the broker on EVERY
+            # (re)subscribe — a stale battery/register setpoint would be
+            # re-executed after each restart, long after the sender is gone.
+            # Commands must be published without the retain flag.
+            _LOGGER.warning(
+                "Ignoring RETAINED MQTT command on %s: commands must be "
+                "published without retain (a retained setpoint would replay "
+                "on every restart). Clear the retained message on the broker "
+                "and fix the publishing client.",
+                msg.topic,
+            )
             return
         topic: str = msg.topic
         payload: str = msg.payload
@@ -644,6 +656,15 @@ class KostalMqttBridge:
             # See _handle_command: no register writes before the commit point.
             _LOGGER.debug(
                 "Ignoring MQTT proxy command before bridge start: %s", msg.topic
+            )
+            return
+        if getattr(msg, "retain", False):
+            # See _handle_command: retained commands replay on every restart.
+            _LOGGER.warning(
+                "Ignoring RETAINED MQTT proxy command on %s: commands must be "
+                "published without retain. Clear the retained message on the "
+                "broker and fix the publishing client.",
+                msg.topic,
             )
             return
         topic: str = msg.topic

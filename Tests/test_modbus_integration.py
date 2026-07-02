@@ -526,6 +526,36 @@ async def test_options_flow_keeps_unchanged_legacy_bind(
     assert result["data"]["modbus_proxy_bind"] == "nas.local"
 
 
+async def test_options_flow_rejects_legacy_bind_when_enabling_proxy(
+    hass: HomeAssistant,
+) -> None:
+    """The grandfather exception applies only while the proxy stays disabled:
+    ENABLING the proxy with a stored non-IP bind must surface the form error
+    instead of silently activating an all-interfaces/hostname bind."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
+    entry = MockConfigEntry(
+        entry_id="legacy_bind_enable_proxy",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_proxy_bind": "nas.local", "modbus_proxy_enabled": False},
+    )
+    entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+
+    result = await flow.async_step_init(
+        user_input={
+            "modbus_proxy_enabled": True,
+            "modbus_proxy_bind": "nas.local",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_bind_address"}
+
+
 async def test_setup_entry_mqtt_bridge_start_error_does_not_fail_setup(
     hass: HomeAssistant,
 ) -> None:
