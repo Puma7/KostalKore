@@ -593,20 +593,34 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         if not self._pending_entry_data:
             return await self.async_step_user()
 
+        errors: dict[str, str] = {}
+        defaults = _normalize_options({})
         if user_input is not None:
             options = _normalize_options(user_input)
-            self._pending_options = options
+            if (
+                validate_bind_address(
+                    options.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
+                )
+                is None
+            ):
+                # First-run wizard creates a NEW entry: unlike the options
+                # flow there is no pre-existing stored value to grandfather,
+                # so any non-IP bind is rejected with a visible form error
+                # before it can ever be persisted.
+                errors = {"base": "invalid_bind_address"}
+                defaults = options
+            else:
+                self._pending_options = options
 
-            if options.get(CONF_MODBUS_ENABLED, False):
-                return await self.async_step_setup_modbus_test()
+                if options.get(CONF_MODBUS_ENABLED, False):
+                    return await self.async_step_setup_modbus_test()
 
-            return self.async_create_entry(
-                title=self._pending_entry_title,
-                data=self._pending_entry_data,
-                options=options,
-            )
+                return self.async_create_entry(
+                    title=self._pending_entry_title,
+                    data=self._pending_entry_data,
+                    options=options,
+                )
 
-        defaults = _normalize_options({})
         access_role = str(self._pending_entry_data.get(CONF_ACCESS_ROLE, "UNKNOWN"))
         write_access = (
             "enabled"
@@ -616,6 +630,7 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="setup_options",
             data_schema=_options_schema(defaults),
+            errors=errors,
             description_placeholders={
                 "detected_host": str(self._pending_entry_data.get(CONF_HOST, "")),
                 "access_role": access_role,

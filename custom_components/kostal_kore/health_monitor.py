@@ -46,6 +46,11 @@ DC_SHARE_LONG_MAXLEN: Final[int] = 17280  # ~24h at 5s polls
 DC_SHARE_SHORT_MAXLEN: Final[int] = 60  # ~5min at 5s polls
 DC_SHARE_MIN_SAMPLES: Final[int] = 720  # ~1h of production before judging
 DC_SHARE_MIN_TOTAL_W: Final[float] = 200.0  # below this, shares are noise
+# While a string deviates this hard (fraction of total, 0.20 = 20pp) from its
+# learned share, its samples are NOT added to the baseline — otherwise a
+# sustained fault would gradually BECOME the baseline and clear the warning
+# while the fault persists.
+DC_SHARE_FREEZE_THRESHOLD: Final[float] = 0.20
 
 
 def resolve_active_error_warning_counts(
@@ -462,12 +467,27 @@ class InverterHealthMonitor:
             return
         for key, power in powers.items():
             share = power / total
-            self._dc_share_long.setdefault(
+            long_q = self._dc_share_long.setdefault(
                 key, deque(maxlen=DC_SHARE_LONG_MAXLEN)
-            ).append(share)
-            self._dc_share_short.setdefault(
+            )
+            short_q = self._dc_share_short.setdefault(
                 key, deque(maxlen=DC_SHARE_SHORT_MAXLEN)
-            ).append(share)
+            )
+            short_q.append(share)
+            # Freeze baseline learning while this string already deviates hard
+            # from its learned share: a sustained fault must not gradually
+            # become the new baseline (the median would flip once faulty
+            # samples outnumber the learned ones, silently clearing the
+            # warning while the fault persists). A DELIBERATE permanent change
+            # re-baselines via an integration reload (~1h relearn).
+            if (
+                len(long_q) >= self._dc_share_min_samples
+                and len(short_q) >= 5
+                and abs(median(short_q) - median(long_q))
+                > DC_SHARE_FREEZE_THRESHOLD
+            ):
+                continue
+            long_q.append(share)
 
     @property
     def dc_string_baseline_deviation(self) -> float | None:

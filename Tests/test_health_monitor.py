@@ -309,6 +309,20 @@ class TestInverterHealthMonitor:
         shares = m.dc_share_baseline
         assert shares["dc1_power"]["learned_share_pct"] > shares["dc1_power"]["recent_share_pct"]
 
+    def test_dc_baseline_does_not_absorb_sustained_fault(self) -> None:
+        """A sustained fault must NOT become the new baseline: learning is
+        frozen while a string deviates hard, so the warning persists even when
+        faulty samples far outnumber the learned history."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(100):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # Fault lasts 4x longer than the learned history.
+        for _ in range(400):
+            m.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev > 25.0
+
     def test_dc_baseline_ignores_low_light(self) -> None:
         """Below the minimum total, shares are noise and are not recorded."""
         m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=5)

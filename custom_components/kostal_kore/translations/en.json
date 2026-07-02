@@ -46,7 +46,8 @@
             "unknown": "Unexpected error",
             "invalid_inverter_model": "Inverter model not supported or incompatible",
             "inverter_error": "Inverter internal error, check device status",
-            "modbus_error": "MODBUS communication error"
+            "modbus_error": "MODBUS communication error",
+            "invalid_bind_address": "Proxy bind address must be a literal IP address (e.g. 127.0.0.1 for local-only or 0.0.0.0 for all interfaces)"
         },
         "step": {
             "reauth_confirm": {
