@@ -548,10 +548,14 @@ class TestHealthMonitorCoverageGaps:
         assert monitor.battery_soh.current is None
 
     def test_overall_health_info_and_score_penalties(self) -> None:
-        monitor = InverterHealthMonitor()
-        monitor.update_from_modbus(
-            {"controller_temp": 64.0, "dc1_power": 60.0, "dc2_power": 120.0}
-        )
+        monitor = InverterHealthMonitor(dc_share_min_samples=10)
+        # The imbalance penalty is baseline-aware: learn a stable share
+        # pattern first, then shift it hard (>25pp) so the -5 applies.
+        for _ in range(60):
+            monitor.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        for _ in range(40):
+            monitor.update_from_modbus({"dc1_power": 500.0, "dc2_power": 3500.0})
+        monitor.update_from_modbus({"controller_temp": 64.0})
         monitor._total_polls = 10
         monitor._failed_polls = 1
 

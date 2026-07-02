@@ -276,7 +276,7 @@ def test_health_binary_sensor_entities_cover_unknown_warning_and_error_branches(
     assert dc_warning.is_on is True
     assert dc_warning.icon == "mdi:alert"
     assert dc_warning.extra_state_attributes["baseline_deviation_pp"] == pytest.approx(35.0)
-    assert dc_warning.extra_state_attributes["imbalance_percent"] == pytest.approx(12.34, abs=0.01)
+    assert dc_warning.extra_state_attributes["imbalance_percent"] == pytest.approx(12.3)
     monitor.dc_string_baseline_deviation = None
     assert dc_warning.is_on is None
     assert dc_warning.extra_state_attributes["baseline_deviation_pp"] is None
