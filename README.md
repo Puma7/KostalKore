@@ -145,8 +145,9 @@ Orphan recorder history (long-time KORE users without legacy entry): [docs/migra
 ## Development
 
 ### Branches
-- `develop` is the default branch for ongoing work.
-- `main` reflects tagged release snapshots.
+- `main` is the default branch: all work lands via pull requests into `main`,
+  and releases are tagged from it.
+- `develop` is a historical branch (stale since early 2026) and no longer used.
 
 ### Release Notes
 See `RELEASE_NOTES.md` for the latest release highlights.

@@ -365,6 +365,15 @@ class BatterySocController:
                 # from the real fault (our own write failures).
                 if write_ok:
                     await self._check_setpoint_divergence(need_charge, need_discharge)
+                else:
+                    # A failed write also breaks the "consecutive
+                    # successful-write samples" streak in both directions:
+                    # without this reset, divergent samples separated by
+                    # minutes of write failures could be stitched together
+                    # into a warning (and clean samples into a premature
+                    # re-arm) even though the evidence is stale.
+                    self._divergence_count = 0
+                    self._divergence_clear_count = 0
 
                 # Sleep, but cap at time-to-next-keepalive
                 if self._last_write > 0:
