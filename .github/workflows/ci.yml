@@ -9,10 +9,12 @@ on:
     branches:
       - main
 
-# Rapid pushes supersede each other: cancel in-progress runs of the same ref.
+# Rapid pushes supersede each other: cancel in-progress runs of the same ref —
+# except on main, so every merge keeps a completed post-merge run (relevant if
+# branch protection ever builds on that status).
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Least-privilege token: this workflow only checks out and runs tests/mypy.
 permissions:

@@ -782,15 +782,23 @@ class KostalPlenticoreOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             normalized = _normalize_options(user_input)
+            submitted_bind = normalized.get(
+                CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND
+            )
+            stored_bind = str(
+                entry.options.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
+            ).strip()
             if (
-                validate_bind_address(
-                    normalized.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND)
-                )
-                is None
+                submitted_bind != stored_bind
+                and validate_bind_address(submitted_bind) is None
             ):
                 # Visible error instead of silent coercion: neither break a
                 # deliberate value without telling the user, nor store a
                 # non-IP the proxy would resolve to an unexpected interface.
+                # Only CHANGED input is validated — an unchanged legacy value
+                # (stored before validation existed) passes through, so those
+                # users are not locked out of saving unrelated options; the
+                # proxy's runtime LAN-exposure warning covers legacy binds.
                 errors = {"base": "invalid_bind_address"}
                 defaults = normalized
             elif normalized.get(CONF_MODBUS_ENABLED, False):

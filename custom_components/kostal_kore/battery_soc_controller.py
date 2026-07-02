@@ -562,18 +562,29 @@ class BatterySocController:
                     "(z. B. Smart AC Charge, ab FW 3.05 standardmäßig aktiv) oder "
                     "ein natives Ladeprogramm. Für zuverlässige externe Steuerung "
                     "diese Funktion deaktivieren.",
+                    notification_suffix="_divergence",
                 )
         except Exception:  # diagnostic must never affect the control loop
             _LOGGER.debug("SoC Controller: divergence check failed", exc_info=True)
 
-    async def _notify(self, title: str, msg: str) -> None:
+    async def _notify(
+        self, title: str, msg: str, *, notification_suffix: str = ""
+    ) -> None:
+        """Send a persistent notification.
+
+        ``notification_suffix`` gives a message class its own notification ID:
+        persistent notifications with the same ID overwrite each other, so the
+        divergence warning must not share an ID with routine status messages
+        (a later "Ziel-SoC erreicht" would silently replace it).
+        """
         if not self._hass:
             return
         try:
             await self._hass.services.async_call(
                 "persistent_notification", "create",
                 {"title": f"🔋 {title}", "message": msg,
-                 "notification_id": f"kostal_soc_controller_{self._entry_id}"},
+                 "notification_id":
+                     f"kostal_soc_controller_{self._entry_id}{notification_suffix}"},
             )
         except Exception:  # notification is non-critical, keep broad
             _LOGGER.debug("Failed to send SoC controller notification")

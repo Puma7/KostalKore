@@ -496,6 +496,36 @@ async def test_options_flow_rejects_invalid_bind_address(
     assert result["errors"] == {"base": "invalid_bind_address"}
 
 
+async def test_options_flow_keeps_unchanged_legacy_bind(
+    hass: HomeAssistant,
+) -> None:
+    """A legacy non-IP bind stored before validation existed passes through
+    UNCHANGED when re-saved — users must not be locked out of saving unrelated
+    options (the proxy's runtime warning covers legacy binds)."""
+    from custom_components.kostal_kore.config_flow import KostalPlenticoreOptionsFlow
+
+    entry = MockConfigEntry(
+        entry_id="legacy_bind_entry",
+        domain=DOMAIN,
+        data={"host": "192.168.1.2", "password": "pw"},
+        options={"modbus_proxy_bind": "nas.local"},
+    )
+    entry.add_to_hass(hass)
+    flow = KostalPlenticoreOptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+
+    result = await flow.async_step_init(
+        user_input={
+            "modbus_enabled": False,
+            "modbus_proxy_bind": "nas.local",
+        }
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["modbus_proxy_bind"] == "nas.local"
+
+
 async def test_setup_entry_mqtt_bridge_start_error_does_not_fail_setup(
     hass: HomeAssistant,
 ) -> None:
