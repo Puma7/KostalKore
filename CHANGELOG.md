@@ -82,18 +82,24 @@ diagnostics for cases where the inverter's own firmware now controls the battery
   and dead statements in the bridge lifecycle code.
 - **DC-string baseline cannot learn a dead string as "normal".** Samples in which
   a string produces below 2% of total DC power (while the others produce) are
-  excluded from baseline learning — a string already dead at startup previously
-  trained the baseline during the first ~1h and then read as "no deviation". Such
-  collapsed strings are now reported directly (no learned baseline needed) via a
-  new `dc_string_collapsed` fallback: problem sensor, DC diagnosis (WARNUNG),
+  excluded from baseline learning — a string dying during the ~1h learning phase
+  previously trained the baseline and then read as "no deviation". Such collapsed
+  strings are now reported directly (no learned baseline needed) via a new
+  `dc_string_collapsed` fallback: problem sensor, DC diagnosis (WARNUNG),
   high-priority longevity tip, health-score penalty, and a `collapsed_strings`
   attribute. The 2% floor is far below any real shading scenario (even a fully
   shaded string receives diffuse light well above it), so asymmetric south/north
-  setups remain unaffected.
+  setups remain unaffected. Only inputs that have produced ≥5% share in the
+  current session count as strings: unused/not-connected inputs reporting 0 W
+  are excluded from the share model entirely (mirrors the raw metric's active
+  filter) — a string dead since *before* startup is indistinguishable from an
+  unused input and stays silent (documented limitation).
 - **Setpoint-divergence streaks no longer span sample gaps.** A missing battery
-  power sample (e.g. a partial fast-poll batch) now resets both the divergence
-  and the clean-re-arm streak, so the "another controller?" warning can only
-  latch from consecutive readings.
+  power sample (e.g. a partial fast-poll batch) or a stale coordinator cache
+  (failed poll cycles leave old data behind — the same frozen sample must not
+  be judged repeatedly) now resets both the divergence and the clean-re-arm
+  streak, so the "another controller?" warning can only latch from consecutive
+  fresh readings.
 - **MQTT retained cleanup is per-topic.** A failing retained `/config` delete no
   longer skips the more important `/available = offline` correction.
 

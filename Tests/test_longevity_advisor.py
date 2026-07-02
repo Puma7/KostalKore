@@ -74,10 +74,13 @@ class TestPVTips:
         assert any("String" in t.title or "verschoben" in t.title for t in tips)
 
     def test_tip_for_collapsed_string(self) -> None:
-        """A dead string produces a high-priority tip even before a baseline
-        is learned (collapsed samples never train the baseline)."""
+        """A string dying during the learning hour produces a high-priority
+        tip even before a baseline is learned (collapsed samples never train
+        the baseline)."""
         h = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
         for _ in range(10):
+            h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        for _ in range(60):
             h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
         a = LongevityAdvisor(h, LFP_THRESHOLDS)
         tips = [t for t in a.get_tips() if t.component == "pv"]

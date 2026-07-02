@@ -331,14 +331,35 @@ class TestInverterHealthMonitor:
         assert m.dc_string_baseline_deviation is None
 
     def test_dc_collapsed_string_detected_without_baseline(self) -> None:
-        """A string that is already dead when learning starts is reported by
-        the raw collapse fallback — and never trains the baseline, so the
-        deviation metric stays None instead of learning the fault as normal."""
-        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=10)
+        """A string dying DURING the learning hour is reported by the raw
+        collapse fallback — and never trains the baseline, so the deviation
+        metric stays None instead of learning the fault as normal."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
         for _ in range(30):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # Collapse must dominate the whole short window (60 samples) before
+        # the median-based flag trips — no single-glitch trigger.
+        for _ in range(60):
             m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
         assert m.dc_string_collapsed == ["dc2_power"]
         assert m.dc_string_baseline_deviation is None  # suspect → not learned
+
+    def test_dc_unused_input_is_not_a_string(self) -> None:
+        """An input at 0 W since startup (unused/not connected) must neither
+        freeze baseline learning nor be flagged as collapsed — it never
+        produced, so it is not a string (mirrors the raw metric's filter).
+        Indistinguishable from a string dead since before startup, which is
+        therefore also silent (documented limitation)."""
+        m = InverterHealthMonitor(num_bidirectional=0, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus(
+                {"dc1_power": 3000.0, "dc2_power": 1000.0, "dc3_power": 0.0}
+            )
+        assert m.dc_string_collapsed == []
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None  # learning proceeded for the real strings
+        assert bdev < 5.0
+        assert set(m.dc_share_baseline) == {"dc1_power", "dc2_power"}
 
     def test_dc_collapsed_samples_never_train_baseline(self) -> None:
         """After healthy learning, a sustained collapse below the freeze
@@ -367,11 +388,13 @@ class TestInverterHealthMonitor:
         """A collapsed string costs points even before a baseline exists."""
         m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
         for _ in range(10):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        for _ in range(60):
             m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
         assert m.dc_string_baseline_deviation is None
         assert m.dc_string_collapsed == ["dc2_power"]
         healthy = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
-        for _ in range(10):
+        for _ in range(70):
             healthy.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
         assert m.health_score == healthy.health_score - 5
 

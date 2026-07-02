@@ -55,9 +55,17 @@ DC_SHARE_FREEZE_THRESHOLD: Final[float] = 0.20
 # produce is treated as collapsed (fuse/connector/cable, or fully covered),
 # not as a share pattern: even a fully shaded string still receives diffuse
 # light well above 2% of total. Collapsed samples never train the baseline
-# (a string already dead at startup must not BECOME the baseline) and are
-# surfaced directly via ``dc_string_collapsed`` — no learned baseline needed.
+# and are surfaced directly via ``dc_string_collapsed`` — no learned
+# baseline needed.
 DC_SHARE_COLLAPSE_FLOOR: Final[float] = 0.02
+# An input only participates in the share model after it has produced at
+# least this share of total DC power once in the current session. Unused /
+# not-connected inputs report 0 W and are indistinguishable from a string
+# that died before startup — without this gate they would freeze baseline
+# learning forever and read as collapsed strings. Kept well above the
+# collapse floor so a borderline string cannot flap between "unused" and
+# "collapsed".
+DC_SHARE_ACTIVITY_FLOOR: Final[float] = 0.05
 
 
 def resolve_active_error_warning_counts(
@@ -249,6 +257,7 @@ class InverterHealthMonitor:
         self._dc_share_min_samples: int = dc_share_min_samples
         self._dc_share_long: dict[str, deque[float]] = {}
         self._dc_share_short: dict[str, deque[float]] = {}
+        self._dc_share_active: set[str] = set()
         # --- Electrical Safety ---
         self.isolation = ParameterTracker(
             name="Isolation Resistance", unit="Ω",
@@ -473,12 +482,23 @@ class InverterHealthMonitor:
             # Dawn/dusk/night: shares are numerically meaningless noise.
             return
         shares = {key: power / total for key, power in powers.items()}
+        # Only inputs that have produced a meaningful share this session are
+        # strings: an unused / not-connected input reports 0 W permanently
+        # (mirrors the >50 W active filter of the raw imbalance metric) and
+        # is indistinguishable from a string that died before startup — such
+        # inputs are excluded from the share model instead of being flagged.
+        for key, share in shares.items():
+            if share >= DC_SHARE_ACTIVITY_FLOOR:
+                self._dc_share_active.add(key)
+        shares = {k: s for k, s in shares.items() if k in self._dc_share_active}
+        if len(shares) < 2:
+            return
         # A collapsed string is a fault state, not a share pattern: such
         # samples may describe the PRESENT (short window) but must never
-        # train the baseline — neither during cold-start learning (a string
-        # already dead at HA start would otherwise become the baseline and
-        # read as "no deviation") nor afterwards (a sub-freeze-threshold
-        # collapse would slowly seep into the 24h median).
+        # train the baseline — neither while still learning (a string dying
+        # in the first hour would otherwise become the baseline and read as
+        # "no deviation") nor afterwards (a sub-freeze-threshold collapse
+        # would slowly seep into the 24h median).
         suspect = any(s < DC_SHARE_COLLAPSE_FLOOR for s in shares.values())
         for key, share in shares.items():
             long_q = self._dc_share_long.setdefault(
@@ -533,9 +553,12 @@ class InverterHealthMonitor:
 
         Raw fallback that needs NO learned baseline: collapsed samples are
         excluded from baseline learning (see ``_record_dc_shares``), so a
-        string that is already dead when learning starts would otherwise
-        never be reported by ``dc_string_baseline_deviation``. Median over
-        the short window; empty list when all strings produce.
+        string dying during the learning hour would otherwise never be
+        reported by ``dc_string_baseline_deviation``. Only strings that have
+        produced this session can collapse — an input at ~0 W since startup
+        is indistinguishable from an unused input and stays silent (it never
+        enters the share windows). Median over the short window; empty list
+        when all strings produce.
         """
         collapsed: list[str] = []
         for key, short_q in self._dc_share_short.items():

@@ -427,6 +427,16 @@ async def test_divergence_streaks_reset_on_missing_power_sample() -> None:
     assert controller._divergence_count == 1
     assert controller._divergence_warned is False
 
+    # A stale cache (failed poll cycle left old data behind) counts as a gap
+    # too — the same frozen sample must not be judged repeatedly.
+    coord.last_update_success = False
+    await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == 0
+    coord.last_update_success = True
+    await controller._check_setpoint_divergence(True, False)
+    assert controller._divergence_count == 1
+    assert controller._divergence_warned is False
+
 
 @pytest.mark.asyncio
 async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:

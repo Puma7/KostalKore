@@ -500,6 +500,11 @@ class BatterySocController:
         serial Modbus transaction per control cycle — 5s-stale data is well
         within tolerance for the multi-cycle divergence heuristic.
         """
+        if not getattr(self._coord, "last_update_success", True):
+            # Failed poll cycles leave the previous data in place; judging
+            # every new write against the same frozen pre-failure sample
+            # would fabricate a divergence streak from one reading.
+            return None
         data = self._coord.data
         if not data:
             return None
