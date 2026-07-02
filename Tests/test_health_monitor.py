@@ -330,6 +330,51 @@ class TestInverterHealthMonitor:
             m.update_from_modbus({"dc1_power": 60.0, "dc2_power": 40.0})
         assert m.dc_string_baseline_deviation is None
 
+    def test_dc_collapsed_string_detected_without_baseline(self) -> None:
+        """A string that is already dead when learning starts is reported by
+        the raw collapse fallback — and never trains the baseline, so the
+        deviation metric stays None instead of learning the fault as normal."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=10)
+        for _ in range(30):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        assert m.dc_string_collapsed == ["dc2_power"]
+        assert m.dc_string_baseline_deviation is None  # suspect → not learned
+
+    def test_dc_collapsed_samples_never_train_baseline(self) -> None:
+        """After healthy learning, a sustained collapse below the freeze
+        threshold's reach must not seep into the 24h baseline median."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(200):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        # dc2 collapses for far longer than the learned history.
+        for _ in range(400):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 5.0})
+        assert m.dc_string_collapsed == ["dc2_power"]
+        shares = m.dc_share_baseline
+        assert shares["dc2_power"]["learned_share_pct"] == pytest.approx(25.0, abs=1.0)
+        bdev = m.dc_string_baseline_deviation
+        assert bdev is not None
+        assert bdev > 20.0
+
+    def test_dc_healthy_strings_not_collapsed(self) -> None:
+        """A permanent 75/25 split is a share pattern, not a collapse."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(20):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert m.dc_string_collapsed == []
+
+    def test_health_score_penalizes_collapsed_string(self) -> None:
+        """A collapsed string costs points even before a baseline exists."""
+        m = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            m.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        assert m.dc_string_baseline_deviation is None
+        assert m.dc_string_collapsed == ["dc2_power"]
+        healthy = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            healthy.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 1000.0})
+        assert m.health_score == healthy.health_score - 5
+
     def test_inverter_state_tracking(self) -> None:
         m = InverterHealthMonitor()
         m.update_from_modbus({"inverter_state": 6})

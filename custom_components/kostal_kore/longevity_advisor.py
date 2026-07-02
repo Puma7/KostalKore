@@ -187,6 +187,21 @@ class LongevityAdvisor:
         tips: list[LongevityTip] = []
         h = self._health
 
+        # A collapsed string is reported directly — it is excluded from
+        # baseline learning, so the deviation metric below can never see it.
+        collapsed = h.dc_string_collapsed
+        if collapsed:
+            names = ", ".join(k.replace("_power", "").upper() for k in collapsed)
+            tips.append(LongevityTip(
+                "pv", "hoch",
+                f"DC-String ohne Leistung: {names}",
+                "Ein DC-String liefert praktisch keine Leistung, während die "
+                "anderen produzieren — wahrscheinlich String-Sicherung, "
+                "MC4-Stecker oder Kabel, ggf. vollständige Abdeckung (Schnee).",
+                "String-Sicherung und MC4-Stecker des betroffenen Strings "
+                "prüfen. Bleibt der String ohne Leistung, Solarteur kontaktieren.",
+            ))
+
         # Baseline-aware: permanent asymmetry (south/north orientation,
         # different string sizes) is learned as normal — only a SHIFT away
         # from the installation's own share pattern produces a tip.

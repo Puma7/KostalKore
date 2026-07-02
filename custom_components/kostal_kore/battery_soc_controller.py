@@ -522,6 +522,12 @@ class BatterySocController:
         try:
             power = self._read_battery_power()
             if power is None:
+                # A missing sample interrupts the evidence chain in BOTH
+                # directions: divergence streak and clean re-arm streak must
+                # each be built from consecutive readings, so a gap resets
+                # them (the warned latch itself stays untouched).
+                self._divergence_count = 0
+                self._divergence_clear_count = 0
                 return
             diverging = (need_charge and power > DIVERGENCE_DEADBAND_W) or (
                 need_discharge and power < -DIVERGENCE_DEADBAND_W

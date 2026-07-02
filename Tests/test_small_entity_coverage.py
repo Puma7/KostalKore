@@ -104,6 +104,7 @@ def _health_monitor() -> SimpleNamespace:
         ],
         dc_string_imbalance=12.34,
         dc_string_baseline_deviation=8.76,
+        dc_string_collapsed=[],
         dc_share_baseline={
             "dc1_power": {"learned_share_pct": 52.6, "recent_share_pct": 51.0},
         },
@@ -282,6 +283,12 @@ def test_health_binary_sensor_entities_cover_unknown_warning_and_error_branches(
     assert dc_warning.extra_state_attributes["baseline_deviation_pp"] is None
     monitor.dc_string_imbalance = None
     assert dc_warning.extra_state_attributes["imbalance_percent"] is None
+    # Collapsed string trips the warning even before a baseline is learned
+    # (collapsed samples never train the baseline, so bdev stays None).
+    monitor.dc_string_collapsed = ["dc2_power"]
+    assert dc_warning.is_on is True
+    assert dc_warning.extra_state_attributes["collapsed_strings"] == ["dc2_power"]
+    monitor.dc_string_collapsed = []
 
     active_errors = ActiveErrorsWarning(monitor, "entry", device_info)
     assert active_errors.available is True

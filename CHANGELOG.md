@@ -80,6 +80,22 @@ diagnostics for cases where the inverter's own firmware now controls the battery
 - **Cleanup** — removed genuinely dead baselined imports, leftover test fixture
   scaffolding, a stale hardcoded version in the README (now points at Releases),
   and dead statements in the bridge lifecycle code.
+- **DC-string baseline cannot learn a dead string as "normal".** Samples in which
+  a string produces below 2% of total DC power (while the others produce) are
+  excluded from baseline learning — a string already dead at startup previously
+  trained the baseline during the first ~1h and then read as "no deviation". Such
+  collapsed strings are now reported directly (no learned baseline needed) via a
+  new `dc_string_collapsed` fallback: problem sensor, DC diagnosis (WARNUNG),
+  high-priority longevity tip, health-score penalty, and a `collapsed_strings`
+  attribute. The 2% floor is far below any real shading scenario (even a fully
+  shaded string receives diffuse light well above it), so asymmetric south/north
+  setups remain unaffected.
+- **Setpoint-divergence streaks no longer span sample gaps.** A missing battery
+  power sample (e.g. a partial fast-poll batch) now resets both the divergence
+  and the clean-re-arm streak, so the "another controller?" warning can only
+  latch from consecutive readings.
+- **MQTT retained cleanup is per-topic.** A failing retained `/config` delete no
+  longer skips the more important `/available = offline` correction.
 
 ### Changed
 - Documented battery-control coexistence limits in `README.md` (single inverter; do not

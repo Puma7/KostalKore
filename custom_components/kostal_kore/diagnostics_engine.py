@@ -96,6 +96,10 @@ class DiagnosticsEngine:
             raw["baseline_deviation_pp"] = round(baseline_dev, 1)
             raw["share_baseline"] = h.dc_share_baseline
 
+        collapsed = h.dc_string_collapsed
+        if collapsed:
+            raw["collapsed_strings"] = collapsed
+
         dc_arc_alerts = [
             a for a in self._safety.active_alerts
             if a.category in ("dc_arc_indicator", "dc_imbalance")
@@ -119,6 +123,21 @@ class DiagnosticsEngine:
                 f"Ein DC-String liefert deutlich weniger als die anderen. {worst.detail}",
                 "Mögliche Ursachen: Verschattung, verschmutzte Module, lockerer MC4-Stecker, "
                 "beschädigtes Kabel. Bitte String-Anschlüsse und Module visuell prüfen.",
+                raw,
+            )
+
+        # A collapsed string needs no learned baseline (it is excluded from
+        # baseline learning, so the deviation metric can never report it).
+        if collapsed:
+            names = ", ".join(k.replace("_power", "").upper() for k in collapsed)
+            return AreaDiagnosis(
+                "dc_solar", DiagStatus.WARNUNG,
+                "DC-String liefert keine Leistung",
+                f"{names}: praktisch keine Leistung, während die anderen "
+                "Strings produzieren.",
+                "String-Sicherung, MC4-Stecker und Verkabelung des betroffenen "
+                "Strings prüfen. Auch vollständige Abdeckung (Schnee, Laub) "
+                "möglich.",
                 raw,
             )
 

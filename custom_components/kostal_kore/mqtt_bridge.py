@@ -308,7 +308,9 @@ class KostalMqttBridge:
                     timeout=2.0,
                 )
             except Exception:  # best-effort cleanup only
-                return
+                # Each topic independently: a failed /config delete must not
+                # skip the more important /available = offline correction.
+                continue
 
     def _schedule_start_retry(self) -> None:
         """Schedule the background self-healing start loop (idempotent)."""

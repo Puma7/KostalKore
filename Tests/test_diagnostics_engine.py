@@ -38,6 +38,19 @@ class TestDCDiagnostics:
         assert d.status == DiagStatus.HINWEIS
         assert "MC4" in d.action or "String" in d.action or "verschattet" in d.action
 
+    def test_dc_warnung_on_collapsed_string(self) -> None:
+        """A dead string is reported even without a learned baseline —
+        collapsed samples never train the baseline, so the HINWEIS-on-shift
+        path alone could never see a string that is dead from the start."""
+        e = _make_engine()
+        e._health._dc_share_min_samples = 50
+        for _ in range(10):
+            e._health.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        d = e.diagnose_dc_solar()
+        assert d.status == DiagStatus.WARNUNG
+        assert "keine Leistung" in d.title
+        assert d.raw_values["collapsed_strings"] == ["dc2_power"]
+
     def test_dc_warnung_on_arc_indicator(self) -> None:
         e = _make_engine()
         e._safety._check_interval = 0.0

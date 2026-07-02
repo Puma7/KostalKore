@@ -51,6 +51,13 @@ DC_SHARE_MIN_TOTAL_W: Final[float] = 200.0  # below this, shares are noise
 # sustained fault would gradually BECOME the baseline and clear the warning
 # while the fault persists.
 DC_SHARE_FREEZE_THRESHOLD: Final[float] = 0.20
+# A string producing below this share of total DC power while the others
+# produce is treated as collapsed (fuse/connector/cable, or fully covered),
+# not as a share pattern: even a fully shaded string still receives diffuse
+# light well above 2% of total. Collapsed samples never train the baseline
+# (a string already dead at startup must not BECOME the baseline) and are
+# surfaced directly via ``dc_string_collapsed`` — no learned baseline needed.
+DC_SHARE_COLLAPSE_FLOOR: Final[float] = 0.02
 
 
 def resolve_active_error_warning_counts(
@@ -465,8 +472,15 @@ class InverterHealthMonitor:
         if total < DC_SHARE_MIN_TOTAL_W:
             # Dawn/dusk/night: shares are numerically meaningless noise.
             return
-        for key, power in powers.items():
-            share = power / total
+        shares = {key: power / total for key, power in powers.items()}
+        # A collapsed string is a fault state, not a share pattern: such
+        # samples may describe the PRESENT (short window) but must never
+        # train the baseline — neither during cold-start learning (a string
+        # already dead at HA start would otherwise become the baseline and
+        # read as "no deviation") nor afterwards (a sub-freeze-threshold
+        # collapse would slowly seep into the 24h median).
+        suspect = any(s < DC_SHARE_COLLAPSE_FLOOR for s in shares.values())
+        for key, share in shares.items():
             long_q = self._dc_share_long.setdefault(
                 key, deque(maxlen=DC_SHARE_LONG_MAXLEN)
             )
@@ -474,6 +488,8 @@ class InverterHealthMonitor:
                 key, deque(maxlen=DC_SHARE_SHORT_MAXLEN)
             )
             short_q.append(share)
+            if suspect:
+                continue
             # Freeze baseline learning while this string already deviates hard
             # from its learned share: a sustained fault must not gradually
             # become the new baseline (the median would flip once faulty
@@ -509,6 +525,25 @@ class InverterHealthMonitor:
                 continue
             devs.append(abs(median(short_q) - median(long_q)) * 100.0)
         return max(devs) if devs else None
+
+    @property
+    def dc_string_collapsed(self) -> list[str]:
+        """PV strings whose recent share of total DC power sits below the
+        collapse floor — effectively dead while the other strings produce.
+
+        Raw fallback that needs NO learned baseline: collapsed samples are
+        excluded from baseline learning (see ``_record_dc_shares``), so a
+        string that is already dead when learning starts would otherwise
+        never be reported by ``dc_string_baseline_deviation``. Median over
+        the short window; empty list when all strings produce.
+        """
+        collapsed: list[str] = []
+        for key, short_q in self._dc_share_short.items():
+            if len(short_q) < 5:
+                continue
+            if median(short_q) < DC_SHARE_COLLAPSE_FLOOR:
+                collapsed.append(key)
+        return collapsed
 
     @property
     def dc_share_baseline(self) -> dict[str, dict[str, float]]:
@@ -732,9 +767,10 @@ class InverterHealthMonitor:
         if self.communication_reliability < 95:
             score -= 10
         # Baseline-aware: permanent asymmetry (south/north strings) does not
-        # cost points — only a shift away from the learned share pattern does.
+        # cost points — only a shift away from the learned share pattern, or
+        # a collapsed string (which needs no learned baseline), does.
         bdev = self.dc_string_baseline_deviation
-        if bdev is not None and bdev > 25:
+        if (bdev is not None and bdev > 25) or self.dc_string_collapsed:
             score -= 5
         return max(0, min(100, score))
 
@@ -752,6 +788,7 @@ class InverterHealthMonitor:
             "dc_string_imbalance": round(self.dc_string_imbalance, 1) if self.dc_string_imbalance is not None else None,
             "dc_string_baseline_deviation": round(self.dc_string_baseline_deviation, 1) if self.dc_string_baseline_deviation is not None else None,
             "dc_share_baseline": self.dc_share_baseline,
+            "dc_string_collapsed": self.dc_string_collapsed,
             "phase_voltage_imbalance": round(self.phase_voltage_imbalance, 1) if self.phase_voltage_imbalance is not None else None,
             "trackers": {},
         }

@@ -333,6 +333,31 @@ class TestBridgeStartSelfHealing:
         assert (f"{TOPIC_PREFIX}/INV123/modbus/available", "offline") in published
         assert bridge._start_attempted is False
 
+    @pytest.mark.asyncio
+    async def test_clear_retained_config_failure_still_publishes_offline(self) -> None:
+        """Each retained cleanup is independent: a failing /config delete must
+        not skip the more important /available = offline correction."""
+        hass = _mock_hass(mqtt_available=True)
+        coord = _mock_coordinator()
+        bridge = KostalMqttBridge(hass, coord, "INV123")
+
+        mock_mqtt = _mock_mqtt_module()
+
+        async def _publish(_hass, topic, payload, _qos, retain=False):
+            if topic.endswith("/config"):
+                raise HomeAssistantError("mqtt_broker_error")
+
+        mock_mqtt.async_publish = AsyncMock(side_effect=_publish)
+
+        with patch.dict(sys.modules, {"homeassistant.components.mqtt": mock_mqtt}):
+            await bridge._best_effort_clear_retained()
+
+        published = [
+            (call.args[1], call.args[2])
+            for call in mock_mqtt.async_publish.call_args_list
+        ]
+        assert (f"{TOPIC_PREFIX}/INV123/modbus/available", "offline") in published
+
 
 class TestCommandGating:
     """Inbound commands must never execute before the bridge commit point."""

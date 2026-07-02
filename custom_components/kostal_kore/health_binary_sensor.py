@@ -210,6 +210,11 @@ class DCStringImbalanceWarning(BinarySensorEntity):
         # Baseline-aware: permanent asymmetry (south/north strings) stays off;
         # only a shift away from the learned share pattern turns the problem
         # sensor on. None until the baseline is learned (~1h of production).
+        # Exception: a collapsed string (near-zero share) triggers directly —
+        # it is excluded from baseline learning, so waiting for a baseline
+        # would leave a string that is dead at startup permanently unreported.
+        if self._monitor.dc_string_collapsed:
+            return True
         bdev = self._monitor.dc_string_baseline_deviation
         if bdev is None:
             return None
@@ -225,6 +230,7 @@ class DCStringImbalanceWarning(BinarySensorEntity):
         return {
             "imbalance_percent": round(self._monitor.dc_string_imbalance, 1) if self._monitor.dc_string_imbalance is not None else None,
             "baseline_deviation_pp": round(bdev, 1) if bdev is not None else None,
+            "collapsed_strings": self._monitor.dc_string_collapsed,
         }
 
 

@@ -73,6 +73,17 @@ class TestPVTips:
         tips = [t for t in a.get_tips() if t.component == "pv"]
         assert any("String" in t.title or "verschoben" in t.title for t in tips)
 
+    def test_tip_for_collapsed_string(self) -> None:
+        """A dead string produces a high-priority tip even before a baseline
+        is learned (collapsed samples never train the baseline)."""
+        h = InverterHealthMonitor(num_bidirectional=1, dc_share_min_samples=50)
+        for _ in range(10):
+            h.update_from_modbus({"dc1_power": 3000.0, "dc2_power": 10.0})
+        a = LongevityAdvisor(h, LFP_THRESHOLDS)
+        tips = [t for t in a.get_tips() if t.component == "pv"]
+        assert any("ohne Leistung" in t.title for t in tips)
+        assert any(t.priority == "hoch" for t in tips)
+
     def test_no_tip_for_stable_asymmetric_strings(self) -> None:
         """South/north setups: a PERMANENT 75/25 split is learned as normal
         and must not produce an imbalance tip (raw imbalance is ~50%)."""

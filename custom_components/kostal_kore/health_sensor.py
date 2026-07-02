@@ -286,6 +286,7 @@ class DCStringImbalanceSensor(SensorEntity):
             # baseline deviation below is what the warning entities act on.
             "baseline_deviation_pp": round(bdev, 1) if bdev is not None else None,
             "share_baseline": self._monitor.dc_share_baseline,
+            "collapsed_strings": self._monitor.dc_string_collapsed,
         }
 
 
