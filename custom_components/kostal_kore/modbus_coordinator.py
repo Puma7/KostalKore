@@ -38,7 +38,9 @@ from .modbus_registers import (
     REG_SERIAL_NUMBER,
     REG_SW_VERSION,
     REGISTER_BY_ADDRESS,
+    REGISTER_BY_NAME,
     Access,
+    DataType,
     ModbusRegister,
     RegisterGroup,
 )
@@ -63,6 +65,17 @@ SLOW_GROUPS: Final[frozenset[RegisterGroup]] = frozenset({
     RegisterGroup.BATTERY_MGMT,
     RegisterGroup.BATTERY_LIMIT_G3,
     RegisterGroup.IO_BOARD,
+})
+
+# Data types the Modbus client encodes via int() (truncation). A commanded
+# value is normalized the same way before caching so the reported value can
+# never differ from what the inverter actually received.
+_INTEGER_WRITE_DATA_TYPES: Final[frozenset[DataType]] = frozenset({
+    DataType.UINT16,
+    DataType.SINT16,
+    DataType.UINT32,
+    DataType.SINT32,
+    DataType.UINT8,
 })
 
 
@@ -172,12 +185,21 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _record_commanded(self, name: str, value: Any) -> None:
         """Cache a successfully-written value tagged with the current connection
-        generation; non-numeric writes are dropped."""
+        generation; non-numeric writes are dropped.
+
+        The value is normalized to what the register actually encodes: the
+        client truncates integer registers via ``int()`` (e.g. UINT16 533
+        receives ``int(80.5) == 80``), so a fractional command must not be
+        reported back as the un-truncated value the inverter never applied.
+        """
         try:
             fval = float(value)
         except (TypeError, ValueError):
             self._last_commanded.pop(name, None)
             return
+        reg = REGISTER_BY_NAME.get(name)
+        if reg is not None and reg.data_type in _INTEGER_WRITE_DATA_TYPES:
+            fval = float(int(fval))
         self._last_commanded[name] = (fval, self._client.connection_generation)
 
     async def async_setup(self) -> None:

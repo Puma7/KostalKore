@@ -322,6 +322,13 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     await coordinator.async_write_by_address(64999, 7)
     assert coordinator.last_commanded("addr_64999") is None
 
+    # a fractional command to an integer (UINT16) register is cached as the
+    # truncated value the client actually encodes (int(80.5) == 80), never the
+    # un-applied 80.5.
+    client.write_register = AsyncMock()
+    await coordinator.async_write_register(REG_ACTIVE_POWER_SETPOINT, 80.5)
+    assert coordinator.last_commanded("active_power_setpoint") == 80.0
+
 
 @pytest.mark.asyncio
 async def test_last_commanded_invalidated_when_connection_generation_changes(hass) -> None:
