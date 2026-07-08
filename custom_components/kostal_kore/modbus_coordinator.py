@@ -115,6 +115,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # this is the only record of the active setpoint. Cleared on reconnect
         # because volatile setpoints do not survive an inverter reset.
         self._last_commanded: dict[str, float] = {}
+        self._last_seen_connection_gen: int = client.connection_generation
 
     @property
     def client(self) -> KostalModbusClient:
@@ -204,17 +205,24 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._shutting_down or self._client.closing:
             return self._cached_poll_data()
         if not self._client.connected:
-            # The connection dropped — the inverter may have rebooted, which
-            # discards volatile control setpoints (e.g. active-power limit 533).
-            # Drop the last-commanded cache so those entities report "unknown"
-            # rather than a stale value until they are re-commanded.
-            self._last_commanded.clear()
             try:
                 await self._client.connect()
                 await self._client.detect_endianness()
                 _LOGGER.info("Modbus reconnected to %s", self._client.host)
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
+
+        # Any (re)connection — the reconnect just above OR one performed
+        # internally inside the client's read retry loop — advances the client's
+        # connection generation. A reconnect may mean the inverter rebooted and
+        # discarded its volatile control setpoints (e.g. active-power limit 533),
+        # so drop the last-commanded cache whenever the generation advanced;
+        # those entities then report "unknown" rather than a stale value until
+        # they are re-commanded.
+        gen = self._client.connection_generation
+        if gen != self._last_seen_connection_gen:
+            self._last_commanded.clear()
+            self._last_seen_connection_gen = gen
 
         self._update_count += 1
         data: dict[str, Any] = {}
