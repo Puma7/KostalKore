@@ -46,6 +46,13 @@ documents the boundaries; no write-path or control-logic change.
 - HARDWARE_VALIDATION_TODO: added **HV6** — validate on real G3 whether register 533 is
   writable independent of battery-management mode (it is currently gated read-only unless
   reg 1080 == 0x02); if so, ungate output curtailment from the battery-mode requirement.
+- README troubleshooting: documented two known upstream `kostal_plenticore` situations that
+  also apply to KORE and need no code change — the benign `total_increasing` energy-statistics
+  warnings (home-assistant/core#174543; the negative-value variant is already suppressed by
+  `format_energy`, and `total_increasing` is intentionally kept for these resetting counters),
+  and KSEM-dependent values stuck at 0 when the inverter is not talking to its meter
+  (home-assistant/core#166779; a wiring/commissioning issue, not a KORE bug). Added
+  **HV7** for a future "energy meter connected" diagnostic gated on a real meter-status datapoint.
 
 ### Notes
 - Verified non-issue (no change needed): the PR's FC06-not-FC16 write quirk is already

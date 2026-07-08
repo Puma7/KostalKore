@@ -53,6 +53,18 @@ against your FW 3.06.10 G3.
   → Decides whether to relax the read-only gate for reg 533. Context: evcc PR #31487 adds this same
   capability to its Gen2 template via SunSpec model 123 (regs 40217/40221); KORE already covers it on
   G3 via reg 533, so **no SunSpec-123 port is needed** — only this gating question is open.
+- **HV7 — Is there a definitive "energy meter (KSEM) present / communicating" datapoint?** When the
+  inverter is not talking to its meter (stand-alone mode), all KSEM-dependent values read 0
+  (home consumption, autarky, own-consumption rate, grid feed-in energy, energy-manager state) — the
+  symptom behind upstream `kostal_plenticore` home-assistant/core#166779. A helpful diagnostic would
+  surface "meter not communicating" instead of silent zeros, but a value-based heuristic (all-zero →
+  meter missing) would false-positive on legitimately-zero moments (full battery + no grid flow), so
+  it must be gated on a real status datapoint. Check a REST `get_settings`/`get_process_data` dump and
+  a Modbus scan for a meter-present / meter-communication flag (e.g. a `scb:powermeter` field or a
+  dedicated register). If one exists, add a read-only "Energy meter connected" diagnostic + optional
+  repair hint. Note: KORE already handles the *other* two facets of #166779 — the device name uses the
+  extracted hostname value (not the raw settings dict, so no `{"Hostname":…}` names), and the slow
+  settings read at setup is timeout-protected (`get_hostname_id` via `asyncio.wait_for`).
 
 ---
 

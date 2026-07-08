@@ -221,6 +221,11 @@ own grid measurement). Configure under **Options**:
 When enabled, KSEM-sourced grid power, frequency, power factor, per-phase
 voltages and per-phase active power become available as additional sensors.
 
+> **Note:** if home-consumption / autarky / own-consumption / grid-feed-in
+> values stay at `0`, the inverter itself is likely not talking to the energy
+> meter (stand-alone mode) — see the Troubleshooting section. That is an
+> inverter commissioning issue, independent of this optional KSEM source.
+
 ## Data Update
 
 The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from the inverter at regular intervals:
@@ -360,6 +365,12 @@ The integration provides human-readable inverter states:
    - `Connection lost reading isolation_resistance`
    - `Illegal data address`
 4. Verify Modbus is enabled on inverter and integration settings (host/port/unit-id) are correct.
+
+### Energy statistics warnings in the log (benign)
+You may occasionally see recorder warnings like *"Entity … has state class `total_increasing`, but its state is not strictly increasing"* on energy sensors (e.g. *Home Consumption from Grid Day/Month/Year/Total*). These are **harmless**: the inverter sometimes corrects a cumulative energy counter slightly downward (e.g. 5.1 → 5.0 kWh), and Home Assistant simply discards that single sample — the long-term statistics stay consistent. KORE deliberately keeps `total_increasing` for these counters (it is the correct state class for values that reset per period, so the Energy dashboard handles the daily/monthly reset correctly); switching to `total` would break that reset handling. The related *"state is negative"* variant is already suppressed by KORE — a negative energy reading is mapped to *unavailable* for one tick instead of a negative value (see `format_energy`). No action needed. (Matches the upstream `kostal_plenticore` behaviour in home-assistant/core#174543.)
+
+### Home consumption / autarky / own-consumption values stuck at 0
+If the KSEM-dependent sensors — home consumption, autarky, own-consumption rate, grid feed-in energy, energy-manager state — all report `0` or unavailable, the inverter is most likely **not communicating with the energy meter (KSEM)** and running in a kind of stand-alone mode. This is a wiring/commissioning issue on the inverter side, not a KORE bug (the entities are created correctly but the inverter has no consumption data to report). Have the meter link checked by your installer. (Same root cause as upstream `kostal_plenticore` home-assistant/core#166779.)
 
 ## Example Automations
 
