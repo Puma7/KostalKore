@@ -394,3 +394,47 @@ def test_active_power_setpoint_exposes_curtailment_attributes() -> None:
         read_only=False,
     )
     assert other.extra_state_attributes is None
+
+
+@pytest.mark.asyncio
+async def test_active_power_setpoint_flags_track_last_commanded_value() -> None:
+    """Register 533 is write-only (not polled into coordinator.data), so the
+    flags and native_value must reflect the last value KORE commanded."""
+    coord = _coord(data={})  # 533 never appears in the polled data
+    entity = _curtail_entity(coord)
+
+    # Before any write: value unknown → flags honest, nothing cached.
+    assert entity.native_value is None
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["curtailment_active"] is False
+    assert attrs["at_full_power"] is False
+    assert attrs["last_commanded_percent"] is None
+
+    # Command 80 % → cached → curtailment active.
+    await entity.async_set_native_value(80)
+    assert entity.native_value == 80
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["curtailment_active"] is True
+    assert attrs["at_full_power"] is False
+    assert attrs["last_commanded_percent"] == 80
+    coord.async_write_register.assert_awaited_once_with(
+        mod.REG_ACTIVE_POWER_SETPOINT, 80
+    )
+
+    # Release to 100 % → full power.
+    await entity.async_set_native_value(100)
+    assert entity.native_value == 100
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["curtailment_active"] is False
+    assert attrs["at_full_power"] is True
+    assert attrs["last_commanded_percent"] == 100
+
+    # A blocked (read-only) write must not update the cache.
+    blocked = _curtail_entity(_coord(data={}))
+    blocked._read_only = True
+    await blocked.async_set_native_value(50)
+    assert blocked._last_commanded_value is None
+    assert blocked.native_value is None

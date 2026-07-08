@@ -308,6 +308,11 @@ class ModbusNumberEntity(
         self._attr_device_info = device_info
         self._keepalive_task: asyncio.Task[None] | None = None
         self._keepalive_value: float | None = None
+        # Last value KORE commanded for this register. The active-power
+        # setpoint (533) is write-only on the inverter and is not polled into
+        # coordinator.data, so this cache is the only way native_value / the
+        # curtailment attributes can reflect the active setpoint.
+        self._last_commanded_value: float | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -316,16 +321,25 @@ class ModbusNumberEntity(
 
     @property
     def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
-        """Return the current value from Modbus data."""
-        if self.coordinator.data is None:
-            return None
-        val = self.coordinator.data.get(self._register.name)
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
+        """Return the current value from Modbus data.
+
+        The active-power setpoint (533) is write-only on the inverter (Kostal
+        Modbus/SunSpec spec §3.3) and is not in ``MONITORING_REGISTERS``, so it
+        never appears in ``coordinator.data``. For that register we fall back to
+        the last value KORE commanded so the entity and its curtailment
+        attributes reflect the active setpoint instead of always reading unknown.
+        """
+        data = self.coordinator.data
+        if data is not None:
+            val = data.get(self._register.name)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+        if self._register.name == CURTAILMENT_REGISTER_NAME:
+            return self._last_commanded_value
+        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -339,6 +353,10 @@ class ModbusNumberEntity(
         keepalive/watchdog is needed. True 0 % (zero export) is NOT reachable
         here (the floor is 1 %); use the REST ``ActivePower:ExtCtrlP:P`` = 0
         setting or a watt-based cap for that.
+
+        The register is write-only, so the flags reflect the last value KORE
+        commanded (``last_commanded_percent``); they read as not-curtailed/
+        not-full until the setpoint is written once and after a restart.
         """
         if self._register.name != CURTAILMENT_REGISTER_NAME:
             return None
@@ -347,6 +365,7 @@ class ModbusNumberEntity(
             "role": "feed_in_curtailment",
             "curtailment_active": val is not None and val < 100,
             "at_full_power": val is not None and val >= 100,
+            "last_commanded_percent": self._last_commanded_value,
             "minimum_percent": self._attr_native_min_value,
             "zero_export_via_this_entity": False,
             "volatile_resets_to_full_power": True,
@@ -380,6 +399,10 @@ class ModbusNumberEntity(
             self._register.name, value, self._register.address,
         )
         await self.coordinator.async_write_register(self._register, value)
+        # Remember the commanded value: write-only control registers (e.g. the
+        # active-power setpoint 533) are never polled back into coordinator.data,
+        # so this is what native_value / the curtailment attributes report.
+        self._last_commanded_value = value
 
         try:
             readback = await self.coordinator.client.read_register(self._register)

@@ -17,11 +17,14 @@ documents the boundaries; no write-path or control-logic change.
 ### Changed
 - **"Active Power Setpoint (Modbus)" (register 533) is now framed as the feed-in
   curtailment control.** New export-tower icon and `extra_state_attributes`
-  (`role`, `curtailment_active`, `at_full_power`, `minimum_percent`,
-  `zero_export_via_this_entity`, `volatile_resets_to_full_power`) surface the
-  semantics: 100 % = uncurtailed, < 100 % throttles AC output, Kostal-native
-  equivalent of SunSpec 123 `WMaxLimPct`. Entity name and write path are unchanged
-  (no dashboard breakage, no behavior change).
+  (`role`, `curtailment_active`, `at_full_power`, `last_commanded_percent`,
+  `minimum_percent`, `zero_export_via_this_entity`, `volatile_resets_to_full_power`)
+  surface the semantics: 100 % = uncurtailed, < 100 % throttles AC output,
+  Kostal-native equivalent of SunSpec 123 `WMaxLimPct`. Register 533 is write-only
+  on the inverter (Kostal spec §3.3) and is not polled into `coordinator.data`, so
+  the entity now reports the **last value KORE commanded** — previously its state
+  and these flags would have read "unknown" permanently. Entity name and write path
+  are unchanged (no dashboard breakage).
 
 ### Documentation
 - README: new "Feed-In Curtailment / Wirkleistungsbegrenzung" section clarifying that
