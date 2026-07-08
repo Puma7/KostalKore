@@ -349,34 +349,24 @@ def _curtail_entity(coord: MagicMock) -> "mod.ModbusNumberEntity":
     )
 
 
-def test_active_power_setpoint_exposes_curtailment_attributes() -> None:
-    """Register 533 surfaces feed-in-curtailment semantics; others surface none."""
-    name = mod.REG_ACTIVE_POWER_SETPOINT.name
-
-    # < 100 % → curtailment active
-    entity = _curtail_entity(_coord(data={name: "80"}))
+def test_active_power_setpoint_exposes_static_curtailment_attributes() -> None:
+    """Register 533 surfaces the static feed-in-curtailment semantics, and with
+    no command yet reports an honest unknown (not a false curtailed/full signal).
+    Other registers surface no extra attributes. The dynamic flags are validated
+    against the coordinator's last-commanded cache — the real production path —
+    in test_active_power_setpoint_reads_coordinator_last_commanded."""
+    coord = _coord(data={})
+    coord.last_commanded = MagicMock(return_value=None)
+    entity = _curtail_entity(coord)
     attrs = entity.extra_state_attributes
     assert attrs is not None
     assert attrs["role"] == "feed_in_curtailment"
-    assert attrs["curtailment_active"] is True
-    assert attrs["at_full_power"] is False
     assert attrs["minimum_percent"] == 1
     assert attrs["zero_export_via_this_entity"] is False
     assert attrs["volatile_resets_to_full_power"] is True
-
-    # 100 % → uncurtailed / full power
-    full = _curtail_entity(_coord(data={name: "100"}))
-    full_attrs = full.extra_state_attributes
-    assert full_attrs is not None
-    assert full_attrs["curtailment_active"] is False
-    assert full_attrs["at_full_power"] is True
-
-    # unknown value → neither flag asserted
-    unknown = _curtail_entity(_coord(data=None))
-    unknown_attrs = unknown.extra_state_attributes
-    assert unknown_attrs is not None
-    assert unknown_attrs["curtailment_active"] is False
-    assert unknown_attrs["at_full_power"] is False
+    assert attrs["curtailment_active"] is False
+    assert attrs["at_full_power"] is False
+    assert attrs["last_commanded_percent"] is None
 
     # a non-curtailment register returns no extra attributes
     other = mod.ModbusNumberEntity(
@@ -395,6 +385,19 @@ def test_active_power_setpoint_exposes_curtailment_attributes() -> None:
         read_only=False,
     )
     assert other.extra_state_attributes is None
+
+
+def test_active_power_setpoint_is_not_polled() -> None:
+    """Proof the cache is load-bearing (not injected test data): reg 533 is a
+    write-only RW CONTROL register, so it is excluded from MONITORING_REGISTERS
+    and never lands in coordinator.data — hence the last-commanded fallback."""
+    from custom_components.kostal_kore.modbus_registers import (
+        MONITORING_REGISTERS,
+        Access,
+    )
+
+    assert mod.REG_ACTIVE_POWER_SETPOINT.access is Access.RW
+    assert mod.REG_ACTIVE_POWER_SETPOINT not in MONITORING_REGISTERS
 
 
 def test_active_power_setpoint_reads_coordinator_last_commanded() -> None:

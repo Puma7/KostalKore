@@ -76,7 +76,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - **Minimum 1%.** True 0% / zero-export is *not* reachable via this register — use the REST setting `ActivePower:ExtCtrlP:P`=0 or a watt-based cap (`Inverter:ActivePowerLimitation`) instead.
 - **Volatile:** the inverter discards the setpoint on power-on/reset and returns to full power (fail-open), so no keepalive is needed.
 - This is **not** the Grid Feed-In Optimizer above: the optimizer caps grid export *indirectly* by limiting battery charging (register `1038`); this control throttles the inverter's AC output *directly*. It is also distinct from the §14a EnWG **import** limit (`Inverter:ActivePowerConsumLimitation`).
-- The entity is created read-only unless the inverter is in **"External via Modbus"** battery-management mode (register `1080` == `0x02`) — the same gate as the battery controls (see `HARDWARE_VALIDATION_TODO.md` HV6).
+- The entity uses the same read-only gate as the battery controls: writable when register `1080` == `0x02` (**"External via Modbus"**), or when `1080` == `0x00` and a read probe succeeds, and it stays writable when `1080` is unavailable; other modes make it read-only. Whether output curtailment *should* be gated behind battery mode at all is an open hardware question (see `HARDWARE_VALIDATION_TODO.md` HV6).
 - evcc's PR #31487 adds the same capability to *its* Gen2 meter template via SunSpec model 123 (registers `40217`/`40221`); KORE already covers this on G3 through register `533`, so that PR needs nothing ported here — see `HARDWARE_VALIDATION_TODO.md` HV6 for the open validation points.
 
 ### 🔧 **Diagnostics**

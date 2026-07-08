@@ -42,9 +42,11 @@ against your FW 3.06.10 G3.
   are already known; the newer grid/tariff modes are not. → Completes **M3**.
 - **HV6 — Is the active-power output setpoint (Modbus reg 533, "Active Power Setpoint") writable
   independent of the battery-management mode?** Today every Modbus number entity — including reg 533,
-  which is *feed-in curtailment / Wirkleistungsbegrenzung*, not battery control — is created
-  read-only unless the inverter reports "External via Modbus" (reg 1080 == 0x02) or the write probe
-  succeeds (`modbus_number.py:204`). On a G3, set the inverter to a non-Modbus battery mode and try
+  which is *feed-in curtailment / Wirkleistungsbegrenzung*, not battery control — is gated by the
+  read-only logic in `create_modbus_number_entities` (`modbus_number.py`): writable when reg 1080 ==
+  0x02 ("External via Modbus"), or when reg 1080 == 0x00 and a read probe (`_probe_modbus_access`,
+  which only reads Min SoC — never writes) succeeds; read-only for any other mode; and writable when
+  reg 1080 is unavailable. On a G3, set the inverter to a non-Modbus battery mode and try
   writing reg 533 (e.g. 90 %): if the inverter accepts it, output curtailment is being needlessly
   gated behind battery mode and should be ungated (curtailment does not require external battery
   control). Also confirm the 1 % floor and that the value really is discarded on reset (fail-open).
