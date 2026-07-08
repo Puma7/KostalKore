@@ -25,11 +25,14 @@ documents the boundaries; no write-path or control-logic change.
   the entity now reports the **last value KORE commanded** — previously its state
   and these flags would have read "unknown" permanently. The last-commanded value
   is tracked on the **coordinator** so it covers every write path (UI number, MQTT
-  bridge, Modbus proxy), and it is **cleared whenever the Modbus link is
-  re-established** (tracked via a connection-generation counter on the client, so
-  it also catches reconnects performed internally inside the read retry loop)
-  because the volatile setpoint does not survive an inverter reset (fails open to
-  full power). Entity name and write path are unchanged (no dashboard breakage).
+  bridge, Modbus proxy), and each cached value is **tagged with the connection
+  generation it was written on** (a monotonic counter bumped on every client
+  (re)connection). A value is trusted only while that generation is unchanged, so
+  a reconnect — whether performed by the coordinator or internally inside the
+  client's read/write retry loop — invalidates a stale setpoint (the volatile
+  register fails open to full power on an inverter reset), while a command
+  re-issued on the new connection survives. Entity name and write path are
+  unchanged (no dashboard breakage).
 
 ### Documentation
 - README: new "Feed-In Curtailment / Wirkleistungsbegrenzung" section clarifying that

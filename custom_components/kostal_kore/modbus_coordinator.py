@@ -110,12 +110,14 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_persisted_isolation_ohm: float | None = None
         self._shutting_down = False
         # Last value commanded to each control register, across ALL write paths
-        # (entity, MQTT bridge, proxy). Write-only control registers such as the
-        # active-power setpoint (533) are never polled back into ``data``, so
-        # this is the only record of the active setpoint. Cleared on reconnect
-        # because volatile setpoints do not survive an inverter reset.
-        self._last_commanded: dict[str, float] = {}
-        self._last_seen_connection_gen: int = client.connection_generation
+        # (entity, MQTT bridge, proxy), tagged with the client connection
+        # generation it was written on: name -> (value, connection_generation).
+        # Write-only control registers such as the active-power setpoint (533)
+        # are never polled back into ``data``, so this is the only record of the
+        # active setpoint. A value is trusted only while the connection
+        # generation is unchanged — a reconnect may mean the inverter reset and
+        # discarded its volatile setpoints (see last_commanded()).
+        self._last_commanded: dict[str, tuple[float, int]] = {}
 
     @property
     def client(self) -> KostalModbusClient:
@@ -151,18 +153,32 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Write-only control registers (e.g. the active-power setpoint 533) are
         never polled back into ``data``; this is the only record of the active
-        setpoint. Returns ``None`` when nothing was commanded since startup or
-        since the last reconnect (a volatile setpoint is not trusted across an
-        inverter reset).
+        setpoint. Returns ``None`` when nothing was commanded, or when the
+        Modbus link has been re-established since the value was written: a
+        reconnect (performed by the coordinator OR internally inside the client
+        read/write retry loop) may mean the inverter reset and discarded its
+        volatile setpoints, so a value is trusted only while the connection
+        generation is unchanged. Because the generation is stored per value, a
+        command re-issued on the new connection survives while a stale one from
+        the previous connection does not.
         """
-        return self._last_commanded.get(name)
+        entry = self._last_commanded.get(name)
+        if entry is None:
+            return None
+        value, gen = entry
+        if gen != self._client.connection_generation:
+            return None
+        return value
 
     def _record_commanded(self, name: str, value: Any) -> None:
-        """Cache a successfully-written value; non-numeric writes are dropped."""
+        """Cache a successfully-written value tagged with the current connection
+        generation; non-numeric writes are dropped."""
         try:
-            self._last_commanded[name] = float(value)
+            fval = float(value)
         except (TypeError, ValueError):
             self._last_commanded.pop(name, None)
+            return
+        self._last_commanded[name] = (fval, self._client.connection_generation)
 
     async def async_setup(self) -> None:
         """Connect to the inverter and read initial device info."""
@@ -211,18 +227,6 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.info("Modbus reconnected to %s", self._client.host)
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
-
-        # Any (re)connection — the reconnect just above OR one performed
-        # internally inside the client's read retry loop — advances the client's
-        # connection generation. A reconnect may mean the inverter rebooted and
-        # discarded its volatile control setpoints (e.g. active-power limit 533),
-        # so drop the last-commanded cache whenever the generation advanced;
-        # those entities then report "unknown" rather than a stale value until
-        # they are re-commanded.
-        gen = self._client.connection_generation
-        if gen != self._last_seen_connection_gen:
-            self._last_commanded.clear()
-            self._last_seen_connection_gen = gen
 
         self._update_count += 1
         data: dict[str, Any] = {}

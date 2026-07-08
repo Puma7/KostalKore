@@ -177,8 +177,9 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
 
     client.connected = False
 
-    # A reconnect bumps the client's connection generation; the coordinator
-    # clears the volatile last-commanded cache when it observes that change.
+    # A reconnect bumps the client's connection generation; a value cached on
+    # the previous generation is no longer trusted (volatile setpoints do not
+    # survive an inverter reset).
     async def _bump_connect() -> bool:
         client.connection_generation += 1
         return True
@@ -187,9 +188,8 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     client.read_registers_batch = AsyncMock(side_effect=_batch_normal)
     coordinator._slow_tick = 5
     coordinator._device_info_tick = 59
-    # Prime the last-commanded cache; a reconnect must clear it because a
-    # volatile setpoint does not survive an inverter reset.
-    coordinator._last_commanded["active_power_setpoint"] = 80.0
+    # Prime a value tagged with the current (pre-reconnect) generation 0.
+    coordinator._last_commanded["active_power_setpoint"] = (80.0, 0)
     with patch(
         "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
         (fast_ok, fast_perm, slow_ok),
@@ -324,32 +324,26 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
 
 
 @pytest.mark.asyncio
-async def test_last_commanded_cleared_on_internal_reconnect(hass) -> None:
-    """A reconnect performed inside the client's own read retry loop leaves
-    client.connected True by the time the next poll runs, so the coordinator's
-    pre-poll 'not connected' branch never fires. The connection-generation
-    change must still clear the volatile last-commanded cache."""
+async def test_last_commanded_invalidated_when_connection_generation_changes(hass) -> None:
+    """A cached command is trusted only while the connection generation is
+    unchanged. A reconnect performed internally inside the client's read/write
+    retry loop advances the generation without the coordinator's reconnect
+    branch ever running, so a stale command is no longer returned — while a
+    command re-issued on the new connection survives."""
     client = _modbus_client()
-    client.connected = True
     client.connection_generation = 3
-    coordinator = ModbusDataUpdateCoordinator(hass, client)  # baseline gen = 3
-    coordinator._last_commanded["active_power_setpoint"] = 80.0
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
 
-    # No coordinator-level reconnect (stays connected), but the client
-    # reconnected internally → generation advanced since the last poll.
+    coordinator._record_commanded("active_power_setpoint", 80)
+    assert coordinator.last_commanded("active_power_setpoint") == 80.0
+
+    # Internal reconnect bumps the generation → the old command is not trusted.
     client.connection_generation = 4
-    fast_ok = _modbus_reg(10, "fast_ok", group=RegisterGroup.POWER)
-    client.read_registers_batch = AsyncMock(return_value={"fast_ok": 1.0})
-    with patch(
-        "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
-        (fast_ok,),
-    ), patch.object(coordinator, "_read_device_info", new=AsyncMock()), patch.object(
-        coordinator, "_save_register_capability_state_if_changed", new=AsyncMock()
-    ):
-        await coordinator._async_update_data()
-
-    client.connect.assert_not_awaited()  # never went through the reconnect branch
     assert coordinator.last_commanded("active_power_setpoint") is None
+
+    # A command re-issued on the new connection (generation 4) survives.
+    coordinator._record_commanded("active_power_setpoint", 90)
+    assert coordinator.last_commanded("active_power_setpoint") == 90.0
 
 
 @pytest.mark.asyncio
