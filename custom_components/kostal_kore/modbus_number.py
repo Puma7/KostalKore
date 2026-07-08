@@ -58,6 +58,12 @@ G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_G3_MAX_DISCHARGE.name,
 })
 
+# Register 533 is the inverter's active-power OUTPUT limit in percent
+# (Wirkleistungsbegrenzung / feed-in curtailment) — the Kostal-native
+# equivalent of SunSpec model 123 WMaxLimPct. It gets curtailment-specific
+# state attributes (see ModbusNumberEntity.extra_state_attributes).
+CURTAILMENT_REGISTER_NAME: Final[str] = REG_ACTIVE_POWER_SETPOINT.name
+
 
 async def _probe_modbus_access(coordinator: ModbusDataUpdateCoordinator) -> bool:
     """Probe if battery management registers are accessible (read-only).
@@ -144,7 +150,10 @@ def _build_descriptions(
         {
             "register": REG_ACTIVE_POWER_SETPOINT,
             "name": "Active Power Setpoint (Modbus)",
-            "icon": "mdi:flash",
+            # Inverter active-power OUTPUT limit in % (Wirkleistungsbegrenzung /
+            # feed-in curtailment); 100 % = uncurtailed. See the entity's
+            # extra_state_attributes for the curtailment semantics.
+            "icon": "mdi:transmission-tower-export",
             "min_value": 1,
             "max_value": 100,
             "step": 1,
@@ -317,6 +326,31 @@ class ModbusNumberEntity(
             return float(val)
         except (TypeError, ValueError):
             return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """Expose feed-in-curtailment semantics for the active-power setpoint.
+
+        Register 533 is the inverter's active-power OUTPUT limit in percent
+        (Wirkleistungsbegrenzung): 100 % = uncurtailed / full feed-in, < 100 %
+        throttles AC output. It is the Kostal-native equivalent of SunSpec
+        model 123 WMaxLimPct. The value is *volatile* — the inverter discards
+        it on power-on/reset and returns to full power (fail-open), so no
+        keepalive/watchdog is needed. True 0 % (zero export) is NOT reachable
+        here (the floor is 1 %); use the REST ``ActivePower:ExtCtrlP:P`` = 0
+        setting or a watt-based cap for that.
+        """
+        if self._register.name != CURTAILMENT_REGISTER_NAME:
+            return None
+        val = self.native_value
+        return {
+            "role": "feed_in_curtailment",
+            "curtailment_active": val is not None and val < 100,
+            "at_full_power": val is not None and val >= 100,
+            "minimum_percent": self._attr_native_min_value,
+            "zero_export_via_this_entity": False,
+            "volatile_resets_to_full_power": True,
+        }
 
     async def async_set_native_value(self, value: float) -> None:
         """Write a new value to the Modbus register with safety validation."""

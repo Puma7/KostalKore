@@ -328,3 +328,69 @@ async def test_modbus_number_entity_paths() -> None:
     with patch.object(CoordinatorEntity, "async_will_remove_from_hass", AsyncMock()) as super_remove:
         await entity.async_will_remove_from_hass()
     super_remove.assert_awaited_once()
+
+
+def _curtail_entity(coord: MagicMock) -> "mod.ModbusNumberEntity":
+    return mod.ModbusNumberEntity(
+        coordinator=coord,
+        register=mod.REG_ACTIVE_POWER_SETPOINT,
+        name="Active Power Setpoint (Modbus)",
+        icon="mdi:transmission-tower-export",
+        min_value=1,
+        max_value=100,
+        step=1,
+        unit="%",
+        device_class=None,
+        entity_category=None,
+        entry_id="entry",
+        device_info=_device_info(),
+        read_only=False,
+    )
+
+
+def test_active_power_setpoint_exposes_curtailment_attributes() -> None:
+    """Register 533 surfaces feed-in-curtailment semantics; others surface none."""
+    name = mod.REG_ACTIVE_POWER_SETPOINT.name
+
+    # < 100 % → curtailment active
+    entity = _curtail_entity(_coord(data={name: "80"}))
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["role"] == "feed_in_curtailment"
+    assert attrs["curtailment_active"] is True
+    assert attrs["at_full_power"] is False
+    assert attrs["minimum_percent"] == 1
+    assert attrs["zero_export_via_this_entity"] is False
+    assert attrs["volatile_resets_to_full_power"] is True
+
+    # 100 % → uncurtailed / full power
+    full = _curtail_entity(_coord(data={name: "100"}))
+    full_attrs = full.extra_state_attributes
+    assert full_attrs is not None
+    assert full_attrs["curtailment_active"] is False
+    assert full_attrs["at_full_power"] is True
+
+    # unknown value → neither flag asserted
+    unknown = _curtail_entity(_coord(data=None))
+    unknown_attrs = unknown.extra_state_attributes
+    assert unknown_attrs is not None
+    assert unknown_attrs["curtailment_active"] is False
+    assert unknown_attrs["at_full_power"] is False
+
+    # a non-curtailment register returns no extra attributes
+    other = mod.ModbusNumberEntity(
+        coordinator=_coord(data={mod.REG_BAT_MAX_SOC.name: "90"}),
+        register=mod.REG_BAT_MAX_SOC,
+        name="Battery Max SoC",
+        icon="mdi:battery",
+        min_value=5,
+        max_value=100,
+        step=1,
+        unit="%",
+        device_class=None,
+        entity_category=None,
+        entry_id="entry",
+        device_info=_device_info(),
+        read_only=False,
+    )
+    assert other.extra_state_attributes is None

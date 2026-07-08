@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.4] — 2026-07-08 — Feed-in curtailment legibility (evcc PR #31487 follow-up)
+
+Documentation and entity-metadata pass after evaluating evcc PR #31487 ("Kostal
+Plenticore: add feed-in curtailment via SunSpec model 123"). Outcome: KORE already
+implements the same capability on G3 through the Kostal-native Modbus register 533
+(active-power output limit in %), so nothing from the PR's SunSpec-123 approach needs
+porting. This release makes that existing control legible as a curtailment control and
+documents the boundaries; no write-path or control-logic change.
+
+### Changed
+- **"Active Power Setpoint (Modbus)" (register 533) is now framed as the feed-in
+  curtailment control.** New export-tower icon and `extra_state_attributes`
+  (`role`, `curtailment_active`, `at_full_power`, `minimum_percent`,
+  `zero_export_via_this_entity`, `volatile_resets_to_full_power`) surface the
+  semantics: 100 % = uncurtailed, < 100 % throttles AC output, Kostal-native
+  equivalent of SunSpec 123 `WMaxLimPct`. Entity name and write path are unchanged
+  (no dashboard breakage, no behavior change).
+
+### Documentation
+- README: new "Feed-In Curtailment / Wirkleistungsbegrenzung" section clarifying that
+  register 533 curtails the inverter's AC **output** directly — distinct from the Grid
+  Feed-In Optimizer (which caps export indirectly via battery charging, register 1038)
+  and from the §14a **import** limit (`Inverter:ActivePowerConsumLimitation`). Notes the
+  1 % floor, the zero-export path (REST `ActivePower:ExtCtrlP:P`=0 or a watt cap), the
+  fail-open volatility, and why evcc PR #31487 needs nothing ported.
+- ENTITY_REFERENCE: expanded the register-533 row with the same boundaries and the
+  G3-from-FW-3.04.01 validity note.
+- HARDWARE_VALIDATION_TODO: added **HV6** — validate on real G3 whether register 533 is
+  writable independent of battery-management mode (it is currently gated read-only unless
+  reg 1080 == 0x02); if so, ungate output curtailment from the battery-mode requirement.
+
+### Notes
+- Verified non-issue (no change needed): the PR's FC06-not-FC16 write quirk is already
+  satisfied — KORE selects FC06 for single-register writes (`count == 1`), and register
+  533 is a single 16-bit word. The SunSpec registers `40217`/`40221` remain intentionally
+  unimplemented (redundant with 533 and unverified on G3).
+
 ## [3.0.3] — 2026-06-29 — Firmware-coexistence hardening (G3 changelog follow-ups)
 
 Hardening based on a review of the Kostal PLENTICORE G3 firmware changelog (up to

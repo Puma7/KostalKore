@@ -70,6 +70,15 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - Turning the switch OFF restores normal charging limits.
 - Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations, **evcc `batteryMode`**, or the optimizer), or they can conflict. evcc's `kostal-plenticore-gen2` template (`batteryMode`) cyclically writes registers `1034`/`1038`/`1040` — the same registers KORE controls — so use **one** controller per battery. KORE rejects competing external writes with Modbus exception `0x06` while an internal controller is active.
 
+### 🔻 Feed-In Curtailment / Wirkleistungsbegrenzung (Active Power Setpoint)
+- Requires Modbus. Uses the **Active Power Setpoint (Modbus)** number entity (register `533`) — the inverter's active-power **output** limit in percent, the Kostal-native equivalent of SunSpec model 123 `WMaxLimPct`.
+- **100% = uncurtailed** (full feed-in); values below 100% throttle the inverter's AC output. Setting it back to 100% releases the limit.
+- **Minimum 1%.** True 0% / zero-export is *not* reachable via this register — use the REST setting `ActivePower:ExtCtrlP:P`=0 or a watt-based cap (`Inverter:ActivePowerLimitation`) instead.
+- **Volatile:** the inverter discards the setpoint on power-on/reset and returns to full power (fail-open), so no keepalive is needed.
+- This is **not** the Grid Feed-In Optimizer above: the optimizer caps grid export *indirectly* by limiting battery charging (register `1038`); this control throttles the inverter's AC output *directly*. It is also distinct from the §14a EnWG **import** limit (`Inverter:ActivePowerConsumLimitation`).
+- The entity is created read-only unless the inverter is in **"External via Modbus"** battery-management mode (register `1080` == `0x02`) — the same gate as the battery controls (see `HARDWARE_VALIDATION_TODO.md` HV6).
+- evcc's PR #31487 adds the same capability to *its* Gen2 meter template via SunSpec model 123 (registers `40217`/`40221`); KORE already covers this on G3 through register `533`, so that PR needs nothing ported here — see `HARDWARE_VALIDATION_TODO.md` HV6 for the open validation points.
+
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting
 - Redacted sensitive information for privacy
