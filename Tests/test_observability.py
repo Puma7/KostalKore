@@ -529,7 +529,6 @@ def test_consistency_sensor_debounces_transient_status():
 
     sensor = RestModbusConsistencySensor.__new__(RestModbusConsistencySensor)
     sensor._reported_status = "insufficient_data"
-    sensor._candidate_status = None
     sensor._candidate_count = 0
     sensor._initialized = False
     sensor.async_write_ha_state = MagicMock()
@@ -539,9 +538,9 @@ def test_consistency_sensor_debounces_transient_status():
 
     sensor._handle_coordinator_update()   # 1) first reading adopted immediately
     assert sensor.native_value == "ok"
-    sensor._handle_coordinator_update()   # 2) single mismatch → held as candidate
+    sensor._handle_coordinator_update()   # 2) single mismatch → count 1
     assert sensor.native_value == "ok"
-    sensor._handle_coordinator_update()   # 3) reverts → transient skew ignored
+    sensor._handle_coordinator_update()   # 3) reverts to ok → count reset
     assert sensor.native_value == "ok"
     sensor._handle_coordinator_update()   # 4) mismatch again, count 1
     assert sensor.native_value == "ok"
@@ -550,6 +549,39 @@ def test_consistency_sensor_debounces_transient_status():
     sensor._handle_coordinator_update()   # 6) mismatch, count 3 → committed
     assert sensor.native_value == "mismatch"
     assert sensor.async_write_ha_state.call_count == 6
+
+
+def test_consistency_sensor_commits_when_abnormal_status_oscillates():
+    """A genuinely inconsistent system that flaps between two ABNORMAL statuses
+    (warn↔mismatch at a threshold) must still be reported — the debounce counts
+    consecutive 'differs from reported' cycles, not repeats of one candidate, so
+    it can never be masked as a healthy 'ok'."""
+    from unittest.mock import MagicMock
+
+    from custom_components.kostal_kore.observability_entities import (
+        RestModbusConsistencySensor,
+    )
+
+    sensor = RestModbusConsistencySensor.__new__(RestModbusConsistencySensor)
+    sensor._reported_status = "insufficient_data"
+    sensor._candidate_count = 0
+    sensor._initialized = False
+    sensor.async_write_ha_state = MagicMock()
+
+    # Healthy start, then sustained inconsistency that oscillates warn↔mismatch.
+    scripted = iter(["ok", "mismatch", "warn", "mismatch", "warn"])
+    sensor._raw_status = lambda: next(scripted)
+
+    sensor._handle_coordinator_update()   # ok → reported ok
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # mismatch → count 1
+    sensor._handle_coordinator_update()   # warn     → count 2 (still != ok)
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # mismatch → count 3 → commit latest raw
+    assert sensor.native_value == "mismatch"
+    # continues to track the abnormal state, never silently returns to ok
+    sensor._handle_coordinator_update()   # warn (== reported? no → count 1)
+    assert sensor.native_value != "ok"
 
 
 # ---------------------------------------------------------------------------

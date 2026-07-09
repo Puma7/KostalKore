@@ -184,7 +184,6 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
         self._attr_device_info = device_info
         # Debounced status actually reported as the entity state.
         self._reported_status: str = "insufficient_data"
-        self._candidate_status: str | None = None
         self._candidate_count: int = 0
         self._initialized: bool = False
 
@@ -249,9 +248,8 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
             "status": status,
         }
 
-    def _raw_status(self) -> str:
-        """Instantaneous consistency status from the current poll (undebounced)."""
-        pairs = self._compute_pairs()
+    @staticmethod
+    def _status_from_pairs(pairs: list[dict[str, Any]]) -> str:
         statuses = {p["status"] for p in pairs}
         if "mismatch" in statuses:
             return "mismatch"
@@ -265,30 +263,33 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
             return "partial"
         return "insufficient_data"
 
+    def _raw_status(self) -> str:
+        """Instantaneous consistency status from the current poll (undebounced)."""
+        return self._status_from_pairs(self._compute_pairs())
+
     def _handle_coordinator_update(self) -> None:
         """Debounce the raw status before it becomes the entity state.
 
-        A changed status must persist ``CONSISTENCY_DEBOUNCE_CYCLES`` consecutive
-        updates to be reported, so a single-cycle REST↔Modbus timing skew no
-        longer flaps the state (and the Logbook). The first reading is adopted
-        immediately so startup shows the real status without delay.
+        The status must stay *different from the reported one* for
+        ``CONSISTENCY_DEBOUNCE_CYCLES`` consecutive updates before the change is
+        committed (adopting the most recent raw). This suppresses a single-cycle
+        REST↔Modbus timing skew — but, unlike counting repeats of one identical
+        candidate, it still commits when the abnormal readings themselves flap
+        (e.g. warn↔mismatch oscillating at a threshold), so a genuinely
+        inconsistent system is never masked as "ok". The first reading is
+        adopted immediately so startup shows the real status without delay.
         """
         raw = self._raw_status()
         if not self._initialized:
             self._reported_status = raw
             self._initialized = True
         elif raw == self._reported_status:
-            self._candidate_status = None
             self._candidate_count = 0
-        elif raw == self._candidate_status:
+        else:
             self._candidate_count += 1
             if self._candidate_count >= CONSISTENCY_DEBOUNCE_CYCLES:
                 self._reported_status = raw
-                self._candidate_status = None
                 self._candidate_count = 0
-        else:
-            self._candidate_status = raw
-            self._candidate_count = 1
         super()._handle_coordinator_update()
 
     @property
@@ -328,9 +329,10 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        pairs = self._compute_pairs()
         return {
-            "pairs": self._compute_pairs(),
-            "raw_status": self._raw_status(),
+            "pairs": pairs,
+            "raw_status": self._status_from_pairs(pairs),
             "debounce_cycles": CONSISTENCY_DEBOUNCE_CYCLES,
         }
 
