@@ -104,6 +104,28 @@ class TestTrackedParameter:
         p.record(100.0, base_time + 11 * SECONDS_PER_DAY)
         assert "Stabil" in p.trend_description or "stabil" in p.trend_description.lower()
 
+    def test_trend_category_stable_state(self) -> None:
+        """The trend category is the low-churn sensor state (steigend/fallend/
+        stabil/unbekannt), unlike the verbose, numbers-embedding description."""
+        empty = TrackedParameter(name="test", unit="V")
+        assert empty.trend == "unbekannt"  # no data yet
+
+        stable = TrackedParameter(name="test", unit="V")
+        base_time = time.time()
+        for day in range(11):
+            stable.record(100.0, base_time + day * SECONDS_PER_DAY)
+        assert stable.trend == "stabil"
+
+        rising = TrackedParameter(name="test", unit="V")
+        for day in range(11):
+            rising.record(100.0 + day * 5.0, base_time + day * SECONDS_PER_DAY)
+        assert rising.trend == "steigend"
+
+        falling = TrackedParameter(name="test", unit="V")
+        for day in range(11):
+            falling.record(200.0 - day * 5.0, base_time + day * SECONDS_PER_DAY)
+        assert falling.trend == "fallend"
+
     def test_persistence_roundtrip(self) -> None:
         p = TrackedParameter(name="test", unit="V")
         base_time = time.time()

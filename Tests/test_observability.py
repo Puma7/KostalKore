@@ -245,7 +245,7 @@ def test_consistency_sensor_ok_all_three_pairs():
     sensor._process_coord = rest
     sensor.coordinator = modbus
 
-    assert sensor.native_value == "ok"
+    assert sensor._raw_status() == "ok"
 
 
 def test_consistency_sensor_mismatch_soc():
@@ -267,7 +267,7 @@ def test_consistency_sensor_mismatch_soc():
     sensor._process_coord = rest
     sensor.coordinator = modbus
 
-    assert sensor.native_value == "mismatch"
+    assert sensor._raw_status() == "mismatch"
 
 
 def test_consistency_sensor_insufficient_data_when_no_rest_coord():
@@ -279,7 +279,7 @@ def test_consistency_sensor_insufficient_data_when_no_rest_coord():
     sensor._process_coord = None
     sensor.coordinator = modbus
 
-    assert sensor.native_value == "insufficient_data"
+    assert sensor._raw_status() == "insufficient_data"
 
 
 def test_consistency_sensor_missing_modbus_key_gives_insufficient_data_for_pair():
@@ -327,7 +327,7 @@ def test_consistency_sensor_warn_threshold_power():
     sensor._process_coord = rest
     sensor.coordinator = modbus
 
-    assert sensor.native_value == "warn"
+    assert sensor._raw_status() == "warn"
 
 
 def test_to_float_helper():
@@ -350,7 +350,7 @@ def test_consistency_sensor_get_rest_float_missing_module():
     sensor.coordinator = modbus
 
     # All REST keys missing → all insufficient_data
-    assert sensor.native_value == "insufficient_data"
+    assert sensor._raw_status() == "insufficient_data"
 
 
 def test_consistency_sensor_get_rest_float_missing_key_in_module():
@@ -407,7 +407,7 @@ def test_consistency_sensor_soc_warn_threshold():
     pairs = sensor._compute_pairs()
     soc_pair = next(p for p in pairs if p["key"] == "battery_soc")
     assert soc_pair["status"] == "warn"
-    assert sensor.native_value == "warn"
+    assert sensor._raw_status() == "warn"
 
 
 def test_consistency_sensor_dc_mismatch_relative():
@@ -462,7 +462,7 @@ def test_consistency_sensor_low_power_no_spurious_mismatch():
     home_pair = next(p for p in pairs if p["key"] == "home_power_w")
     assert dc_pair["status"] == "ok"
     assert home_pair["status"] == "ok"
-    assert sensor.native_value == "ok"
+    assert sensor._raw_status() == "ok"
 
 
 def test_consistency_sensor_partial_when_some_pairs_ok_some_insufficient():
@@ -486,7 +486,7 @@ def test_consistency_sensor_partial_when_some_pairs_ok_some_insufficient():
     sensor._process_coord = rest
     sensor.coordinator = modbus
 
-    assert sensor.native_value == "partial"
+    assert sensor._raw_status() == "partial"
 
 
 def test_consistency_sensor_extra_state_attributes_returns_pairs():
@@ -511,6 +511,45 @@ def test_consistency_sensor_extra_state_attributes_returns_pairs():
     attrs = sensor.extra_state_attributes
     assert "pairs" in attrs
     assert len(attrs["pairs"]) == 3
+    assert "raw_status" in attrs
+
+
+def test_consistency_sensor_debounces_transient_status():
+    """A single-cycle status change (REST/Modbus timing skew) must not flip the
+    reported state; only a status sustained for CONSISTENCY_DEBOUNCE_CYCLES is
+    committed. The first reading is adopted immediately."""
+    from unittest.mock import MagicMock
+
+    from custom_components.kostal_kore.observability_entities import (
+        CONSISTENCY_DEBOUNCE_CYCLES,
+        RestModbusConsistencySensor,
+    )
+
+    assert CONSISTENCY_DEBOUNCE_CYCLES == 3
+
+    sensor = RestModbusConsistencySensor.__new__(RestModbusConsistencySensor)
+    sensor._reported_status = "insufficient_data"
+    sensor._candidate_status = None
+    sensor._candidate_count = 0
+    sensor._initialized = False
+    sensor.async_write_ha_state = MagicMock()
+
+    scripted = iter(["ok", "mismatch", "ok", "mismatch", "mismatch", "mismatch"])
+    sensor._raw_status = lambda: next(scripted)
+
+    sensor._handle_coordinator_update()   # 1) first reading adopted immediately
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # 2) single mismatch → held as candidate
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # 3) reverts → transient skew ignored
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # 4) mismatch again, count 1
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # 5) mismatch, count 2
+    assert sensor.native_value == "ok"
+    sensor._handle_coordinator_update()   # 6) mismatch, count 3 → committed
+    assert sensor.native_value == "mismatch"
+    assert sensor.async_write_ha_state.call_count == 6
 
 
 # ---------------------------------------------------------------------------
