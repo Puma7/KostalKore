@@ -40,6 +40,31 @@ against your FW 3.06.10 G3.
 - **HV5 — REST setting IDs for the new native grid-charging / dynamic-tariff battery modes**
   (from a `get_settings` dump). `Battery:SmartBatteryControl:Enable` and `Battery:TimeControl:Enable`
   are already known; the newer grid/tariff modes are not. → Completes **M3**.
+- **HV6 — Is the active-power output setpoint (Modbus reg 533, "Active Power Setpoint") writable
+  independent of the battery-management mode?** Today every Modbus number entity — including reg 533,
+  which is *feed-in curtailment / Wirkleistungsbegrenzung*, not battery control — is gated by the
+  read-only logic in `create_modbus_number_entities` (`modbus_number.py`): writable when reg 1080 ==
+  0x02 ("External via Modbus"), or when reg 1080 == 0x00 and a read probe (`_probe_modbus_access`,
+  which only reads Min SoC — never writes) succeeds; read-only for any other mode; and writable when
+  reg 1080 is unavailable. On a G3, set the inverter to a non-Modbus battery mode and try
+  writing reg 533 (e.g. 90 %): if the inverter accepts it, output curtailment is being needlessly
+  gated behind battery mode and should be ungated (curtailment does not require external battery
+  control). Also confirm the 1 % floor and that the value really is discarded on reset (fail-open).
+  → Decides whether to relax the read-only gate for reg 533. Context: evcc PR #31487 adds this same
+  capability to its Gen2 template via SunSpec model 123 (regs 40217/40221); KORE already covers it on
+  G3 via reg 533, so **no SunSpec-123 port is needed** — only this gating question is open.
+- **HV7 — Is there a definitive "energy meter (KSEM) present / communicating" datapoint?** When the
+  inverter is not talking to its meter (stand-alone mode), all KSEM-dependent values read 0
+  (home consumption, autarky, own-consumption rate, grid feed-in energy, energy-manager state) — the
+  symptom behind upstream `kostal_plenticore` home-assistant/core#166779. A helpful diagnostic would
+  surface "meter not communicating" instead of silent zeros, but a value-based heuristic (all-zero →
+  meter missing) would false-positive on legitimately-zero moments (full battery + no grid flow), so
+  it must be gated on a real status datapoint. Check a REST `get_settings`/`get_process_data` dump and
+  a Modbus scan for a meter-present / meter-communication flag (e.g. a `scb:powermeter` field or a
+  dedicated register). If one exists, add a read-only "Energy meter connected" diagnostic + optional
+  repair hint. Note: KORE already handles the *other* two facets of #166779 — the device name uses the
+  extracted hostname value (not the raw settings dict, so no `{"Hostname":…}` names), and the slow
+  settings read at setup is timeout-protected (`get_hostname_id` via `asyncio.wait_for`).
 
 ---
 

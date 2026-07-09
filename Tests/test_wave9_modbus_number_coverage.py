@@ -26,6 +26,7 @@ def _coord(
     coord.async_request_refresh = AsyncMock()
     coord.hass = SimpleNamespace()
     coord.async_add_listener = MagicMock(return_value=lambda: None)
+    coord.last_commanded = MagicMock(return_value=None)
     return coord
 
 
@@ -328,3 +329,124 @@ async def test_modbus_number_entity_paths() -> None:
     with patch.object(CoordinatorEntity, "async_will_remove_from_hass", AsyncMock()) as super_remove:
         await entity.async_will_remove_from_hass()
     super_remove.assert_awaited_once()
+
+
+def _curtail_entity(coord: MagicMock) -> "mod.ModbusNumberEntity":
+    return mod.ModbusNumberEntity(
+        coordinator=coord,
+        register=mod.REG_ACTIVE_POWER_SETPOINT,
+        name="Active Power Setpoint (Modbus)",
+        icon="mdi:transmission-tower-export",
+        min_value=1,
+        max_value=100,
+        step=1,
+        unit="%",
+        device_class=None,
+        entity_category=None,
+        entry_id="entry",
+        device_info=_device_info(),
+        read_only=False,
+    )
+
+
+def test_active_power_setpoint_exposes_static_curtailment_attributes() -> None:
+    """Register 533 surfaces the static feed-in-curtailment semantics, and with
+    no command yet reports an honest unknown (not a false curtailed/full signal).
+    Other registers surface no extra attributes. The dynamic flags are validated
+    against the coordinator's last-commanded cache — the real production path —
+    in test_active_power_setpoint_reads_coordinator_last_commanded."""
+    coord = _coord(data={})
+    coord.last_commanded = MagicMock(return_value=None)
+    entity = _curtail_entity(coord)
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["role"] == "feed_in_curtailment"
+    assert attrs["minimum_percent"] == 1
+    assert attrs["zero_export_via_this_entity"] is False
+    assert attrs["volatile_resets_to_full_power"] is True
+    assert attrs["curtailment_active"] is False
+    assert attrs["at_full_power"] is False
+    assert attrs["last_commanded_percent"] is None
+
+    # a non-curtailment register returns no extra attributes
+    other = mod.ModbusNumberEntity(
+        coordinator=_coord(data={mod.REG_BAT_MAX_SOC.name: "90"}),
+        register=mod.REG_BAT_MAX_SOC,
+        name="Battery Max SoC",
+        icon="mdi:battery",
+        min_value=5,
+        max_value=100,
+        step=1,
+        unit="%",
+        device_class=None,
+        entity_category=None,
+        entry_id="entry",
+        device_info=_device_info(),
+        read_only=False,
+    )
+    assert other.extra_state_attributes is None
+
+
+def test_active_power_setpoint_is_not_polled() -> None:
+    """Proof the cache is load-bearing (not injected test data): reg 533 is a
+    write-only RW CONTROL register, so it is excluded from MONITORING_REGISTERS
+    and never lands in coordinator.data — hence the last-commanded fallback."""
+    from custom_components.kostal_kore.modbus_registers import (
+        MONITORING_REGISTERS,
+        Access,
+    )
+
+    assert mod.REG_ACTIVE_POWER_SETPOINT.access is Access.RW
+    assert mod.REG_ACTIVE_POWER_SETPOINT not in MONITORING_REGISTERS
+
+
+def test_active_power_setpoint_reads_coordinator_last_commanded() -> None:
+    """533 is write-only (not polled), so native_value + flags come from the
+    coordinator's shared last-commanded cache (populated by every write path,
+    cleared on reconnect)."""
+    name = mod.REG_ACTIVE_POWER_SETPOINT.name
+    coord = _coord(data={})  # 533 never appears in the polled data
+    entity = _curtail_entity(coord)
+
+    # Commanded 80 % (via any path) → curtailment active.
+    coord.last_commanded = MagicMock(side_effect=lambda n: 80.0 if n == name else None)
+    assert entity.native_value == 80.0
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["curtailment_active"] is True
+    assert attrs["at_full_power"] is False
+    assert attrs["last_commanded_percent"] == 80.0
+
+    # Released to 100 % → full power.
+    coord.last_commanded = MagicMock(side_effect=lambda n: 100.0 if n == name else None)
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["curtailment_active"] is False
+    assert attrs["at_full_power"] is True
+
+    # Nothing commanded (fresh start / post-reconnect) → unknown.
+    coord.last_commanded = MagicMock(return_value=None)
+    assert entity.native_value is None
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["curtailment_active"] is False
+    assert attrs["at_full_power"] is False
+    assert attrs["last_commanded_percent"] is None
+
+
+@pytest.mark.asyncio
+async def test_active_power_setpoint_write_delegates_to_coordinator() -> None:
+    """The entity delegates the write to the coordinator (which owns the cache);
+    a read-only-gated write must not reach the coordinator at all."""
+    coord = _coord(data={})
+    entity = _curtail_entity(coord)
+    await entity.async_set_native_value(80)
+    coord.async_write_register.assert_awaited_once_with(
+        mod.REG_ACTIVE_POWER_SETPOINT, 80
+    )
+
+    blocked_coord = _coord(data={})
+    blocked = _curtail_entity(blocked_coord)
+    blocked._read_only = True
+    await blocked.async_set_native_value(50)
+    blocked_coord.async_write_register.assert_not_awaited()

@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.4] — 2026-07-08 — Feed-in curtailment legibility (evcc PR #31487 follow-up)
+
+Documentation and entity-metadata pass after evaluating evcc PR #31487 ("Kostal
+Plenticore: add feed-in curtailment via SunSpec model 123"). Outcome: KORE already
+implements the same capability on G3 through the Kostal-native Modbus register 533
+(active-power output limit in %), so nothing from the PR's SunSpec-123 approach needs
+porting. This release makes that existing control legible as a curtailment control and
+documents the boundaries; no write-path or control-logic change.
+
+### Changed
+- **"Active Power Setpoint (Modbus)" (register 533) is now framed as the feed-in
+  curtailment control.** New export-tower icon and `extra_state_attributes`
+  (`role`, `curtailment_active`, `at_full_power`, `last_commanded_percent`,
+  `minimum_percent`, `zero_export_via_this_entity`, `volatile_resets_to_full_power`)
+  surface the semantics: 100 % = uncurtailed, < 100 % throttles AC output,
+  Kostal-native equivalent of SunSpec 123 `WMaxLimPct`. Register 533 is write-only
+  on the inverter (Kostal spec §3.3) and is not polled into `coordinator.data`, so
+  the entity now reports the **last value KORE commanded** — previously its state
+  and these flags would have read "unknown" permanently. The last-commanded value
+  is tracked on the **coordinator** so it covers every write path (UI number, MQTT
+  bridge, Modbus proxy), and each cached value is **tagged with the connection
+  generation it was written on** (a monotonic counter bumped on every client
+  (re)connection). A value is trusted only while that generation is unchanged, so
+  a reconnect — whether performed by the coordinator or internally inside the
+  client's read/write retry loop — invalidates a stale setpoint (the volatile
+  register fails open to full power on an inverter reset), while a command
+  re-issued on the new connection survives. Entity name and write path are
+  unchanged (no dashboard breakage).
+
+### Documentation
+- README: new "Feed-In Curtailment / Wirkleistungsbegrenzung" section clarifying that
+  register 533 curtails the inverter's AC **output** directly — distinct from the Grid
+  Feed-In Optimizer (which caps export indirectly via battery charging, register 1038)
+  and from the §14a **import** limit (`Inverter:ActivePowerConsumLimitation`). Notes the
+  1 % floor, the zero-export path (REST `ActivePower:ExtCtrlP:P`=0 or a watt cap), the
+  fail-open volatility, and why evcc PR #31487 needs nothing ported.
+- ENTITY_REFERENCE: expanded the register-533 row with the same boundaries and the
+  G3-from-FW-3.04.01 validity note.
+- HARDWARE_VALIDATION_TODO: added **HV6** — validate on real G3 whether register 533 is
+  writable independent of battery-management mode (it is currently gated read-only unless
+  reg 1080 == 0x02); if so, ungate output curtailment from the battery-mode requirement.
+- README troubleshooting: documented two known upstream `kostal_plenticore` situations that
+  also apply to KORE and need no code change — the benign `total_increasing` energy-statistics
+  warnings (home-assistant/core#174543; the negative-value variant is already suppressed by
+  `format_energy`, and `total_increasing` is intentionally kept for these resetting counters),
+  and KSEM-dependent values stuck at 0 when the inverter is not talking to its meter
+  (home-assistant/core#166779; a wiring/commissioning issue, not a KORE bug). Added
+  **HV7** for a future "energy meter connected" diagnostic gated on a real meter-status datapoint.
+
+### Notes
+- Verified non-issue (no change needed): the PR's FC06-not-FC16 write quirk is already
+  satisfied — KORE selects FC06 for single-register writes (`count == 1`), and register
+  533 is a single 16-bit word. The SunSpec registers `40217`/`40221` remain intentionally
+  unimplemented (redundant with 533 and unverified on G3).
+
 ## [3.0.3] — 2026-06-29 — Firmware-coexistence hardening (G3 changelog follow-ups)
 
 Hardening based on a review of the Kostal PLENTICORE G3 firmware changelog (up to

@@ -202,6 +202,11 @@ class KostalModbusClient:
         self._last_good_values: dict[int, Any] = {}
         self._outlier_policy = outlier_policy
         self._closing = False
+        # Monotonic counter of successful (re)connections, bumped in connect().
+        # Consumers detect a re-established link (e.g. after an inverter reset)
+        # by observing a change — this covers reconnects performed both by the
+        # coordinator and internally inside the read retry loop.
+        self._connection_generation = 0
 
     @property
     def closing(self) -> bool:
@@ -223,6 +228,17 @@ class KostalModbusClient:
     @property
     def connected(self) -> bool:
         return self._client is not None and self._client.connected
+
+    @property
+    def connection_generation(self) -> int:
+        """Monotonic count of successful (re)connections.
+
+        Bumped on every new TCP connection, including reconnects performed
+        inside the read retry loop. A change signals the link was
+        re-established (e.g. after an inverter reset), which consumers use to
+        drop state that does not survive a reset (volatile control setpoints).
+        """
+        return self._connection_generation
 
     @property
     def endianness(self) -> str:
@@ -319,6 +335,7 @@ class KostalModbusClient:
                     raise ModbusConnectionError(
                         f"Failed to connect to {self._host}:{self._port}"
                     )
+                self._connection_generation += 1
                 _LOGGER.info(
                     "Modbus TCP connected to %s:%s (unit %s)",
                     self._host, self._port, self._unit_id,

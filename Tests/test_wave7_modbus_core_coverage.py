@@ -25,6 +25,7 @@ from custom_components.kostal_kore.modbus_client import (
 )
 from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 from custom_components.kostal_kore.modbus_registers import (
+    REG_ACTIVE_POWER_SETPOINT,
     Access,
     DataType,
     ModbusRegister,
@@ -56,6 +57,7 @@ def _modbus_client() -> MagicMock:
     client.unit_id = 71
     client.connected = True
     client.closing = False
+    client.connection_generation = 0
     client.connect = AsyncMock()
     client.detect_endianness = AsyncMock()
     client.disconnect = AsyncMock()
@@ -174,9 +176,20 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
         return {r.name: r.address * 1.0 for r in regs if r.name in ("fast_ok", "slow_ok")}
 
     client.connected = False
+
+    # A reconnect bumps the client's connection generation; a value cached on
+    # the previous generation is no longer trusted (volatile setpoints do not
+    # survive an inverter reset).
+    async def _bump_connect() -> bool:
+        client.connection_generation += 1
+        return True
+
+    client.connect = AsyncMock(side_effect=_bump_connect)
     client.read_registers_batch = AsyncMock(side_effect=_batch_normal)
     coordinator._slow_tick = 5
     coordinator._device_info_tick = 59
+    # Prime a value tagged with the current (pre-reconnect) generation 0.
+    coordinator._last_commanded["active_power_setpoint"] = (80.0, 0)
     with patch(
         "custom_components.kostal_kore.modbus_coordinator.MONITORING_REGISTERS",
         (fast_ok, fast_perm, slow_ok),
@@ -189,6 +202,7 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     assert data == {"fast_ok": 10.0, "slow_ok": 20.0}
     read_info.assert_awaited_once()
     save_state.assert_awaited_once()
+    assert coordinator.last_commanded("active_power_setpoint") is None  # cleared on reconnect
 
     # Connection error during reconnect → UpdateFailed
     client.connected = False
@@ -284,15 +298,59 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
 
     await coordinator.async_write_register(rw_reg, 42)
     client.write_register.assert_awaited_with(rw_reg, 42)
+    # Every write path records the commanded value so write-only registers
+    # (e.g. the active-power setpoint 533) can report the active setpoint.
+    assert coordinator.last_commanded("rw_reg") == 42.0
 
     client.write_register = AsyncMock(side_effect=ModbusClientError("write failed"))
     with pytest.raises(ModbusClientError):
         await coordinator.async_write_register(rw_reg, 5)
+    # A failed write must not overwrite the cached value.
+    assert coordinator.last_commanded("rw_reg") == 42.0
 
     await coordinator.async_write_by_name("foo", 1)
     client.write_by_name.assert_awaited_once_with("foo", 1)
-    await coordinator.async_write_by_address(123, 2)
-    client.write_by_address.assert_awaited_once_with(123, 2)
+    assert coordinator.last_commanded("foo") == 1.0
+
+    # write-by-address resolves the register name (proxy path) so it caches too
+    await coordinator.async_write_by_address(REG_ACTIVE_POWER_SETPOINT.address, 80)
+    client.write_by_address.assert_awaited_once_with(
+        REG_ACTIVE_POWER_SETPOINT.address, 80
+    )
+    assert coordinator.last_commanded("active_power_setpoint") == 80.0
+    # an unknown address writes fine but caches nothing
+    await coordinator.async_write_by_address(64999, 7)
+    assert coordinator.last_commanded("addr_64999") is None
+
+    # a fractional command to an integer (UINT16) register is cached as the
+    # truncated value the client actually encodes (int(80.5) == 80), never the
+    # un-applied 80.5.
+    client.write_register = AsyncMock()
+    await coordinator.async_write_register(REG_ACTIVE_POWER_SETPOINT, 80.5)
+    assert coordinator.last_commanded("active_power_setpoint") == 80.0
+
+
+@pytest.mark.asyncio
+async def test_last_commanded_invalidated_when_connection_generation_changes(hass) -> None:
+    """A cached command is trusted only while the connection generation is
+    unchanged. A reconnect performed internally inside the client's read/write
+    retry loop advances the generation without the coordinator's reconnect
+    branch ever running, so a stale command is no longer returned — while a
+    command re-issued on the new connection survives."""
+    client = _modbus_client()
+    client.connection_generation = 3
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+
+    coordinator._record_commanded("active_power_setpoint", 80)
+    assert coordinator.last_commanded("active_power_setpoint") == 80.0
+
+    # Internal reconnect bumps the generation → the old command is not trusted.
+    client.connection_generation = 4
+    assert coordinator.last_commanded("active_power_setpoint") is None
+
+    # A command re-issued on the new connection (generation 4) survives.
+    coordinator._record_commanded("active_power_setpoint", 90)
+    assert coordinator.last_commanded("active_power_setpoint") == 90.0
 
 
 @pytest.mark.asyncio

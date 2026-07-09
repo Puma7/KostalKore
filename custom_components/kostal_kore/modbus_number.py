@@ -58,6 +58,12 @@ G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_G3_MAX_DISCHARGE.name,
 })
 
+# Register 533 is the inverter's active-power OUTPUT limit in percent
+# (Wirkleistungsbegrenzung / feed-in curtailment) — the Kostal-native
+# equivalent of SunSpec model 123 WMaxLimPct. It gets curtailment-specific
+# state attributes (see ModbusNumberEntity.extra_state_attributes).
+CURTAILMENT_REGISTER_NAME: Final[str] = REG_ACTIVE_POWER_SETPOINT.name
+
 
 async def _probe_modbus_access(coordinator: ModbusDataUpdateCoordinator) -> bool:
     """Probe if battery management registers are accessible (read-only).
@@ -144,7 +150,10 @@ def _build_descriptions(
         {
             "register": REG_ACTIVE_POWER_SETPOINT,
             "name": "Active Power Setpoint (Modbus)",
-            "icon": "mdi:flash",
+            # Inverter active-power OUTPUT limit in % (Wirkleistungsbegrenzung /
+            # feed-in curtailment); 100 % = uncurtailed. See the entity's
+            # extra_state_attributes for the curtailment semantics.
+            "icon": "mdi:transmission-tower-export",
             "min_value": 1,
             "max_value": 100,
             "step": 1,
@@ -307,16 +316,60 @@ class ModbusNumberEntity(
 
     @property
     def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
-        """Return the current value from Modbus data."""
-        if self.coordinator.data is None:
+        """Return the current value from Modbus data.
+
+        The active-power setpoint (533) is write-only on the inverter (Kostal
+        Modbus/SunSpec spec §3.3) and is not in ``MONITORING_REGISTERS``, so it
+        never appears in ``coordinator.data``. For that register we fall back to
+        the coordinator's last-commanded cache (populated by every write path
+        and cleared on reconnect) so the entity and its curtailment attributes
+        reflect the active setpoint instead of always reading unknown.
+        """
+        data = self.coordinator.data
+        if data is not None:
+            val = data.get(self._register.name)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+        if self._register.name == CURTAILMENT_REGISTER_NAME:
+            return self.coordinator.last_commanded(self._register.name)
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """Expose feed-in-curtailment semantics for the active-power setpoint.
+
+        Register 533 is the inverter's active-power OUTPUT limit in percent
+        (Wirkleistungsbegrenzung): 100 % = uncurtailed / full feed-in, < 100 %
+        throttles AC output. It is the Kostal-native equivalent of SunSpec
+        model 123 WMaxLimPct. The value is *volatile* — the inverter discards
+        it on power-on/reset and returns to full power (fail-open), so no
+        keepalive/watchdog is needed. True 0 % (zero export) is NOT reachable
+        here (the floor is 1 %); use the REST ``ActivePower:ExtCtrlP:P`` = 0
+        setting or a watt-based cap for that.
+
+        The register is write-only, so the flags reflect the last value KORE
+        commanded via any write path (``last_commanded_percent``); they read as
+        not-curtailed/not-full until the setpoint is written once, after a
+        restart, and after a reconnect (a volatile setpoint is not trusted
+        across an inverter reset).
+        """
+        if self._register.name != CURTAILMENT_REGISTER_NAME:
             return None
-        val = self.coordinator.data.get(self._register.name)
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
+        val = self.native_value
+        return {
+            "role": "feed_in_curtailment",
+            "curtailment_active": val is not None and val < 100,
+            "at_full_power": val is not None and val >= 100,
+            "last_commanded_percent": self.coordinator.last_commanded(
+                self._register.name
+            ),
+            "minimum_percent": self._attr_native_min_value,
+            "zero_export_via_this_entity": False,
+            "volatile_resets_to_full_power": True,
+        }
 
     async def async_set_native_value(self, value: float) -> None:
         """Write a new value to the Modbus register with safety validation."""
@@ -345,6 +398,9 @@ class ModbusNumberEntity(
             "Writing %s = %s via Modbus (register %d)",
             self._register.name, value, self._register.address,
         )
+        # The coordinator records the commanded value for every write path
+        # (see async_write_register); write-only registers like the curtailment
+        # setpoint read it back through native_value / the attributes.
         await self.coordinator.async_write_register(self._register, value)
 
         try:

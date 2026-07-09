@@ -37,7 +37,10 @@ from .modbus_registers import (
     REG_PRODUCT_NAME,
     REG_SERIAL_NUMBER,
     REG_SW_VERSION,
+    REGISTER_BY_ADDRESS,
+    REGISTER_BY_NAME,
     Access,
+    DataType,
     ModbusRegister,
     RegisterGroup,
 )
@@ -62,6 +65,17 @@ SLOW_GROUPS: Final[frozenset[RegisterGroup]] = frozenset({
     RegisterGroup.BATTERY_MGMT,
     RegisterGroup.BATTERY_LIMIT_G3,
     RegisterGroup.IO_BOARD,
+})
+
+# Data types the Modbus client encodes via int() (truncation). A commanded
+# value is normalized the same way before caching so the reported value can
+# never differ from what the inverter actually received.
+_INTEGER_WRITE_DATA_TYPES: Final[frozenset[DataType]] = frozenset({
+    DataType.UINT16,
+    DataType.SINT16,
+    DataType.UINT32,
+    DataType.SINT32,
+    DataType.UINT8,
 })
 
 
@@ -108,6 +122,15 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._health_monitor: Any | None = None  # injected after init if available
         self._last_persisted_isolation_ohm: float | None = None
         self._shutting_down = False
+        # Last value commanded to each control register, across ALL write paths
+        # (entity, MQTT bridge, proxy), tagged with the client connection
+        # generation it was written on: name -> (value, connection_generation).
+        # Write-only control registers such as the active-power setpoint (533)
+        # are never polled back into ``data``, so this is the only record of the
+        # active setpoint. A value is trusted only while the connection
+        # generation is unchanged — a reconnect may mean the inverter reset and
+        # discarded its volatile setpoints (see last_commanded()).
+        self._last_commanded: dict[str, tuple[float, int]] = {}
 
     @property
     def client(self) -> KostalModbusClient:
@@ -137,6 +160,47 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def update_count(self) -> int:
         return self._update_count
+
+    def last_commanded(self, name: str) -> float | None:
+        """Return the last value written to a register via any write path.
+
+        Write-only control registers (e.g. the active-power setpoint 533) are
+        never polled back into ``data``; this is the only record of the active
+        setpoint. Returns ``None`` when nothing was commanded, or when the
+        Modbus link has been re-established since the value was written: a
+        reconnect (performed by the coordinator OR internally inside the client
+        read/write retry loop) may mean the inverter reset and discarded its
+        volatile setpoints, so a value is trusted only while the connection
+        generation is unchanged. Because the generation is stored per value, a
+        command re-issued on the new connection survives while a stale one from
+        the previous connection does not.
+        """
+        entry = self._last_commanded.get(name)
+        if entry is None:
+            return None
+        value, gen = entry
+        if gen != self._client.connection_generation:
+            return None
+        return value
+
+    def _record_commanded(self, name: str, value: Any) -> None:
+        """Cache a successfully-written value tagged with the current connection
+        generation; non-numeric writes are dropped.
+
+        The value is normalized to what the register actually encodes: the
+        client truncates integer registers via ``int()`` (e.g. UINT16 533
+        receives ``int(80.5) == 80``), so a fractional command must not be
+        reported back as the un-truncated value the inverter never applied.
+        """
+        try:
+            fval = float(value)
+        except (TypeError, ValueError):
+            self._last_commanded.pop(name, None)
+            return
+        reg = REGISTER_BY_NAME.get(name)
+        if reg is not None and reg.data_type in _INTEGER_WRITE_DATA_TYPES:
+            fval = float(int(fval))
+        self._last_commanded[name] = (fval, self._client.connection_generation)
 
     async def async_setup(self) -> None:
         """Connect to the inverter and read initial device info."""
@@ -404,6 +468,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             await self._client.write_register(register, value)
+            self._record_commanded(register.name, value)
             _LOGGER.info(
                 "Wrote %s = %s to inverter via Modbus", register.name, value
             )
@@ -433,6 +498,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_write_by_name(self, name: str, value: Any) -> None:
         """Write a value to a register identified by name."""
         await self._client.write_by_name(name, value)
+        self._record_commanded(name, value)
         _LOGGER.info("Wrote %s = %s via Modbus", name, value)
 
     async def async_write_by_address(
@@ -445,6 +511,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         try:
             await self._client.write_by_address(address, value)
+            reg = REGISTER_BY_ADDRESS.get(address)
+            if reg is not None:
+                self._record_commanded(reg.name, value)
             _LOGGER.info("Wrote address %d = %s via Modbus", address, value)
             if self._write_audit is not None:
                 from .write_audit import WriteEvent

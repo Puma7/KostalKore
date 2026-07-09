@@ -70,6 +70,15 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - Turning the switch OFF restores normal charging limits.
 - Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations, **evcc `batteryMode`**, or the optimizer), or they can conflict. evcc's `kostal-plenticore-gen2` template (`batteryMode`) cyclically writes registers `1034`/`1038`/`1040` — the same registers KORE controls — so use **one** controller per battery. KORE rejects competing external writes with Modbus exception `0x06` while an internal controller is active.
 
+### 🔻 Feed-In Curtailment / Wirkleistungsbegrenzung (Active Power Setpoint)
+- Requires Modbus. Uses the **Active Power Setpoint (Modbus)** number entity (register `533`) — the inverter's active-power **output** limit in percent, the Kostal-native equivalent of SunSpec model 123 `WMaxLimPct`.
+- **100% = uncurtailed** (full feed-in); values below 100% throttle the inverter's AC output. Setting it back to 100% releases the limit.
+- **Minimum 1%.** True 0% / zero-export is *not* reachable via this register — use the REST setting `ActivePower:ExtCtrlP:P`=0 or a watt-based cap (`Inverter:ActivePowerLimitation`) instead.
+- **Volatile:** the inverter discards the setpoint on power-on/reset and returns to full power (fail-open), so no keepalive is needed.
+- This is **not** the Grid Feed-In Optimizer above: the optimizer caps grid export *indirectly* by limiting battery charging (register `1038`); this control throttles the inverter's AC output *directly*. It is also distinct from the §14a EnWG **import** limit (`Inverter:ActivePowerConsumLimitation`).
+- The entity uses the same read-only gate as the battery controls: writable when register `1080` == `0x02` (**"External via Modbus"**), or when `1080` == `0x00` and a read probe succeeds, and it stays writable when `1080` is unavailable; other modes make it read-only. Whether output curtailment *should* be gated behind battery mode at all is an open hardware question (see `HARDWARE_VALIDATION_TODO.md` HV6).
+- evcc's PR #31487 adds the same capability to *its* Gen2 meter template via SunSpec model 123 (registers `40217`/`40221`); KORE already covers this on G3 through register `533`, so that PR needs nothing ported here — see `HARDWARE_VALIDATION_TODO.md` HV6 for the open validation points.
+
 ### 🔧 **Diagnostics**
 - Comprehensive diagnostic data for troubleshooting
 - Redacted sensitive information for privacy
@@ -212,6 +221,11 @@ own grid measurement). Configure under **Options**:
 When enabled, KSEM-sourced grid power, frequency, power factor, per-phase
 voltages and per-phase active power become available as additional sensors.
 
+> **Note:** if home-consumption / autarky / own-consumption / grid-feed-in
+> values stay at `0`, the inverter itself is likely not talking to the energy
+> meter (stand-alone mode) — see the Troubleshooting section. That is an
+> inverter commissioning issue, independent of this optional KSEM source.
+
 ## Data Update
 
 The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from the inverter at regular intervals:
@@ -351,6 +365,12 @@ The integration provides human-readable inverter states:
    - `Connection lost reading isolation_resistance`
    - `Illegal data address`
 4. Verify Modbus is enabled on inverter and integration settings (host/port/unit-id) are correct.
+
+### Energy statistics warnings in the log (benign)
+You may occasionally see recorder warnings like *"Entity … has state class `total_increasing`, but its state is not strictly increasing"* on energy sensors (e.g. *Home Consumption from Grid Day/Month/Year/Total*). These are **harmless**: the inverter sometimes corrects a cumulative energy counter slightly downward (e.g. 5.1 → 5.0 kWh), and Home Assistant simply discards that single sample — the long-term statistics stay consistent. KORE deliberately keeps `total_increasing` for these counters (it is the correct state class for values that reset per period, so the Energy dashboard handles the daily/monthly reset correctly); switching to `total` would break that reset handling. The related *"state is negative"* variant is already suppressed by KORE — a negative energy reading is mapped to *unavailable* for one tick instead of a negative value (see `format_energy`). No action needed. (Matches the upstream `kostal_plenticore` behaviour in home-assistant/core#174543.)
+
+### Home consumption / autarky / own-consumption values stuck at 0
+If the KSEM-dependent sensors — home consumption, autarky, own-consumption rate, grid feed-in energy, energy-manager state — all report `0` or unavailable, the inverter is most likely **not communicating with the energy meter (KSEM)** and running in a kind of stand-alone mode. This is a wiring/commissioning issue on the inverter side, not a KORE bug (the entities are created correctly but the inverter has no consumption data to report). Have the meter link checked by your installer. (Same root cause as upstream `kostal_plenticore` home-assistant/core#166779.)
 
 ## Example Automations
 
