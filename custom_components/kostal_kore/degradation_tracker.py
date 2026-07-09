@@ -239,6 +239,22 @@ class TrackedParameter:
         return f"Saisonbereinigt {abs(s_dev):.0f}% {direction} als gleiche Jahreszeit"
 
     @property
+    def trend(self) -> str:
+        """Stable trend category, used as the sensor state.
+
+        ``trend_description`` embeds live numbers that change on every recompute
+        (so using it as the state floods the Logbook). This categorical value
+        only changes when the trend itself flips; the verbose description is
+        exposed as an attribute instead.
+        """
+        rate = self.degradation_rate_per_month
+        if rate is None:
+            return "unbekannt"
+        if abs(rate) < 0.1:
+            return "stabil"
+        return "steigend" if rate > 0 else "fallend"
+
+    @property
     def trend_description(self) -> str:
         """Human-readable trend description."""
         rate = self.degradation_rate_per_month

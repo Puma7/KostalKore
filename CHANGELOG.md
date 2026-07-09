@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] — 2026-07-09 — Quieter Logbook (fast-changing diagnostic sensors)
+
+Two diagnostic sensors were flooding the Home Assistant **Logbook** because their
+*state* changed almost every poll. The Logbook records a line whenever an entity's
+state string changes, so the fix keeps the state stable and moves the volatile
+detail into attributes. No entity is removed; the information is unchanged.
+
+### Changed
+- **Degradation sensors** (DC1/DC2/DC3/battery…) now report a **stable trend
+  category** as state — `steigend` / `fallend` / `stabil` / `unbekannt` — instead
+  of the full sentence that embedded live numbers (which nudged every recompute).
+  The verbose sentence moved to a new **`description`** attribute (the numeric
+  details were already attributes). The Logbook now records a degradation entry
+  only when the trend actually flips. *User-visible:* the sensor **state** is now
+  a short category; use `state_attr(entity, 'description')` for the full text.
+- **REST/Modbus Consistency** sensor is now **debounced**: REST (~10 s) and Modbus
+  (~5 s) are polled independently, so a single cycle can disagree purely from
+  timing skew. A changed status must now persist 3 consecutive updates
+  (`CONSISTENCY_DEBOUNCE_CYCLES`) before it is reported, so the state no longer
+  flaps `ok↔warn↔mismatch` every few seconds — and a reported mismatch is
+  trustworthy. The instantaneous value is exposed as a `raw_status` attribute.
+
+### Notes
+- To also drop these (or any other high-frequency KORE sensors) from **History /
+  the recorder database**, use a `recorder:`/`logbook:` `exclude:` block in
+  `configuration.yaml` — the state changes are now rare, but the per-poll
+  attribute updates still write recorder rows.
+
 ## [3.0.4] — 2026-07-08 — Feed-in curtailment legibility (evcc PR #31487 follow-up)
 
 Documentation and entity-metadata pass after evaluating evcc PR #31487 ("Kostal

@@ -58,12 +58,17 @@ class DegradationSensor(RestoreEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
-        return self._get_param().trend_description
+        # Stable trend category (steigend/fallend/stabil/unbekannt) so the
+        # Logbook only records a change when the trend actually flips. The
+        # verbose, constantly-recomputed sentence lives in the ``description``
+        # attribute below.
+        return self._get_param().trend
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
         p = self._get_param()
         return {
+            "description": p.trend_description,
             "days_tracked": p.days_tracked,
             "baseline_avg": round(p.baseline_avg, 2) if p.baseline_avg is not None else None,
             "current_avg": round(p.current_avg, 2) if p.current_avg is not None else None,

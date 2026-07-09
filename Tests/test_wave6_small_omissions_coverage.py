@@ -379,8 +379,11 @@ async def test_degradation_entities_restore_current_and_legacy_formats() -> None
         tracker, "battery_soh", "Battery SoH", "mdi:battery", "entry", _device_info()
     )
 
-    assert sensor.native_value
+    # State is the stable trend category (keeps the Logbook quiet); the verbose
+    # sentence moved to the ``description`` attribute.
+    assert sensor.native_value in {"steigend", "fallend", "stabil", "unbekannt"}
     attrs = sensor.extra_state_attributes
+    assert attrs["description"] == tracker.battery_soh.trend_description
     assert attrs["days_tracked"] >= 8
     assert attrs["baseline_avg"] is not None
     assert attrs["current_avg"] is not None

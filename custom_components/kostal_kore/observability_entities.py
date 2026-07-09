@@ -36,6 +36,11 @@ _SOC_MISMATCH_ABS = 5.0
 # Status escalates only when BOTH relative AND absolute thresholds are exceeded.
 _WARN_ABS_FLOOR_W = 50.0
 _MISMATCH_ABS_FLOOR_W = 150.0
+# Debounce: REST (~10s) and Modbus (~5s) are polled independently, so a single
+# cycle can disagree purely from timing skew. Only report a changed status
+# after it has persisted this many consecutive coordinator updates — this both
+# keeps the Logbook quiet and makes a reported mismatch trustworthy.
+CONSISTENCY_DEBOUNCE_CYCLES: Final[int] = 3
 
 
 class WriteAuditSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], SensorEntity):
@@ -177,6 +182,10 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
         self._process_coord = process_coordinator
         self._attr_unique_id = f"{entry_id}_consistency"
         self._attr_device_info = device_info
+        # Debounced status actually reported as the entity state.
+        self._reported_status: str = "insufficient_data"
+        self._candidate_count: int = 0
+        self._initialized: bool = False
 
     def _get_rest_float(self, module_id: str, key: str) -> float | None:
         if self._process_coord is None:
@@ -239,9 +248,8 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
             "status": status,
         }
 
-    @property
-    def native_value(self) -> str:
-        pairs = self._compute_pairs()
+    @staticmethod
+    def _status_from_pairs(pairs: list[dict[str, Any]]) -> str:
         statuses = {p["status"] for p in pairs}
         if "mismatch" in statuses:
             return "mismatch"
@@ -254,6 +262,39 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
         if "ok" in statuses:
             return "partial"
         return "insufficient_data"
+
+    def _raw_status(self) -> str:
+        """Instantaneous consistency status from the current poll (undebounced)."""
+        return self._status_from_pairs(self._compute_pairs())
+
+    def _handle_coordinator_update(self) -> None:
+        """Debounce the raw status before it becomes the entity state.
+
+        The status must stay *different from the reported one* for
+        ``CONSISTENCY_DEBOUNCE_CYCLES`` consecutive updates before the change is
+        committed (adopting the most recent raw). This suppresses a single-cycle
+        REST↔Modbus timing skew — but, unlike counting repeats of one identical
+        candidate, it still commits when the abnormal readings themselves flap
+        (e.g. warn↔mismatch oscillating at a threshold), so a genuinely
+        inconsistent system is never masked as "ok". The first reading is
+        adopted immediately so startup shows the real status without delay.
+        """
+        raw = self._raw_status()
+        if not self._initialized:
+            self._reported_status = raw
+            self._initialized = True
+        elif raw == self._reported_status:
+            self._candidate_count = 0
+        else:
+            self._candidate_count += 1
+            if self._candidate_count >= CONSISTENCY_DEBOUNCE_CYCLES:
+                self._reported_status = raw
+                self._candidate_count = 0
+        super()._handle_coordinator_update()
+
+    @property
+    def native_value(self) -> str:
+        return self._reported_status
 
     def _compute_pairs(self) -> list[dict[str, Any]]:
         modbus_data = self.coordinator.data or {}
@@ -289,7 +330,11 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         pairs = self._compute_pairs()
-        return {"pairs": pairs}
+        return {
+            "pairs": pairs,
+            "raw_status": self._status_from_pairs(pairs),
+            "debounce_cycles": CONSISTENCY_DEBOUNCE_CYCLES,
+        }
 
 
 def _to_float(val: Any) -> float | None:
