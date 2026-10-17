@@ -21,6 +21,7 @@ def _coord(
     coord.client = SimpleNamespace(read_register=AsyncMock(), connected=True, connection_generation=1)
     coord._communication_entry_id = ""  # data-path fixture has no HA notification runtime
     coord.slow_poll_stale = False
+    coord.communication = SimpleNamespace(faults=(), incidents=0)
     coord.device_info_data = device_info_data or {}
     coord.data = data
     coord.last_update_success = True

@@ -19,17 +19,19 @@ def entity():
     result._attr_native_min_value, result._attr_native_max_value = 0, 20000
     result._attr_native_step = 100
     result._keepalive_value, result._keepalive_generation = 5000, 1
+    result._keepalive_incidents = 0
     result._keepalive_task = None
     result._get_keepalive_interval = lambda: 1
     result.coordinator = SimpleNamespace(
         client=SimpleNamespace(connected=True, connection_generation=1), last_update_success=True,
+        slow_poll_stale=False, communication=SimpleNamespace(faults=(), incidents=0),
         last_commanded=lambda name: 5000, async_write_register=AsyncMock(),
     )
     return result
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["offline", "poll_failed", "reconnected", "other_owner"])
+@pytest.mark.parametrize("failure", ["offline", "poll_failed", "reconnected", "other_owner", "slow_partial", "fast_partial", "recovered_partial"])
 async def test_lost_lease_prevents_stale_keepalive_writes(failure):
     item = entity()
     if failure == "offline":
@@ -38,6 +40,12 @@ async def test_lost_lease_prevents_stale_keepalive_writes(failure):
         item.coordinator.last_update_success = False
     elif failure == "reconnected":
         item.coordinator.client.connection_generation = 2
+    elif failure == "slow_partial":
+        item.coordinator.slow_poll_stale = True
+    elif failure == "fast_partial":
+        item.coordinator.communication.faults = ("modbus_partial",)
+    elif failure == "recovered_partial":
+        item.coordinator.communication.incidents = 1
     else:
         item.coordinator.last_commanded = lambda name: 0
     with patch("custom_components.kostal_kore.modbus_number.asyncio.sleep", AsyncMock()):

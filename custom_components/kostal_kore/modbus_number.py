@@ -310,6 +310,7 @@ class ModbusNumberEntity(
         self._keepalive_task: asyncio.Task[None] | None = None
         self._keepalive_value: float | None = None
         self._keepalive_generation: int | None = None
+        self._keepalive_incidents = 0
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -441,6 +442,7 @@ class ModbusNumberEntity(
         """Start or update the keepalive task for G3 cyclic registers."""
         self._keepalive_value = value
         self._keepalive_generation = self.coordinator.client.connection_generation
+        self._keepalive_incidents = self.coordinator.communication.incidents
         if self._keepalive_task and not self._keepalive_task.done():
             return
         self._keepalive_task = self.hass.async_create_task(
@@ -461,6 +463,9 @@ class ModbusNumberEntity(
                     break
                 if (not self.coordinator.client.connected
                         or self.coordinator.last_update_success is False
+                        or self.coordinator.slow_poll_stale is True
+                        or bool(self.coordinator.communication.faults)
+                        or self.coordinator.communication.incidents != self._keepalive_incidents
                         or self.coordinator.client.connection_generation != self._keepalive_generation
                         or self.coordinator.last_commanded(self._register.name) != self._keepalive_value):
                     _LOGGER.warning("G3 keepalive lease lost for %s; explicit control is required before resuming",

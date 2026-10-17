@@ -2585,7 +2585,8 @@ class PreferredGridPowerSensor(
         rest_val = None
         if (self._process_coordinator.data
                 and self._process_coordinator.last_update_success is not False
-                and getattr(self._process_coordinator, "communication_stale", False) is not True):
+                and (getattr(self._process_coordinator, "communication_stale", False) is not True
+                     or (ModuleId.DEVICES_LOCAL, "Grid_P") in self._process_coordinator.fresh_fields)):
             raw_rest = (
                 self._process_coordinator.data.get(ModuleId.DEVICES_LOCAL, {}).get("Grid_P")
             )
@@ -2660,7 +2661,8 @@ class PlenticoreDataSensor(
         """Return if entity is available."""
         return (
             super().available
-            and getattr(self.coordinator, "communication_stale", False) is not True
+            and (getattr(self.coordinator, "communication_stale", False) is not True
+                 or (self.module_id, self.data_id) in self.coordinator.fresh_fields)
             and self.coordinator.data is not None
             and self.module_id in self.coordinator.data
             and self.data_id in self.coordinator.data[self.module_id]

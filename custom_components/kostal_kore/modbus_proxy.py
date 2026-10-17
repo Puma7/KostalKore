@@ -450,11 +450,8 @@ class ModbusTcpProxyServer:
                 if response[0] & 0x80 and response[1] == 0x04:
                     if len(self._read_failures) < 64:
                         self._read_failures.add(key)
-                else:
-                    if not response[0] & 0x80:
-                        self._read_failures.clear()
-                    else:
-                        self._read_failures.discard(key)
+                elif response[0] & 0x80:
+                    self._read_failures.discard(key)
             if fc in (FC_WRITE_SINGLE, FC_WRITE_MULTIPLE) and len(pdu) >= 5:
                 address = struct.unpack(">H", pdu[1:3])[0]
                 if response[0] & 0x80 and response[1] == 0x04:
@@ -553,6 +550,9 @@ class ModbusTcpProxyServer:
                         _LOGGER.warning("Proxy: non-finite upstream value at %d", reg.address)
                         return None
             self._forwarded_reads += 1
+            # Only a validated upstream observation proves link recovery. A
+            # cache hit in another concurrent request performs no device I/O.
+            self._read_failures.clear()
             _LOGGER.debug(
                 "Proxy: forwarded read at addr=%d qty=%d (%d bytes)",
                 start_addr, quantity, len(raw),

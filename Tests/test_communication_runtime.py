@@ -64,7 +64,7 @@ def test_grid_source_selection_never_uses_retained_values_after_loss():
     sensor.coordinator = SimpleNamespace(data={"net_active_power_w": 100}, last_update_success=False)
     sensor._modbus_coordinator = SimpleNamespace(data={"pm_total_active": 200}, proxy_cache_data={})
     sensor._process_coordinator = SimpleNamespace(data={"devices:local": {"Grid_P": 300}},
-                                                last_update_success=True, communication_stale=True)
+                                                last_update_success=True, communication_stale=True, fresh_fields=set())
     assert sensor.available is False
     sensor._process_coordinator.communication_stale = False
     assert sensor.native_value == 300
@@ -130,6 +130,7 @@ async def test_runtime_rest_notifications_deduplicate_and_keep_recovery(tmp_path
     owner.hass = HomeAssistant(str(tmp_path))
     owner.config_entry = SimpleNamespace(entry_id="one")
     owner.rest_communication = CommunicationState()
+    owner._rest_poll_health = {}
     owner._communication_store = SimpleNamespace(async_save=AsyncMock())
     with patch("homeassistant.components.persistent_notification.async_create") as notice:
         await owner.async_report_rest_communication(False)

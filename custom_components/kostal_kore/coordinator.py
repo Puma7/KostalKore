@@ -113,6 +113,7 @@ class Plenticore:
         self.hass = hass
         self.config_entry = config_entry
         self.rest_communication = CommunicationState()
+        self._rest_poll_health: dict[str, bool] = {}
         self._communication_store = Store[dict[str, Any]](
             hass, 1, f"kostal_kore_rest_communication_{config_entry.entry_id}",
         )
@@ -141,8 +142,10 @@ class Plenticore:
         """Return the host of the Plenticore inverter."""
         return cast(str, self.config_entry.data[CONF_HOST])
 
-    async def async_report_rest_communication(self, healthy: bool) -> None:
-        """Report failed essential polls even while display cache bridges them."""
+    async def async_report_rest_communication(self, healthy: bool, *, source: str = "process") -> None:
+        """Recover only once every observed REST polling channel is healthy."""
+        self._rest_poll_health[source] = healthy
+        healthy = all(self._rest_poll_health.values())
         health = self.rest_communication
         if not health.observe([] if healthy else ["rest"], dt_util.now()):
             return
@@ -814,6 +817,7 @@ class ProcessDataUpdateCoordinator(
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_result: dict[str, dict[str, str]] = {}
+        self.fresh_fields: set[tuple[str, str]] = set()
         # NEU: Zeitstempel des letzten erfolgreichen Fetches für Stale-TTL.
         self._last_success_ts: float = 0.0
         self._init_adaptive_polling(
@@ -832,6 +836,7 @@ class ProcessDataUpdateCoordinator(
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
         """Expose transport loss separately from availability of display cache."""
         self._communication_roundtrip_ok = False
+        self.fresh_fields.clear()
         report = getattr(self._plenticore, "async_report_rest_communication", None)
         try:
             result = await self._async_fetch_process_data()
@@ -969,6 +974,7 @@ class ProcessDataUpdateCoordinator(
 
             # Snapshot fresh fields BEFORE backfill so _last_result stays stale-free. // GEÄNDERT
             fresh_result[module_id] = dict(result[module_id])
+            self.fresh_fields.update((module_id, key) for key in fresh_result[module_id])
 
             if failed_fields:
                 partial_response = True
@@ -1045,12 +1051,18 @@ class SettingDataUpdateCoordinator(
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         """Keep last values for display, but expose failed setting reads."""
         self._communication_roundtrip_ok = False
+        requested = bool(self._fetch or tuple(self.async_contexts()))
+        report = getattr(self._plenticore, "async_report_rest_communication", None)
         try:
             result = await self._async_fetch_settings()
         except UpdateFailed:
             self.communication_stale = True
+            if callable(report):
+                await report(False, source="settings")
             raise
-        self.communication_stale = bool(self._fetch) and not self._communication_roundtrip_ok
+        self.communication_stale = requested and not self._communication_roundtrip_ok
+        if requested and callable(report):
+            await report(not self.communication_stale, source="settings")
         return result
 
     async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:
