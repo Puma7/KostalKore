@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -27,6 +27,51 @@ from .const import (
 
 _LOGGER: Final = logging.getLogger(__name__)
 LEGACY_DOMAIN: Final[str] = "kostal_plenticore"
+
+
+def _async_transfer_device(
+    hass: HomeAssistant,
+    registry: dr.DeviceRegistry,
+    device: dr.DeviceEntry,
+    target_entry_id: str,
+    remove_source_entry_id: str | None = None,
+) -> dr.DeviceEntry | None:
+    """Move ownership on single-owner HA; retain shared ownership on older HA."""
+    kore_ids = {(DOMAIN, value) for domain, value in device.identifiers if domain == LEGACY_DOMAIN}
+    identifiers = device.identifiers | kore_ids
+    # Setup may already have registered the same inverter under the target.
+    # Rebind migrated entities to it before removing any legacy device; moving
+    # the old device would collide with the target's identifiers/connections.
+    matches = [
+        target for target in dr.async_entries_for_config_entry(registry, target_entry_id)
+        if target.id != device.id and (
+            identifiers & target.identifiers or device.connections & target.connections
+        )
+    ]
+    if len(matches) > 1:
+        raise HomeAssistantError("Legacy device matches multiple target devices; resolve duplicates first.")
+    if matches:
+        target = matches[0]
+        entities = er.async_get(hass)
+        for entity in er.async_entries_for_device(entities, device.id, include_disabled_entities=True):
+            if entity.config_entry_id == target_entry_id:
+                entities.async_update_entity(entity.entity_id, device_id=target.id)
+        return target
+    # This attribute was introduced with the single-owner device registry.
+    # Keep the version-specific keyword at this compatibility boundary.
+    ownership: dict[str, Any]
+    if hasattr(dr.DeviceEntry, "config_entry_id"):
+        ownership = {"new_config_entry_id": target_entry_id}
+    else:
+        ownership = {"add_config_entry_id": target_entry_id}
+        if remove_source_entry_id is not None:
+            ownership["remove_config_entry_id"] = remove_source_entry_id
+    if kore_ids:
+        # Publish identity and ownership together. HA's registry listeners may
+        # run immediately and remove entities if the device still has its old
+        # owner after their config-entry binding has already been migrated.
+        ownership["new_identifiers"] = identifiers
+    return registry.async_update_device(device.id, **ownership)
 
 
 @dataclass(slots=True)
@@ -309,12 +354,11 @@ async def adopt_legacy_entity_ids(
         result.migrated_devices += 1
         if dry_run:
             continue
-        kore_ids = {(DOMAIN, val) for d, val in source_device.identifiers if d == LEGACY_DOMAIN}
-        if kore_ids:
-            device_registry.async_update_device(source_device.id, merge_identifiers=kore_ids)
-        device_registry.async_update_device(
-            source_device.id,
-            add_config_entry_id=target_entry.entry_id,
+        _async_transfer_device(
+            hass,
+            device_registry,
+            source_device,
+            target_entry.entry_id,
         )
 
     if not dry_run:
@@ -424,20 +468,13 @@ async def migrate_legacy_plenticore_entry(
         dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
     )
     for source_device in source_devices:
-        kore_ids = {(DOMAIN, val) for d, val in source_device.identifiers if d == LEGACY_DOMAIN}
-        if kore_ids:
-            device_registry.async_update_device(source_device.id, merge_identifiers=kore_ids)
-        if remove_source_entry:
-            updated = device_registry.async_update_device(
-                source_device.id,
-                add_config_entry_id=target_entry.entry_id,
-                remove_config_entry_id=source_entry.entry_id,
-            )
-        else:
-            updated = device_registry.async_update_device(
-                source_device.id,
-                add_config_entry_id=target_entry.entry_id,
-            )
+        updated = _async_transfer_device(
+            hass,
+            device_registry,
+            source_device,
+            target_entry.entry_id,
+            source_entry.entry_id if remove_source_entry else None,
+        )
         if updated is not None:
             result.migrated_devices += 1
 
@@ -512,19 +549,41 @@ async def finalize_legacy_cleanup(
     source_devices = list(
         dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
     )
+    # On single-owner HA transferred devices no longer appear under the source.
+    # Remove their legacy identifiers without deleting their entities/history.
+    if hasattr(dr.DeviceEntry, "config_entry_id"):
+        for device in dr.async_entries_for_config_entry(device_registry, target_entry.entry_id):
+            if any(domain == LEGACY_DOMAIN for domain, _ in device.identifiers):
+                device_registry.async_update_device(
+                    device.id,
+                    new_identifiers={
+                        (DOMAIN if domain == LEGACY_DOMAIN else domain, value)
+                        for domain, value in device.identifiers
+                    },
+                )
     for source_device in source_devices:
         cleaned_ids = {
             (DOMAIN if d == LEGACY_DOMAIN else d, val)
             for d, val in source_device.identifiers
         }
-        if cleaned_ids:
+        # Only shared devices survive detaching the source on older HA. A
+        # source-only device is deleted; renaming it first could collide with
+        # an already registered target device for the same physical inverter.
+        if (
+            cleaned_ids and not hasattr(dr.DeviceEntry, "config_entry_id")
+            and target_entry.entry_id in source_device.config_entries
+        ):
             device_registry.async_update_device(source_device.id, new_identifiers=cleaned_ids)
-        updated = device_registry.async_update_device(
-            source_device.id,
-            remove_config_entry_id=source_entry.entry_id,
-        )
-        if updated is not None:
+        if hasattr(dr.DeviceEntry, "config_entry_id"):
+            device_registry.async_remove_device(source_device.id)
             result.detached_legacy_devices += 1
+        else:
+            updated = device_registry.async_update_device(
+                source_device.id,
+                remove_config_entry_id=source_entry.entry_id,
+            )
+            if updated is not None:
+                result.detached_legacy_devices += 1
 
     await hass.config_entries.async_remove(source_entry.entry_id)
     result.removed_source_entry = (

@@ -27,6 +27,7 @@ from .modbus_client import (
 )
 from .modbus_registers import (
     ALL_REGISTERS,  # noqa: F401
+    CONTROL_READBACK_REGISTERS,
     MONITORING_REGISTERS,
     REG_BATTERY_MGMT_MODE,
     REG_BATTERY_TYPE,
@@ -99,7 +100,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=update_interval,
         )
         self._client = client
-        self._slow_tick = 0
+        self._slow_tick = 5  # Read the inverter's settings on the first refresh.
         self._device_info_tick = 0
         self._device_info: dict[str, Any] = {}
         self._last_slow_data: dict[str, Any] = {}
@@ -246,6 +247,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 await self._client.connect()
                 await self._client.detect_endianness()
+                self._slow_tick = 5
+                self._last_slow_data = {}
                 _LOGGER.info("Modbus reconnected to %s", self._client.host)
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
@@ -468,6 +471,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             await self._client.write_register(register, value)
+            if register in CONTROL_READBACK_REGISTERS:
+                # The next refresh must read the device, not retain the old limit.
+                self._slow_tick = 5
             self._record_commanded(register.name, value)
             _LOGGER.info(
                 "Wrote %s = %s to inverter via Modbus", register.name, value
