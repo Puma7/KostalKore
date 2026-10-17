@@ -29,6 +29,13 @@ from custom_components.kostal_kore.legacy_migration import (
 )
 
 
+def _config_entry_ids(device):
+    """Read actual owners without invoking current HA's deprecated property."""
+    if hasattr(device, "config_entry_id"):
+        return {device.config_entry_id}
+    return device.config_entries
+
+
 async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):
     """Migration keeps old entity_id and moves registry bindings to new entry."""
     target_entry = MockConfigEntry(
@@ -114,7 +121,7 @@ async def test_migrate_legacy_entry_moves_entities_devices_and_data(hass):
 
     migrated_device = device_registry.async_get(old_device.id)
     assert migrated_device is not None
-    assert target_entry.entry_id in migrated_device.config_entries
+    assert target_entry.entry_id in _config_entry_ids(migrated_device)
     assert (DOMAIN, "SER-12345") in migrated_device.identifiers
     assert result.unloaded_source_entry is True
 
@@ -253,11 +260,14 @@ async def test_migration_and_cleanup_cover_remaining_runtime_branches(hass):
 
     assert result.removed_source_entry is True
     assert result.unloaded_source_entry is False
-    assert mock_update_device.call_args.kwargs["remove_config_entry_id"] == source_entry.entry_id
+    if hasattr(dr.DeviceEntry, "config_entry_id"):
+        assert mock_update_device.call_args.kwargs["new_config_entry_id"] == target_entry.entry_id
+    else:
+        assert mock_update_device.call_args.kwargs["remove_config_entry_id"] == source_entry.entry_id
     migrated = entity_registry.async_get(old_entity.entity_id)
     assert migrated is not None
     assert migrated.unique_id == "plain_unique_id"
-    assert source_entry.entry_id not in device_registry.async_get(old_device.id).config_entries
+    assert source_entry.entry_id not in _config_entry_ids(device_registry.async_get(old_device.id))
 
     cleanup_target = MockConfigEntry(domain=DOMAIN, title="cleanup-target", data={})
     cleanup_target.add_to_hass(hass)
@@ -616,7 +626,7 @@ async def test_discover_duplicate_pairs_and_adopt_entity_ids(hass):
 
     migrated_device = device_registry.async_get(old_device.id)
     assert migrated_device is not None
-    assert target_entry.entry_id in migrated_device.config_entries
+    assert target_entry.entry_id in _config_entry_ids(migrated_device)
     assert (DOMAIN, "SER-ADOPT-1") in migrated_device.identifiers
     assert applied.unloaded_source_entry is True
 
@@ -718,7 +728,7 @@ async def test_migration_and_cleanup_cover_remaining_no_unique_and_device_none_p
         patch("custom_components.kostal_kore.legacy_migration.dr.async_get", return_value=device_registry),
         patch(
             "custom_components.kostal_kore.legacy_migration.dr.async_entries_for_config_entry",
-            side_effect=[[fake_source_device], [fake_source_device]],
+            side_effect=[[fake_source_device], [fake_source_device], []],
         ),
         patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
     ):
@@ -741,7 +751,11 @@ async def test_migration_and_cleanup_cover_remaining_no_unique_and_device_none_p
     assert migrated.migrated_entities == 1
     assert migrated.migrated_devices == 0
     entity_registry.async_remove.assert_called_once_with("sensor.legacy_no_uid")
-    assert cleaned.detached_legacy_devices == 0
+    if hasattr(dr.DeviceEntry, "config_entry_id"):
+        device_registry.async_remove_device.assert_called_once_with("device-1")
+        assert cleaned.detached_legacy_devices == 1
+    else:
+        assert cleaned.detached_legacy_devices == 0
 
 
 async def test_finalize_cleanup_counts_detached_devices_when_registry_updates(hass):
@@ -921,7 +935,11 @@ async def test_finalize_cleanup_strips_legacy_domain_from_device_identifiers(has
         manufacturer="Kostal",
         name="Legacy",
     )
-    device_registry.async_update_device(old_device.id, add_config_entry_id=target_entry.entry_id)
+    owner_key = (
+        "new_config_entry_id" if hasattr(dr.DeviceEntry, "config_entry_id")
+        else "add_config_entry_id"
+    )
+    device_registry.async_update_device(old_device.id, **{owner_key: target_entry.entry_id})
 
     with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
         await finalize_legacy_cleanup(
@@ -967,6 +985,12 @@ async def test_full_migration_then_cleanup_is_forward_compatible_2026_8(hass):
         manufacturer="Kostal",
         name="Legacy inverter",
     )
+    entity_registry = er.async_get(hass)
+    entity = entity_registry.async_get_or_create(
+        "sensor", LEGACY_DOMAIN, f"{source_entry.entry_id}_history",
+        config_entry=source_entry, device_id=device.id,
+        suggested_object_id="preserved_legacy_history",
+    )
 
     with patch.object(
         hass.config_entries, "async_reload", AsyncMock(return_value=True)
@@ -999,3 +1023,8 @@ async def test_full_migration_then_cleanup_is_forward_compatible_2026_8(hass):
     assert (DOMAIN, serial) in cleaned.identifiers
     assert (LEGACY_DOMAIN, serial) not in cleaned.identifiers
     assert all(domain == DOMAIN for domain, _ in cleaned.identifiers)
+    assert target_entry.entry_id in _config_entry_ids(cleaned)
+    preserved = entity_registry.async_get(entity.entity_id)
+    assert preserved is not None
+    assert preserved.device_id == device.id
+    assert preserved.config_entry_id == target_entry.entry_id
