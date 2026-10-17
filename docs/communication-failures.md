@@ -20,6 +20,8 @@ old lease, with a visible notification. It does not automatically resurrect when
 the connection recovers. Native firmware fallback limits can still take effect;
 configure and verify them on the actual device. Preferred grid-source selection
 also excludes failed/retained sources and non-finite readings.
+REST numeric commands and numeric readback confirmation must also be finite.
+Unknown switch values are exposed as unknown rather than a plausible OFF state.
 
 Essential REST process/settings failures keep last values in the display cache,
 but the affected process sensors and setting controls become unavailable. This

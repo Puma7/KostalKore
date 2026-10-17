@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Any, Final
@@ -22,6 +23,7 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -1824,6 +1826,8 @@ class PlenticoreDataNumber(
 
     async def async_set_native_value(self, value: float) -> None:
         """Set a new value."""
+        if not math.isfinite(value):
+            raise ServiceValidationError("Number value must be finite")
         data_id_for_write = self._resolve_data_id_for_write()
         # Enhanced safety logging and validation for battery controls
         if is_battery_control(data_id_for_write):

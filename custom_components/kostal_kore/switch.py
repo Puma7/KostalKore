@@ -1087,6 +1087,8 @@ class PlenticoreDataSwitch(
             return None  # Return None during startup to show "unknown" state
 
         value = self.coordinator.data[self.module_id][self.data_id]
+        if value not in (self.on_value, self.off_value):
+            return None
         return bool(value == self._is_on)
 
 

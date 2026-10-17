@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 from collections import defaultdict, deque
@@ -93,6 +94,15 @@ if TYPE_CHECKING:  # pragma: no cover
     PlenticoreConfigEntry = ConfigEntry["Plenticore"]
 else:
     PlenticoreConfigEntry = ConfigEntry
+
+
+def _setting_values_equal(expected: str, actual: str) -> bool:
+    """Numeric readback must be finite; textual settings must match exactly."""
+    try:
+        wanted, observed = float(expected), float(actual)
+    except (TypeError, ValueError):
+        return expected == actual
+    return math.isfinite(wanted) and math.isfinite(observed) and abs(wanted - observed) <= 1e-3
 
 
 class Plenticore:
@@ -641,18 +651,8 @@ class DataUpdateCoordinatorMixin:
                         continue
                     actual = str(verify_values[data_id])
                     expected_s = str(expected)
-                    try:
-                        expected_f = float(expected_s)
-                        actual_f = float(actual)
-                        if abs(expected_f - actual_f) > 1e-3:
-                            mismatches.append(
-                                f"{data_id}: expected {expected_s}, got {actual}"
-                            )
-                    except (TypeError, ValueError):
-                        if actual != expected_s:
-                            mismatches.append(
-                                f"{data_id}: expected {expected_s}, got {actual}"
-                            )
+                    if not _setting_values_equal(expected_s, actual):
+                        mismatches.append(f"{data_id}: expected {expected_s}, got {actual}")
 
                 if mismatches and strict_verify:
                     raise HomeAssistantError(

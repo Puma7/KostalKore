@@ -11,7 +11,11 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.kostal_kore.communication import CommunicationState
-from custom_components.kostal_kore.coordinator import Plenticore, ProcessDataUpdateCoordinator
+from custom_components.kostal_kore.coordinator import (
+    Plenticore,
+    ProcessDataUpdateCoordinator,
+    _setting_values_equal,
+)
 from custom_components.kostal_kore.diagnostics import (
     async_register_debug_bundle_service,
     async_unregister_debug_bundle_service_if_unused,
@@ -19,7 +23,9 @@ from custom_components.kostal_kore.diagnostics import (
 )
 from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 from custom_components.kostal_kore.modbus_registers import REG_PM_TOTAL_ACTIVE
+from custom_components.kostal_kore.number import PlenticoreDataNumber
 from custom_components.kostal_kore.sensor import PreferredGridPowerSensor
+from custom_components.kostal_kore.switch import PlenticoreDataSwitch
 
 
 def test_observation_age_epoch_and_missing_poll_result():
@@ -64,6 +70,36 @@ def test_grid_source_selection_never_uses_retained_values_after_loss():
     assert sensor.native_value == 300
     sensor._modbus_coordinator.proxy_cache_data = {"pm_total_active": 400}
     assert sensor.native_value == 400
+
+
+@pytest.mark.parametrize("expected,actual,matches", [
+    ("1", "nan", False), ("0", "inf", False), ("nan", "nan", False),
+    ("1", "1.0005", True), ("1", "1.01", False),
+    ("text", "text", True), ("text", "different", False),
+])
+def test_invalid_readback_is_never_confirmation(expected, actual, matches):
+    assert _setting_values_equal(expected, actual) is matches
+
+
+@pytest.mark.parametrize("raw,expected", [("0", False), ("1", True), ("nan", None), ("future-state", None), (None, None)])
+def test_unknown_switch_data_is_unknown_rather_than_off(raw, expected):
+    switch = object.__new__(PlenticoreDataSwitch)
+    switch.module_id, switch.data_id, switch._is_on = "module", "control", "1"
+    switch.on_value, switch.off_value = "1", "0"
+    switch.coordinator = SimpleNamespace(data={"module": {"control": raw}},
+                                         last_update_success=True, communication_stale=False)
+    assert switch.is_on is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+async def test_invalid_rest_numeric_command_is_rejected_before_device_access(value):
+    from homeassistant.exceptions import ServiceValidationError
+    number = object.__new__(PlenticoreDataNumber)
+    number.coordinator = SimpleNamespace(async_write_data=AsyncMock())
+    with pytest.raises(ServiceValidationError, match="finite"):
+        await number.async_set_native_value(value)
+    number.coordinator.async_write_data.assert_not_awaited()
 
 
 @pytest.mark.asyncio
