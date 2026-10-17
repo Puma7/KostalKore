@@ -332,12 +332,18 @@ ALL_REGISTERS: Final[tuple[ModbusRegister, ...]] = (
 REGISTER_BY_NAME: Final[dict[str, ModbusRegister]] = {r.name: r for r in ALL_REGISTERS}
 REGISTER_BY_ADDRESS: Final[dict[int, ModbusRegister]] = {r.address: r for r in ALL_REGISTERS}
 
+CONTROL_READBACK_REGISTERS: Final[tuple[ModbusRegister, ...]] = (
+    REG_BAT_MAX_CHARGE_LIMIT, REG_BAT_MAX_DISCHARGE_LIMIT,
+    REG_BAT_MIN_SOC, REG_BAT_MAX_SOC,
+    REG_G3_MAX_CHARGE, REG_G3_MAX_DISCHARGE, REG_G3_FALLBACK_TIME,
+)
+
 MONITORING_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
     r for r in ALL_REGISTERS if r.access == Access.RO and r.group in (
         RegisterGroup.POWER, RegisterGroup.BATTERY, RegisterGroup.PHASE,
         RegisterGroup.ENERGY, RegisterGroup.POWERMETER,
     )
-)
+) + CONTROL_READBACK_REGISTERS
 
 WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
     r for r in ALL_REGISTERS if r.access == Access.RW

@@ -302,6 +302,13 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     # (e.g. the active-power setpoint 533) can report the active setpoint.
     assert coordinator.last_commanded("rw_reg") == 42.0
 
+    from custom_components.kostal_kore.modbus_registers import REG_BAT_MAX_CHARGE_LIMIT
+
+    coordinator._slow_tick = 0
+    await coordinator.async_write_register(REG_BAT_MAX_CHARGE_LIMIT, 1800)
+    client.write_register.assert_awaited_with(REG_BAT_MAX_CHARGE_LIMIT, 1800)
+    assert coordinator.slow_tick == 5
+
     client.write_register = AsyncMock(side_effect=ModbusClientError("write failed"))
     with pytest.raises(ModbusClientError):
         await coordinator.async_write_register(rw_reg, 5)

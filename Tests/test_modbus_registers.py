@@ -6,6 +6,7 @@ from kostal_plenticore.modbus_registers import (
     ALL_REGISTERS,
     BATTERY_MGMT_MODES,
     BATTERY_TYPES,
+    CONTROL_READBACK_REGISTERS,
     INVERTER_STATES,
     MONITORING_REGISTERS,
     REG_ACTIVE_POWER_SETPOINT,
@@ -55,9 +56,12 @@ class TestRegisterDefinitions:
         addresses = [r.address for r in ALL_REGISTERS]
         assert len(addresses) == len(set(addresses)), "Duplicate addresses found"
 
-    def test_monitoring_registers_are_read_only(self) -> None:
+    def test_monitoring_registers_include_only_readable_controls(self) -> None:
         for reg in MONITORING_REGISTERS:
-            assert reg.access == Access.RO, f"{reg.name} should be read-only"
+            assert reg.access == Access.RO or reg in CONTROL_READBACK_REGISTERS
+        assert REG_BAT_MAX_CHARGE_LIMIT in MONITORING_REGISTERS
+        assert REG_G3_MAX_CHARGE in MONITORING_REGISTERS
+        assert REG_ACTIVE_POWER_SETPOINT not in MONITORING_REGISTERS
 
     def test_writable_registers_are_rw(self) -> None:
         for reg in WRITABLE_REGISTERS:
