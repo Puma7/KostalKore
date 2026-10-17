@@ -302,7 +302,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             endianness="little" if endianness == "auto" else endianness,
             request_scheduler=request_scheduler,
         )
-        modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client)
+        modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client, entry_id=entry.entry_id)
         try:
             await modbus_coordinator.async_setup()
             # detect_endianness() is already called inside async_setup(),
@@ -362,6 +362,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 installer_access=installer_access,
                 hass=hass,
                 entry_id=entry.entry_id,
+                client_timeout_s=float(entry.options.get("modbus_proxy_client_timeout_s", 0)),
             )
             try:
                 await modbus_proxy.start()

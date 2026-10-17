@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, Final
 
 from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.helpers import config_validation as cv  # noqa: F401
 from homeassistant.helpers.system_info import async_get_system_info
 from pykoplenti import ApiException
@@ -28,6 +28,24 @@ from .helper import parse_modbus_exception
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
+
+
+def communication_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
+    """Read local health only: no requests, file writes or raw exception text."""
+    result: dict[str, Any] = {}
+    modbus = entry_store.get("modbus_coordinator")
+    if modbus is not None:
+        result["modbus"] = modbus.communication.snapshot()
+        result["modbus"]["observed_cache_entries"] = len(modbus.proxy_cache_data)
+    process = entry_store.get("process_coordinator")
+    owner = getattr(process, "_plenticore", None)
+    health = getattr(owner, "rest_communication", None)
+    if health is not None:
+        result["rest"] = health.snapshot()
+    proxy = entry_store.get("modbus_proxy")
+    if proxy is not None:
+        result["proxy"] = proxy.communication_diagnostics()
+    return result
 
 # Data redaction constants (config entry diagnostics + export_debug_bundle).
 TO_REDACT: Final[set[str]] = {
@@ -236,6 +254,7 @@ async def async_get_config_entry_diagnostics(
             "snapshot": dict(ksem_coordinator.data or {}),
         }
 
+    data["communication"] = communication_snapshot(entry_store or {})
     return data
 
 
@@ -298,6 +317,7 @@ async def _export_bundle_for_entry(
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "entry_id": entry_id,
         "ha_version": ha_info.get("version", "unknown"),
+        "communication": communication_snapshot(entry_store),
     }
 
     if health_mon is not None and hasattr(health_mon, "get_health_summary"):
@@ -397,6 +417,16 @@ async def _export_bundle_for_entry(
 
 def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
     """Register the export_debug_bundle service (idempotent)."""
+    async def communication_diagnostics(call: ServiceCall) -> ServiceResponse:
+        return {str(entry_id): communication_snapshot(store)
+                for entry_id, store in hass.data.get(DOMAIN, {}).items()
+                if isinstance(store, dict)}
+
+    if not hass.services.has_service(DOMAIN, "communication_diagnostics"):
+        hass.services.async_register(
+            DOMAIN, "communication_diagnostics", communication_diagnostics,
+            supports_response=SupportsResponse.ONLY,
+        )
     if hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
         return
 
@@ -411,3 +441,4 @@ def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None
     if hass.data.get(DOMAIN):
         return
     hass.services.async_remove(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE)
+    hass.services.async_remove(DOMAIN, "communication_diagnostics")

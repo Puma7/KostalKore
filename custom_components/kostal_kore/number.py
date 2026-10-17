@@ -1662,7 +1662,8 @@ class PlenticoreDataNumber(
             for candidate in self._iter_data_id_candidates()
         )
 
-        return base_available and has_data and has_module and has_value
+        return (base_available and has_data and has_module and has_value
+                and getattr(self.coordinator, "communication_stale", False) is not True)
 
     def _requires_installer(self, data_id_for_write: str) -> bool:
         """Return if this control requires installer service code."""

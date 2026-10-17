@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from aiohttp.client_exceptions import ClientError
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
@@ -20,7 +21,9 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from pykoplenti import (
     ApiClient,
     ApiException,
@@ -29,6 +32,7 @@ from pykoplenti import (
     ExtendedApiClient,
 )
 
+from .communication import CommunicationState
 from .const import ADVANCED_WRITE_ARM_TTL_SECONDS, CONF_SERVICE_CODE, DOMAIN
 from .helper import (
     ModbusException,  # noqa: F401
@@ -98,6 +102,10 @@ class Plenticore:
         """Create a new plenticore manager instance."""
         self.hass = hass
         self.config_entry = config_entry
+        self.rest_communication = CommunicationState()
+        self._communication_store = Store[dict[str, Any]](
+            hass, 1, f"kostal_kore_rest_communication_{config_entry.entry_id}",
+        )
         self._request_scheduler: Any = None
 
         self._client: ApiClient | None = None
@@ -122,6 +130,20 @@ class Plenticore:
     def host(self) -> str:
         """Return the host of the Plenticore inverter."""
         return cast(str, self.config_entry.data[CONF_HOST])
+
+    async def async_report_rest_communication(self, healthy: bool) -> None:
+        """Report failed essential polls even while display cache bridges them."""
+        health = self.rest_communication
+        if not health.observe([] if healthy else ["rest"], dt_util.now()):
+            return
+        persistent_notification.async_create(
+            self.hass, health.message(), title="Kostal KORE: REST-Kommunikation",
+            notification_id=f"kostal_kore_{self.config_entry.entry_id}_rest_communication",
+        )
+        try:
+            await self._communication_store.async_save(health.snapshot())
+        except Exception:
+            _LOGGER.exception("Cannot persist REST communication incident history")
 
     @property
     def client(self) -> ApiClient:
@@ -186,6 +208,10 @@ class Plenticore:
 
     async def async_setup(self) -> bool:
         """Set up Plenticore API client."""
+        try:
+            self.rest_communication = CommunicationState(await self._communication_store.async_load())
+        except Exception:
+            _LOGGER.exception("Cannot load REST communication incident history")
         session = async_get_clientsession(self.hass)
         if self._request_scheduler is not None:
             from .scheduled_session import ScheduledSession
@@ -804,6 +830,22 @@ class ProcessDataUpdateCoordinator(
         return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
+        """Expose transport loss separately from availability of display cache."""
+        self._communication_roundtrip_ok = False
+        report = getattr(self._plenticore, "async_report_rest_communication", None)
+        try:
+            result = await self._async_fetch_process_data()
+        except UpdateFailed:
+            self.communication_stale = True
+            if callable(report):
+                await report(False)
+            raise
+        self.communication_stale = bool(self._fetch) and not self._communication_roundtrip_ok
+        if self._fetch and callable(report):
+            await report(not self.communication_stale)
+        return result
+
+    async def _async_fetch_process_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
 
         if not self._fetch or client is None:
@@ -963,6 +1005,7 @@ class ProcessDataUpdateCoordinator(
                 any_fresh_data = True
         if any_fresh_data:
             self._last_success_ts = time.monotonic()  # für Stale-TTL-Check
+            self._communication_roundtrip_ok = True
         return result
 
 
@@ -995,6 +1038,17 @@ class SettingDataUpdateCoordinator(
         return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
+        """Keep last values for display, but expose failed setting reads."""
+        before = self._last_success_ts
+        try:
+            result = await self._async_fetch_settings()
+        except UpdateFailed:
+            self.communication_stale = True
+            raise
+        self.communication_stale = bool(self._fetch) and self._last_success_ts == before
+        return result
+
+    async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:
         if (client := self._plenticore.client) is None:
             return {}
 

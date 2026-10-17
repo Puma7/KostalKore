@@ -148,3 +148,6 @@ apply_orphan_history_mapping:
       default: true
       selector:
         boolean:
+communication_diagnostics:
+  name: Communication diagnostics
+  description: Read local communication health and proxy counters without device requests or writes.

@@ -13,10 +13,13 @@ import time
 from datetime import timedelta
 from typing import Any, Final
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
+from .communication import CommunicationState
 from .modbus_client import (
     KostalModbusClient,
     ModbusClientError,
@@ -92,6 +95,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass: HomeAssistant,
         client: KostalModbusClient,
         update_interval: timedelta = FAST_POLL_INTERVAL,
+        *,
+        entry_id: str = "",
     ) -> None:
         super().__init__(
             hass,
@@ -132,6 +137,65 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # generation is unchanged — a reconnect may mean the inverter reset and
         # discarded its volatile setpoints (see last_commanded()).
         self._last_commanded: dict[str, tuple[float, int]] = {}
+        # Observations are separate from optimistic command/entity state. A
+        # retained slow value or successful write never refreshes this cache.
+        self._proxy_observations: dict[str, tuple[Any, float, int]] = {}
+        self.communication = CommunicationState()
+        self._communication_entry_id = entry_id
+        self._communication_store = (Store[dict[str, Any]](
+            hass, 1, f"kostal_kore_communication_{entry_id}",
+        ) if entry_id else None)
+
+    async def _report_communication(self, faults: list[str]) -> None:
+        """One scoped notification per transition, with a retained recovery receipt."""
+        if not self.communication.observe(faults, dt_util.now()):
+            return
+        if not self._communication_entry_id:
+            return
+        persistent_notification.async_create(
+            self.hass, self.communication.message(),
+            title="Kostal KORE: " + ("Kommunikation gestört" if faults else "Verbindung wiederhergestellt"),
+            notification_id=f"kostal_kore_{self._communication_entry_id}_modbus_communication",
+        )
+        if self._communication_store is not None:
+            try:
+                await self._communication_store.async_save(self.communication.snapshot())
+            except Exception:
+                _LOGGER.exception("Cannot persist communication incident history")
+
+    @property
+    def proxy_cache_data(self) -> dict[str, Any]:
+        """Only recently observed values from the current connection epoch."""
+        if (self._shutting_down or not self._client.connected
+                or not self.last_update_success):
+            return {}
+        now = time.monotonic()
+        interval = (self.update_interval or FAST_POLL_INTERVAL).total_seconds()
+        fresh: dict[str, Any] = {}
+        for name, (value, observed, generation) in self._proxy_observations.items():
+            register = REGISTER_BY_NAME[name]
+            ttl = max(15.0, interval * 3) * (6 if register.group in SLOW_GROUPS else 1)
+            if generation == self._client.connection_generation and 0 <= now - observed <= ttl:
+                fresh[name] = value
+        return fresh
+
+    def _observe_for_proxy(self, registers: list[ModbusRegister], values: dict[str, Any]) -> None:
+        """Invalidate each attempted register before accepting a fresh result."""
+        now = time.monotonic()
+        for register in registers:
+            self._proxy_observations.pop(register.name, None)
+            value = values.get(register.name)
+            if isinstance(value, (float, int)) and math.isfinite(value):
+                self._proxy_observations[register.name] = (
+                    value, now, self._client.connection_generation,
+                )
+
+    def invalidate_proxy_cache(self, address: int, quantity: int) -> None:
+        """Raw writes may overlap a known observation without naming it."""
+        for name in list(self._proxy_observations):
+            reg = REGISTER_BY_NAME[name]
+            if reg.address < address + quantity and address < reg.address + reg.count:
+                self._proxy_observations.pop(name, None)
 
     @property
     def client(self) -> KostalModbusClient:
@@ -205,6 +269,11 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_setup(self) -> None:
         """Connect to the inverter and read initial device info."""
+        if self._communication_store is not None:
+            try:
+                self.communication = CommunicationState(await self._communication_store.async_load())
+            except Exception:
+                _LOGGER.exception("Cannot restore communication incident history")
         await self._client.connect()
         await self._client.detect_endianness()
         await self._read_device_info()
@@ -234,6 +303,19 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return cached
 
     async def _async_update_data(self) -> dict[str, Any]:
+        """Report failed/partial polls without disguising retained data as fresh."""
+        errors_before = self._fast_error_count
+        try:
+            data = await self._async_poll_data()
+        except UpdateFailed:
+            await self._report_communication(["modbus"])
+            raise
+        if not self._shutting_down and not self._client.closing:
+            partial = self._fast_error_count > errors_before or self._slow_poll_stale
+            await self._report_communication(["modbus_partial"] if partial else [])
+        return data
+
+    async def _async_poll_data(self) -> dict[str, Any]:
         """Poll monitoring registers with per-register error handling.
 
         - Connection lost → reconnect + re-detect endianness
@@ -249,6 +331,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._client.detect_endianness()
                 self._slow_tick = 5
                 self._last_slow_data = {}
+                self._proxy_observations.clear()
                 _LOGGER.info("Modbus reconnected to %s", self._client.host)
             except ModbusConnectionError as err:
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
@@ -264,6 +347,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             batch_result = await self._client.read_registers_batch(fast_regs)
+            self._observe_for_proxy(fast_regs, batch_result)
             data.update(batch_result)
             # QA-3: take a single snapshot of the suppressed-address set via the
             # public `unavailable_registers` property (returns a frozenset and has
@@ -308,15 +392,18 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             slow_regs = [r for r in MONITORING_REGISTERS if r.group in SLOW_GROUPS]
             try:
                 slow_result = await self._client.read_registers_batch(slow_regs)
+                self._observe_for_proxy(slow_regs, slow_result)
                 self._last_slow_data = slow_result
                 self._last_slow_ts = time.monotonic()
                 self._slow_poll_stale = False
                 data.update(slow_result)
             except ModbusConnectionError as err:
                 self._slow_poll_stale = bool(self._last_slow_data)
+                self._observe_for_proxy(slow_regs, {})
                 _LOGGER.debug("Slow-poll connection lost: %s", err)
             except ModbusClientError as err:
                 self._slow_poll_stale = bool(self._last_slow_data)
+                self._observe_for_proxy(slow_regs, {})
                 _LOGGER.debug("Slow-poll batch failed: %s", err)
 
         self._device_info_tick += 1
@@ -470,6 +557,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         try:
+            self._proxy_observations.pop(register.name, None)
             await self._client.write_register(register, value)
             if register in CONTROL_READBACK_REGISTERS:
                 # The next refresh must read the device, not retain the old limit.
@@ -503,6 +591,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_write_by_name(self, name: str, value: Any) -> None:
         """Write a value to a register identified by name."""
+        self._proxy_observations.pop(name, None)
         await self._client.write_by_name(name, value)
         self._record_commanded(name, value)
         _LOGGER.info("Wrote %s = %s via Modbus", name, value)
@@ -516,6 +605,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         the Modbus TCP proxy) surface in the write log.
         """
         try:
+            reg = REGISTER_BY_ADDRESS.get(address)
+            if reg is not None:
+                self._proxy_observations.pop(reg.name, None)
             await self._client.write_by_address(address, value)
             reg = REGISTER_BY_ADDRESS.get(address)
             if reg is not None:

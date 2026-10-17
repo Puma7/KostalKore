@@ -188,6 +188,10 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 default=defaults.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND),
             ): str,
             vol.Optional(
+                "modbus_proxy_client_timeout_s",
+                default=defaults.get("modbus_proxy_client_timeout_s", 0),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+            vol.Optional(
                 CONF_KSEM_ENABLED,
                 default=defaults.get(CONF_KSEM_ENABLED, False),
             ): bool,
@@ -227,6 +231,7 @@ def _normalize_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_MODBUS_ENDIANNESS: str(user_input.get(CONF_MODBUS_ENDIANNESS, "auto")),
         CONF_MQTT_BRIDGE_ENABLED: mqtt_enabled,
         CONF_MODBUS_PROXY_ENABLED: proxy_enabled,
+        "modbus_proxy_client_timeout_s": int(user_input.get("modbus_proxy_client_timeout_s", 0)),
         CONF_MODBUS_PROXY_PORT: int(
             user_input.get(CONF_MODBUS_PROXY_PORT, DEFAULT_MODBUS_PROXY_PORT)
         ),

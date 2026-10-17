@@ -25,8 +25,14 @@ import ipaddress
 import logging
 import struct
 import time
+from datetime import timedelta
 from typing import Any, Final
 
+from homeassistant.components import persistent_notification
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
+
+from .communication import CommunicationState
 from .modbus_registers import (
     ALL_REGISTERS,
     DEFAULT_UNIT_ID,
@@ -41,6 +47,7 @@ _LOGGER: Final = logging.getLogger(__name__)
 DEFAULT_PROXY_PORT: Final[int] = 5502
 DEFAULT_PROXY_BIND: Final[str] = "127.0.0.1"
 MBAP_HEADER_SIZE: Final[int] = 7
+PROXY_REQUEST_TIMEOUT_S: Final[float] = 10.0
 
 FC_READ_HOLDING: Final[int] = 0x03
 FC_READ_INPUT: Final[int] = 0x04
@@ -96,7 +103,7 @@ def _encode_value(value: Any, register: ModbusRegister, endianness: str = "littl
     if dt == DataType.FLOAT32:
         fv = float(value) if value is not None else 0.0
         if math.isnan(fv) or math.isinf(fv):
-            fv = 0.0
+            raise ValueError("Non-finite measurement cannot be represented as zero")
         if endianness == "big":
             return struct.pack(">f", fv)
         packed = struct.pack(">f", fv)
@@ -203,6 +210,7 @@ class ModbusTcpProxyServer:
         installer_access: bool = False,
         hass: Any = None,
         entry_id: str = "",
+        client_timeout_s: float = 0,
     ) -> None:
         self._coordinator = coordinator
         self._port = port
@@ -218,6 +226,50 @@ class ModbusTcpProxyServer:
         self._last_ext_write: dict[int, float] = {}  # address → timestamp
         self._fc06_count: int = 0
         self._fc16_count: int = 0
+        self._read_count = 0
+        self._cache_hits = 0
+        self._forwarded_reads = 0
+        self._failed_requests = 0
+        self._request_timeouts = 0
+        self._uncertain_writes = 0
+        self._last_success_ts: float | None = None
+        self._client_timeout_s = max(0.0, client_timeout_s)
+        self._last_request_ts = time.monotonic()
+        self._upstream_failed = False
+        self._read_failures: set[tuple[int, int]] = set()
+        self._watchdog_unsub: Any = None
+        self.communication = CommunicationState()
+
+    async def _check_client_watchdog(self, now: Any = None) -> None:
+        """Watch expected traffic, not TCP sessions (clients may reconnect normally)."""
+        age = time.monotonic() - self._last_request_ts
+        missing = self._client_timeout_s > 0 and age > self._client_timeout_s
+        faults = ["proxy"] if missing or self._upstream_failed else []
+        if not self.communication.observe(faults, dt_util.now()):
+            return
+        if self._hass is not None and self._entry_id:
+            persistent_notification.async_create(
+                self._hass, self.communication.message(), title="Kostal KORE: Modbus-Proxy",
+                notification_id=f"kostal_kore_{self._entry_id}_proxy_communication",
+            )
+
+    def communication_diagnostics(self) -> dict[str, Any]:
+        """Local, bounded counters; no peer addresses, credentials or network I/O."""
+        return {
+            "running": self.running,
+            "clients": len(self._clients),
+            "read_requests": self._read_count,
+            "observed_cache_hits": self._cache_hits,
+            "forwarded_reads": self._forwarded_reads,
+            "failed_requests": self._failed_requests,
+            "request_timeouts": self._request_timeouts,
+            "uncertain_writes": self._uncertain_writes,
+            "client_timeout_s": self._client_timeout_s,
+            "last_request_age_s": max(0, time.monotonic() - self._last_request_ts),
+            "health": self.communication.snapshot(),
+            "last_success_age_s": (time.monotonic() - self._last_success_ts
+                                   if self._last_success_ts is not None else None),
+        }
 
     @property
     def port(self) -> int:
@@ -276,6 +328,12 @@ class ModbusTcpProxyServer:
         self._server = await asyncio.start_server(
             self._handle_client, self._bind_host, self._port
         )
+        self._last_request_ts = time.monotonic()
+        if self._client_timeout_s > 0 and self._hass is not None and self._watchdog_unsub is None:
+            self._watchdog_unsub = async_track_time_interval(
+                self._hass, self._check_client_watchdog,
+                timedelta(seconds=min(30.0, self._client_timeout_s / 3)),
+            )
         _LOGGER.info(
             "Modbus TCP proxy started on %s:%d (unit_id=%d, endianness=%s)",
             self._bind_host,
@@ -286,6 +344,9 @@ class ModbusTcpProxyServer:
 
     async def stop(self) -> None:
         """Stop the proxy server and disconnect all clients."""
+        if self._watchdog_unsub is not None:
+            self._watchdog_unsub()
+            self._watchdog_unsub = None
         # Cancel client tasks first so they don't block server close
         for task in self._clients:
             task.cancel()
@@ -362,6 +423,36 @@ class ModbusTcpProxyServer:
 
     async def _process_pdu(self, pdu: bytes, unit_id: int) -> bytes:
         """Process a Modbus PDU and return a response PDU."""
+        fc = pdu[0] if pdu else 0
+        try:
+            response = await asyncio.wait_for(
+                self._dispatch_pdu(pdu, unit_id), PROXY_REQUEST_TIMEOUT_S,
+            )
+        except TimeoutError:
+            self._request_timeouts += 1
+            if fc in (FC_WRITE_SINGLE, FC_WRITE_MULTIPLE):
+                self._uncertain_writes += 1
+            _LOGGER.warning("Proxy request timed out (function %d); completion unconfirmed", fc)
+            response = self._error_response(fc, 0x04)
+        if response[0] & 0x80:
+            self._failed_requests += 1
+        else:
+            self._last_success_ts = time.monotonic()
+        if unit_id == self._unit_id and fc in (FC_READ_HOLDING, FC_READ_INPUT):
+            self._last_request_ts = time.monotonic()
+            if len(pdu) == 5:
+                key = struct.unpack(">HH", pdu[1:])
+                if response[0] & 0x80 and response[1] == 0x04:
+                    if len(self._read_failures) < 64:
+                        self._read_failures.add(key)
+                else:
+                    self._read_failures.discard(key)
+            self._upstream_failed = bool(self._read_failures)
+            await self._check_client_watchdog()
+        return response
+
+    async def _dispatch_pdu(self, pdu: bytes, unit_id: int) -> bytes:
+        """Dispatch without adding a retry or replay queue for external writes."""
         if len(pdu) < 1:
             return self._error_response(0, 0x01)
 
@@ -401,10 +492,16 @@ class ModbusTcpProxyServer:
         if quantity < 1 or quantity > 125:
             return self._error_response(fc, 0x03)
 
-        data = self._coordinator.data or {}
+        self._read_count += 1
+        # Optimistic entity/command caches and retained values after a failed
+        # poll are not device observations. Missing support also fails closed.
+        data = getattr(self._coordinator, "proxy_cache_data", None)
+        if not isinstance(data, dict):
+            data = {}
         image = _build_register_image(start_addr, quantity, data, self._endianness)
 
         if image is not None:
+            self._cache_hits += 1
             byte_count = quantity * 2
             return struct.pack(">BB", fc, byte_count) + image
 
@@ -430,6 +527,10 @@ class ModbusTcpProxyServer:
 
         try:
             raw: bytes = await client._raw_read(start_addr, quantity)
+            if len(raw) != quantity * 2:
+                _LOGGER.warning("Proxy: invalid upstream reply length at %d", start_addr)
+                return None
+            self._forwarded_reads += 1
             _LOGGER.debug(
                 "Proxy: forwarded read at addr=%d qty=%d (%d bytes)",
                 start_addr, quantity, len(raw),
@@ -498,6 +599,7 @@ class ModbusTcpProxyServer:
                 _LOGGER.info("Proxy: write reg %d = %d (external)", address, value)
                 return pdu[:5]
             except Exception as err:
+                self._uncertain_writes += 1
                 _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
                 return self._error_response(FC_WRITE_SINGLE, 0x04)
 
@@ -512,12 +614,16 @@ class ModbusTcpProxyServer:
         client = getattr(self._coordinator, "client", None)
         if client is None or not getattr(client, "connected", False):
             return False
+        invalidate = getattr(self._coordinator, "invalidate_proxy_cache", None)
+        if callable(invalidate):
+            invalidate(address, 1)
         try:
             data = struct.pack(">H", value)
             await client._raw_write(address, data, 1)
             _LOGGER.debug("Proxy: forwarded write-single addr=%d val=%d", address, value)
             return True
         except Exception as err:
+            self._uncertain_writes += 1
             _LOGGER.debug("Proxy: forwarded write-single failed at addr=%d: %s", address, err)
             return False
 
@@ -599,6 +705,7 @@ class ModbusTcpProxyServer:
                 )
                 return struct.pack(">BHH", FC_WRITE_MULTIPLE, start_addr, quantity)
             except Exception as err:
+                self._uncertain_writes += 1
                 _LOGGER.warning(
                     "Proxy write-multiple failed at address %d: %s", start_addr, err
                 )
@@ -617,6 +724,9 @@ class ModbusTcpProxyServer:
         client = getattr(self._coordinator, "client", None)
         if client is None or not getattr(client, "connected", False):
             return False
+        invalidate = getattr(self._coordinator, "invalidate_proxy_cache", None)
+        if callable(invalidate):
+            invalidate(start_addr, quantity)
         try:
             await client._raw_write(start_addr, data, quantity)
             _LOGGER.debug(
@@ -624,6 +734,7 @@ class ModbusTcpProxyServer:
             )
             return True
         except Exception as err:
+            self._uncertain_writes += 1
             _LOGGER.debug(
                 "Proxy: forwarded write-multiple failed at addr=%d: %s", start_addr, err,
             )

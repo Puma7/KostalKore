@@ -2644,6 +2644,7 @@ class PlenticoreDataSensor(
         """Return if entity is available."""
         return (
             super().available
+            and getattr(self.coordinator, "communication_stale", False) is not True
             and self.coordinator.data is not None
             and self.module_id in self.coordinator.data
             and self.data_id in self.coordinator.data[self.module_id]
