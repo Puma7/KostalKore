@@ -428,7 +428,8 @@ class ModbusNumberEntity(
 
         if self._register.name in G3_CYCLIC_REGISTERS and not verified:
             notify_control_lease_lost(getattr(self, "hass", None),
-                                      getattr(self.coordinator, "_communication_entry_id", ""))
+                                      getattr(self.coordinator, "_communication_entry_id", ""),
+                                      control=f"modbus_{self._register.name}")
             raise ModbusClientError("Cyclic limit readback is unconfirmed; keepalive was not started")
 
         await self.coordinator.async_request_refresh()
@@ -436,7 +437,8 @@ class ModbusNumberEntity(
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),
-                                       getattr(self.coordinator, "_communication_entry_id", ""))
+                                       getattr(self.coordinator, "_communication_entry_id", ""),
+                                       control=f"modbus_{self._register.name}")
 
     def _start_keepalive(self, value: float) -> None:
         """Start or update the keepalive task for G3 cyclic registers."""
@@ -472,7 +474,8 @@ class ModbusNumberEntity(
                                     self._register.name)
                     self._keepalive_value = None
                     notify_control_lease_lost(getattr(self, "hass", None),
-                                              getattr(self.coordinator, "_communication_entry_id", ""))
+                                              getattr(self.coordinator, "_communication_entry_id", ""),
+                                              control=f"modbus_{self._register.name}")
                     break
                 try:
                     await self.coordinator.async_write_register(
@@ -489,7 +492,8 @@ class ModbusNumberEntity(
                     )
                     self._keepalive_value = None
                     notify_control_lease_lost(getattr(self, "hass", None),
-                                              getattr(self.coordinator, "_communication_entry_id", ""))
+                                              getattr(self.coordinator, "_communication_entry_id", ""),
+                                              control=f"modbus_{self._register.name}")
                     break
         except asyncio.CancelledError:
             return

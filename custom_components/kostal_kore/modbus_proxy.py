@@ -614,6 +614,8 @@ class ModbusTcpProxyServer:
                 )
                 self._log_audit(reg.name, value, "rejected_validation", "FC06 multi-reg")
                 return self._error_response(FC_WRITE_SINGLE, 0x03)
+            if reg.data_type == DataType.SINT16:
+                value = struct.unpack(">h", pdu[3:5])[0]
             if client is None or not getattr(client, "connected", False):
                 return self._error_response(FC_WRITE_SINGLE, 0x0B)
             try:

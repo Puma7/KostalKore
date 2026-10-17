@@ -105,6 +105,20 @@ def _setting_values_equal(expected: str, actual: str) -> bool:
     return math.isfinite(wanted) and math.isfinite(observed) and abs(wanted - observed) <= 1e-3
 
 
+def _process_value_text(value: Any) -> str:
+    """Preserve textual device states but never renew unusable feedback."""
+    text = str(value)
+    if value is None or text.strip().casefold() in {"", "none", "null"}:
+        raise ValueError("Missing process value")
+    try:
+        numeric = float(text)
+    except ValueError:
+        return text
+    if not math.isfinite(numeric):
+        raise ValueError("Non-finite process value")
+    return text
+
+
 class Plenticore:
     """Manages the Plenticore API."""
 
@@ -757,6 +771,8 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
                     self._fetch[module_id].remove(data_id)
                 except ValueError:
                     pass
+                if not self._fetch[module_id]:
+                    self._fetch.pop(module_id, None)
 
 
 class AdaptivePollingCoordinatorMixin:
@@ -845,22 +861,24 @@ class ProcessDataUpdateCoordinator(
             if callable(report):
                 await report(False)
             raise
-        self.communication_stale = bool(self._fetch) and not self._communication_roundtrip_ok
-        if self._fetch and callable(report):
+        requested = any(self._fetch.values())
+        self.communication_stale = requested and not self._communication_roundtrip_ok
+        if requested and callable(report):
             await report(not self.communication_stale)
         return result
 
     async def _async_fetch_process_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
 
-        if not self._fetch or client is None:
+        fetch = {module: ids for module, ids in self._fetch.items() if ids}
+        if not fetch or client is None:
             return {}
 
         _LOGGER.debug("Fetching %s for %s", self.name, self._fetch)
 
         try:
             fetched_data = await asyncio.wait_for(
-                client.get_process_data_values(self._fetch),
+                client.get_process_data_values(fetch),
                 timeout=15.0
             )
             # CHANGELOG (Codex, 2026-02-05):
@@ -910,7 +928,7 @@ class ProcessDataUpdateCoordinator(
                 await asyncio.sleep(3.0)
                 try:
                     fetched_data = await asyncio.wait_for(
-                        client.get_process_data_values(self._fetch),
+                        client.get_process_data_values(fetch),
                         timeout=15.0,
                     )
                     self._record_success()  # GEÄNDERT: only record success, not prior failure
@@ -941,7 +959,7 @@ class ProcessDataUpdateCoordinator(
         #   cascade where backfilled values are re-cached and perpetuated forever.
         result: dict[str, dict[str, str]] = {}
         fresh_result: dict[str, dict[str, str]] = {}
-        partial_response = bool(set(self._fetch) - set(fetched_data))
+        partial_response = bool(set(fetch) - set(fetched_data))
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
@@ -961,14 +979,14 @@ class ProcessDataUpdateCoordinator(
                 continue
 
             # Bug #7: parse field-by-field instead of as one dict-comprehension.
-            partial_response = partial_response or bool(set(self._fetch.get(module_id, ())) - set(keys))
+            partial_response = partial_response or bool(set(fetch.get(module_id, ())) - set(keys))
             # Previously, a single bad ProcessData.value access wiped the entire
             # module's data and made every sensor on it "unavailable".
             result[module_id] = {}
             failed_fields: list[str] = []
             for process_data_id in keys:
                 try:
-                    result[module_id][process_data_id] = str(module_data[process_data_id].value)
+                    result[module_id][process_data_id] = _process_value_text(module_data[process_data_id].value)
                 except (AttributeError, TypeError, KeyError, ValueError):
                     failed_fields.append(process_data_id)
 
@@ -1058,11 +1076,11 @@ class SettingDataUpdateCoordinator(
         except UpdateFailed:
             self.communication_stale = True
             if callable(report):
-                await report(False, source="settings")
+                await report(False, source=f"settings:{id(self)}")
             raise
         self.communication_stale = requested and not self._communication_roundtrip_ok
         if requested and callable(report):
-            await report(not self.communication_stale, source="settings")
+            await report(not self.communication_stale, source=f"settings:{id(self)}")
         return result
 
     async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:
@@ -1072,7 +1090,8 @@ class SettingDataUpdateCoordinator(
         fetch = defaultdict(set)
 
         for module_id, data_ids in self._fetch.items():
-            fetch[module_id].update(data_ids)
+            if data_ids:
+                fetch[module_id].update(data_ids)
 
         for module_id, data_id in self.async_contexts():
             fetch[module_id].add(data_id)

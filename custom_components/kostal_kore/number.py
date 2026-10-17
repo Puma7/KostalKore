@@ -1739,7 +1739,8 @@ class PlenticoreDataNumber(
                         or (self._keepalive_incidents is not None and incidents != self._keepalive_incidents)):
                     _LOGGER.warning("REST keepalive lease lost; explicit control is required before resuming")
                     self._keepalive_value = None
-                    notify_control_lease_lost(getattr(self, "hass", None), getattr(self, "entry_id", ""))
+                    notify_control_lease_lost(getattr(self, "hass", None), getattr(self, "entry_id", ""),
+                                              control=f"rest_{self.module_id}_{self.data_id}")
                     break
                 data_id_for_write = self._resolve_data_id_for_write()
                 if not self._should_keepalive(data_id_for_write):
@@ -1779,7 +1780,8 @@ class PlenticoreDataNumber(
                             consecutive_failures,
                         )
                         self._keepalive_value = None
-                        notify_control_lease_lost(getattr(self, "hass", None), getattr(self, "entry_id", ""))
+                        notify_control_lease_lost(getattr(self, "hass", None), getattr(self, "entry_id", ""),
+                                                  control=f"rest_{self.module_id}_{self.data_id}")
                         break
         except asyncio.CancelledError:
             return
@@ -1883,7 +1885,8 @@ class PlenticoreDataNumber(
 
         if self._should_keepalive(data_id_for_write):
             self._start_keepalive(value)
-            clear_control_lease_notice(getattr(self, "hass", None), getattr(self, "entry_id", ""))
+            clear_control_lease_notice(getattr(self, "hass", None), getattr(self, "entry_id", ""),
+                                       control=f"rest_{self.module_id}_{self.data_id}")
 
     def _iter_data_id_candidates(self) -> list[str]:
         """Return possible data_ids for legacy compatibility."""

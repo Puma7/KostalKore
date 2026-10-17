@@ -106,6 +106,7 @@ async def test_keepalive_failure_is_not_retried_after_communication_returns():
 @pytest.mark.asyncio
 async def test_rest_keepalive_does_not_cross_an_outage_even_after_recovery():
     item = object.__new__(PlenticoreDataNumber)
+    item._module_id, item._data_id = "devices:local", "Battery:MaxChargePowerG3"
     item._keepalive_value, item._keepalive_incidents = 5000, 0
     item._get_keepalive_interval = lambda: 1
     item.coordinator = SimpleNamespace(last_update_success=True, communication_stale=False,
