@@ -142,3 +142,31 @@ async def test_write_timeout_has_unknown_outcome_and_is_never_replayed(monkeypat
     client._raw_write.side_effect = None
     await server._check_client_watchdog()
     client._raw_write.assert_awaited_once()  # no reconnect/retry replay queue
+
+
+@pytest.mark.asyncio
+async def test_write_only_client_renews_expected_traffic_watchdog():
+    server, client = proxy()
+    server._client_timeout_s = 10
+    server._last_request_ts = 0
+    client._raw_write = AsyncMock()
+    pdu = struct.pack(">BHH", 6, 40000, 1)
+    with patch("custom_components.kostal_kore.modbus_proxy.time.monotonic", return_value=11):
+        await server._check_client_watchdog()
+        assert server.communication.faults == ("proxy",)
+        assert await server._process_pdu(pdu, 71) == pdu
+        assert server.communication.faults == ()
+
+
+@pytest.mark.asyncio
+async def test_failed_write_is_visible_and_reads_cannot_clear_unknown_completion():
+    server, client = proxy(observed={REG_PM_TOTAL_ACTIVE.name: 1200})
+    client._raw_write = AsyncMock(side_effect=TimeoutError())
+    pdu = struct.pack(">BHH", 6, 40000, 0)
+    assert await server._process_pdu(pdu, 71) == b"\x86\x04"
+    assert server.communication.faults == ("write_unconfirmed",)
+    await server._process_pdu(struct.pack(">BHH", 3, REG_PM_TOTAL_ACTIVE.address, 2), 71)
+    assert server.communication.faults == ("write_unconfirmed",)
+    client._raw_write.side_effect = None
+    assert await server._process_pdu(pdu, 71) == pdu
+    assert server.communication.faults == ()

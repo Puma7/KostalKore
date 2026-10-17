@@ -238,6 +238,7 @@ class ModbusTcpProxyServer:
         self._last_request_ts = time.monotonic()
         self._upstream_failed = False
         self._read_failures: set[tuple[int, int]] = set()
+        self._write_failures: set[int] = set()
         self._watchdog_unsub: Any = None
         self.communication = CommunicationState()
 
@@ -246,6 +247,8 @@ class ModbusTcpProxyServer:
         age = time.monotonic() - self._last_request_ts
         missing = self._client_timeout_s > 0 and age > self._client_timeout_s
         faults = ["proxy"] if missing or self._upstream_failed else []
+        if self._write_failures:
+            faults.append("write_unconfirmed")
         if not self.communication.observe(faults, dt_util.now()):
             return
         if self._hass is not None and self._entry_id:
@@ -265,6 +268,7 @@ class ModbusTcpProxyServer:
             "failed_requests": self._failed_requests,
             "request_timeouts": self._request_timeouts,
             "uncertain_writes": self._uncertain_writes,
+            "pending_write_confirmations": len(self._write_failures),
             "client_timeout_s": self._client_timeout_s,
             "last_request_age_s": max(0, time.monotonic() - self._last_request_ts),
             "health": self.communication.snapshot(),
@@ -439,15 +443,22 @@ class ModbusTcpProxyServer:
             self._failed_requests += 1
         else:
             self._last_success_ts = time.monotonic()
-        if unit_id == self._unit_id and fc in (FC_READ_HOLDING, FC_READ_INPUT):
+        if unit_id == self._unit_id and fc in (FC_READ_HOLDING, FC_READ_INPUT, FC_WRITE_SINGLE, FC_WRITE_MULTIPLE):
             self._last_request_ts = time.monotonic()
-            if len(pdu) == 5:
+            if fc in (FC_READ_HOLDING, FC_READ_INPUT) and len(pdu) == 5:
                 key = struct.unpack(">HH", pdu[1:])
                 if response[0] & 0x80 and response[1] == 0x04:
                     if len(self._read_failures) < 64:
                         self._read_failures.add(key)
                 else:
                     self._read_failures.discard(key)
+            if fc in (FC_WRITE_SINGLE, FC_WRITE_MULTIPLE) and len(pdu) >= 5:
+                address = struct.unpack(">H", pdu[1:3])[0]
+                if response[0] & 0x80 and response[1] == 0x04:
+                    if len(self._write_failures) < 64:
+                        self._write_failures.add(address)
+                elif not response[0] & 0x80:
+                    self._write_failures.discard(address)
             self._upstream_failed = bool(self._read_failures)
             await self._check_client_watchdog()
         return response
