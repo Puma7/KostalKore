@@ -726,12 +726,12 @@ async def test_migration_and_cleanup_cover_remaining_no_unique_and_device_none_p
         patch("custom_components.kostal_kore.legacy_migration.er.async_get", return_value=entity_registry),
         patch(
             "custom_components.kostal_kore.legacy_migration.er.async_entries_for_config_entry",
-            side_effect=[[fake_source_entity], [], [fake_source_entity]],
+            side_effect=lambda registry, entry_id: [fake_source_entity] if entry_id == source_entry.entry_id else [],
         ),
         patch("custom_components.kostal_kore.legacy_migration.dr.async_get", return_value=device_registry),
         patch(
             "custom_components.kostal_kore.legacy_migration.dr.async_entries_for_config_entry",
-            side_effect=[[fake_source_device], [], [fake_source_device], []],
+            side_effect=lambda registry, entry_id: [fake_source_device] if entry_id == source_entry.entry_id else [],
         ),
         patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
     ):

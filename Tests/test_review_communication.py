@@ -58,14 +58,19 @@ async def test_a_different_successful_read_recovers_link_fault():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fc", [6,16])
+@pytest.mark.parametrize("known", [False,True])
 @pytest.mark.parametrize("client", [None, SimpleNamespace(connected=False)])
-async def test_disconnected_write_is_known_failed_not_unconfirmed(fc, client):
+async def test_disconnected_write_is_known_failed_not_unconfirmed(fc, known, client):
     server, _ = proxy(connected=False)
+    server._installer_access = True
     server._coordinator.client = client
-    request = struct.pack(">BHH",6,40000,0) if fc == 6 else struct.pack(">BHHBH",16,40000,1,2,0)
+    request = (struct.pack(">BHH",6,533 if known else 40000,0) if fc == 6 else
+               struct.pack(">BHHB",16,1280 if known else 40000,2,4)+b"\x00"*4)
     assert await server._process_pdu(request,71) == bytes([fc|128,11])
     assert "write_unconfirmed" not in server.communication.faults
     assert server.communication_diagnostics()["uncertain_writes"] == 0
+    assert await server._forward_write_single(40000,0) is False
+    assert await server._forward_write_multiple(40000,2,b"\x00"*4) is False
 
 
 @pytest.mark.asyncio

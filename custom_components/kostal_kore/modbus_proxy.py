@@ -572,8 +572,6 @@ class ModbusTcpProxyServer:
         address = struct.unpack(">H", pdu[1:3])[0]
         value = struct.unpack(">H", pdu[3:5])[0]
         client = getattr(self._coordinator, "client", None)
-        if client is None or not getattr(client, "connected", False):
-            return self._error_response(FC_WRITE_SINGLE, 0x0B)
 
         if address in BATTERY_CONTROL_REGISTERS and not self._installer_access:
             _LOGGER.warning(
@@ -616,6 +614,8 @@ class ModbusTcpProxyServer:
                 )
                 self._log_audit(reg.name, value, "rejected_validation", "FC06 multi-reg")
                 return self._error_response(FC_WRITE_SINGLE, 0x03)
+            if client is None or not getattr(client, "connected", False):
+                return self._error_response(FC_WRITE_SINGLE, 0x0B)
             try:
                 # Coordinator hook records the ok/error event with source=proxy_fc06.
                 await self._coordinator.async_write_by_address(
@@ -628,6 +628,8 @@ class ModbusTcpProxyServer:
                 _LOGGER.warning("Proxy write failed at address %d: %s", address, err)
                 return self._error_response(FC_WRITE_SINGLE, 0x04)
 
+        if client is None or not getattr(client, "connected", False):
+            return self._error_response(FC_WRITE_SINGLE, 0x0B)
         raw_result = await self._forward_write_single(address, value)
         if raw_result:
             self._log_audit(f"addr:{address}", value, "forwarded_direct", "FC06")
@@ -667,8 +669,6 @@ class ModbusTcpProxyServer:
         if len(pdu) < 6 + byte_count:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
         client = getattr(self._coordinator, "client", None)
-        if client is None or not getattr(client, "connected", False):
-            return self._error_response(FC_WRITE_MULTIPLE, 0x0B)
 
         write_range = range(start_addr, start_addr + quantity)
         touches_battery_control = any(
@@ -726,6 +726,8 @@ class ModbusTcpProxyServer:
                 self._log_audit(reg.name, None, "error", f"FC16 decode: {err}")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
+            if client is None or not getattr(client, "connected", False):
+                return self._error_response(FC_WRITE_MULTIPLE, 0x0B)
             try:
                 await self._coordinator.async_write_register(
                     reg, decoded, audit_source="proxy_fc16"
@@ -741,6 +743,8 @@ class ModbusTcpProxyServer:
                 )
                 return self._error_response(FC_WRITE_MULTIPLE, 0x04)
 
+        if client is None or not getattr(client, "connected", False):
+            return self._error_response(FC_WRITE_MULTIPLE, 0x0B)
         raw_result = await self._forward_write_multiple(start_addr, quantity, reg_values)
         if raw_result:
             self._log_audit(f"addr:{start_addr}", None, "forwarded_direct", "FC16")

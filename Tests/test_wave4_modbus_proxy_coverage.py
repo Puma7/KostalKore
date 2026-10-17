@@ -40,7 +40,7 @@ def _make_proxy(
     coordinator.proxy_cache_data = dict(coordinator.data)
     coordinator.async_write_by_address = AsyncMock()
     coordinator.async_write_register = AsyncMock()
-    coordinator.client = client
+    coordinator.client = client if client is not None else SimpleNamespace(connected=True)
 
     soc_controller = SimpleNamespace(active=soc_active, target_soc=55.0)
     return ModbusTcpProxyServer(
