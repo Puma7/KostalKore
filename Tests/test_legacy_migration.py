@@ -443,7 +443,10 @@ async def test_legacy_migration_validation_and_no_unique_id_paths(hass):
             cleanup_target.entry_id,
             source_entry_id=cleanup_source.entry_id,
         )
-    assert cleanup_result.detached_legacy_devices == 0
+    # Current HA removes source-only devices directly; the mocked legacy
+    # update method is intentionally unused on that runtime.
+    expected_detached = 1 if hasattr(dr.DeviceEntry, "config_entry_id") else 0
+    assert cleanup_result.detached_legacy_devices == expected_detached
 
 
 def test_select_source_entry_additional_edge_cases(hass):
@@ -728,7 +731,7 @@ async def test_migration_and_cleanup_cover_remaining_no_unique_and_device_none_p
         patch("custom_components.kostal_kore.legacy_migration.dr.async_get", return_value=device_registry),
         patch(
             "custom_components.kostal_kore.legacy_migration.dr.async_entries_for_config_entry",
-            side_effect=[[fake_source_device], [fake_source_device], []],
+            side_effect=[[fake_source_device], [], [fake_source_device], []],
         ),
         patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)),
     ):
@@ -1028,3 +1031,45 @@ async def test_full_migration_then_cleanup_is_forward_compatible_2026_8(hass):
     assert preserved is not None
     assert preserved.device_id == device.id
     assert preserved.config_entry_id == target_entry.entry_id
+
+
+@pytest.mark.parametrize("operation", ["migrate", "adopt"])
+async def test_migration_reuses_existing_target_device_without_losing_entities(hass, operation):
+    """An already loaded KORE device must not collide with the legacy device."""
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.7"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, data={CONF_HOST: "10.0.0.7"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    devices = dr.async_get(hass)
+    old_device = devices.async_get_or_create(
+        config_entry_id=source.entry_id, identifiers={(LEGACY_DOMAIN, "SAME-INVERTER")},
+    )
+    target_device = devices.async_get_or_create(
+        config_entry_id=target.entry_id, identifiers={(DOMAIN, "SAME-INVERTER")},
+    )
+    entities = er.async_get(hass)
+    old_entity = entities.async_get_or_create(
+        "sensor", LEGACY_DOMAIN, f"{source.entry_id}_power",
+        config_entry=source, device_id=old_device.id,
+        suggested_object_id="original_power_with_history",
+        disabled_by=er.RegistryEntryDisabler.USER if operation == "adopt" else None,
+    )
+    target_entity = entities.async_get_or_create(
+        "sensor", DOMAIN, "target_only_diagnostic",
+        config_entry=target, device_id=target_device.id,
+    )
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
+        if operation == "migrate":
+            await migrate_legacy_plenticore_entry(hass, target.entry_id, source.entry_id)
+        else:
+            await adopt_legacy_entity_ids(hass, target.entry_id, source.entry_id, dry_run=False)
+        await finalize_legacy_cleanup(hass, target.entry_id, source.entry_id)
+    await hass.async_block_till_done()
+    preserved = entities.async_get(old_entity.entity_id)
+    assert preserved is not None
+    assert preserved.config_entry_id == target.entry_id
+    assert preserved.device_id == target_device.id
+    assert preserved.disabled_by == old_entity.disabled_by
+    assert entities.async_get(target_entity.entity_id) is not None
+    assert devices.async_get(target_device.id) is not None
+    assert devices.async_get(old_device.id) is None
