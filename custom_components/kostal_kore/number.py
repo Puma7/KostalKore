@@ -45,7 +45,7 @@ from .helper import (
     parse_modbus_exception,
     requires_installer_service_code,
 )
-from .notifications import notify_control_lease_lost
+from .notifications import clear_control_lease_notice, notify_control_lease_lost
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1883,6 +1883,7 @@ class PlenticoreDataNumber(
 
         if self._should_keepalive(data_id_for_write):
             self._start_keepalive(value)
+            clear_control_lease_notice(getattr(self, "hass", None), getattr(self, "entry_id", ""))
 
     def _iter_data_id_candidates(self) -> list[str]:
         """Return possible data_ids for legacy compatibility."""

@@ -451,7 +451,10 @@ class ModbusTcpProxyServer:
                     if len(self._read_failures) < 64:
                         self._read_failures.add(key)
                 else:
-                    self._read_failures.discard(key)
+                    if not response[0] & 0x80:
+                        self._read_failures.clear()
+                    else:
+                        self._read_failures.discard(key)
             if fc in (FC_WRITE_SINGLE, FC_WRITE_MULTIPLE) and len(pdu) >= 5:
                 address = struct.unpack(">H", pdu[1:3])[0]
                 if response[0] & 0x80 and response[1] == 0x04:
@@ -568,6 +571,9 @@ class ModbusTcpProxyServer:
 
         address = struct.unpack(">H", pdu[1:3])[0]
         value = struct.unpack(">H", pdu[3:5])[0]
+        client = getattr(self._coordinator, "client", None)
+        if client is None or not getattr(client, "connected", False):
+            return self._error_response(FC_WRITE_SINGLE, 0x0B)
 
         if address in BATTERY_CONTROL_REGISTERS and not self._installer_access:
             _LOGGER.warning(
@@ -660,6 +666,9 @@ class ModbusTcpProxyServer:
 
         if len(pdu) < 6 + byte_count:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
+        client = getattr(self._coordinator, "client", None)
+        if client is None or not getattr(client, "connected", False):
+            return self._error_response(FC_WRITE_MULTIPLE, 0x0B)
 
         write_range = range(start_addr, start_addr + quantity)
         touches_battery_control = any(
@@ -707,13 +716,15 @@ class ModbusTcpProxyServer:
             # hook with source=proxy_fc16 (no double-log).
             try:
                 decoded = self._decode_for_write(reg, reg_values)
+                if isinstance(decoded, (int, float)) and not math.isfinite(decoded):
+                    return self._error_response(FC_WRITE_MULTIPLE, 0x03)
             except Exception as err:
                 _LOGGER.warning(
                     "Proxy write-multiple decode failed at address %d: %s",
                     start_addr, err,
                 )
                 self._log_audit(reg.name, None, "error", f"FC16 decode: {err}")
-                return self._error_response(FC_WRITE_MULTIPLE, 0x04)
+                return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
             try:
                 await self._coordinator.async_write_register(

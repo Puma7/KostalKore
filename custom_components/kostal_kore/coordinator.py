@@ -936,6 +936,7 @@ class ProcessDataUpdateCoordinator(
         #   cascade where backfilled values are re-cached and perpetuated forever.
         result: dict[str, dict[str, str]] = {}
         fresh_result: dict[str, dict[str, str]] = {}
+        partial_response = bool(set(self._fetch) - set(fetched_data))
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
@@ -946,13 +947,16 @@ class ProcessDataUpdateCoordinator(
                 else:
                     _LOGGER.warning("Unsupported data type for module %s: %s", module_id, type(module_data))
                     result[module_id] = {}
+                    partial_response = True
                     continue
             except (AttributeError, TypeError) as err:
                 _LOGGER.warning("Error inspecting module %s: %s", module_id, err)
                 result[module_id] = {}
+                partial_response = True
                 continue
 
             # Bug #7: parse field-by-field instead of as one dict-comprehension.
+            partial_response = partial_response or bool(set(self._fetch.get(module_id, ())) - set(keys))
             # Previously, a single bad ProcessData.value access wiped the entire
             # module's data and made every sensor on it "unavailable".
             result[module_id] = {}
@@ -967,6 +971,7 @@ class ProcessDataUpdateCoordinator(
             fresh_result[module_id] = dict(result[module_id])
 
             if failed_fields:
+                partial_response = True
                 last_module = self._last_result.get(module_id, {})
                 restored: list[str] = []
                 still_missing: list[str] = []
@@ -1005,7 +1010,7 @@ class ProcessDataUpdateCoordinator(
                 any_fresh_data = True
         if any_fresh_data:
             self._last_success_ts = time.monotonic()  # für Stale-TTL-Check
-            self._communication_roundtrip_ok = True
+            self._communication_roundtrip_ok = not partial_response
         return result
 
 

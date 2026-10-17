@@ -44,7 +44,7 @@ from .modbus_registers import (
     REG_INVERTER_MAX_POWER,
     ModbusRegister,
 )
-from .notifications import notify_control_lease_lost
+from .notifications import clear_control_lease_notice, notify_control_lease_lost
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -408,13 +408,15 @@ class ModbusNumberEntity(
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._cancel_keepalive()
         await self.coordinator.async_write_register(self._register, value)
+        write_generation = self.coordinator.client.connection_generation
 
         verified = False
         try:
             readback = await self.coordinator.client.read_register(self._register)
             observed = float(readback)
             tolerance = self._attr_native_step if value != 0 else 0
-            verified = math.isfinite(observed) and abs(observed - value) <= tolerance
+            retained: set[int] = getattr(self.coordinator.client, "retained_quality_addresses", set())
+            verified = self.coordinator.client.connection_generation == write_generation and self._register.address not in retained and math.isfinite(observed) and abs(observed - value) <= tolerance
             if not verified:
                 _LOGGER.warning(
                     "Read-back mismatch for %s: wrote %s, read %s",
@@ -432,6 +434,8 @@ class ModbusNumberEntity(
 
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
+            clear_control_lease_notice(getattr(self, "hass", None),
+                                       getattr(self.coordinator, "_communication_entry_id", ""))
 
     def _start_keepalive(self, value: float) -> None:
         """Start or update the keepalive task for G3 cyclic registers."""

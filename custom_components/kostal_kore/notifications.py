@@ -23,6 +23,14 @@ _LOGGER: Final = logging.getLogger(__name__)
 NOTIFICATION_PREFIX: Final[str] = "kostal_kore"
 
 
+def clear_control_lease_notice(hass: HomeAssistant | None, entry_id: str) -> None:
+    """A confirmed replacement command resolves the halted-lease incident."""
+    if hass is None or not entry_id:
+        return
+    from homeassistant.components import persistent_notification
+    persistent_notification.async_dismiss(hass, f"kostal_kore_{entry_id}_control_lease")
+
+
 def notify_control_lease_lost(hass: HomeAssistant | None, entry_id: str) -> None:
     """A halted keepalive must be visible even if the next poll recovers."""
     if hass is None or not entry_id:

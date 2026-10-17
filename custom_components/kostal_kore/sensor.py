@@ -350,6 +350,15 @@ SENSOR_PROCESS_DATA = [
     # DC sensors will be generated dynamically based on available strings
     PlenticoreSensorEntityDescription(
         module_id=ModuleId.DEVICES_LOCAL,
+        key="Grid2Bat_P",
+        name="Grid to Battery Power",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        formatter="format_round",
+    ),
+    PlenticoreSensorEntityDescription(
+        module_id=ModuleId.DEVICES_LOCAL,
         key="PV2Bat_P",
         name="PV to Battery Power",
         native_unit_of_measurement=UnitOfPower.WATT,

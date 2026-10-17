@@ -185,9 +185,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for register in registers:
             self._proxy_observations.pop(register.name, None)
             value = values.get(register.name)
-            if isinstance(value, (float, int)) and math.isfinite(value):
+            retained: set[int] = getattr(self._client, "retained_quality_addresses", set())
+            if register.address not in retained and isinstance(value, (float, int)) and math.isfinite(value):
+                generations = getattr(self._client, "observation_generations", {})
+                generation = generations.get(register.address, self._client.connection_generation)
                 self._proxy_observations[register.name] = (
-                    value, now, self._client.connection_generation,
+                    value, now, generation,
                 )
 
     def invalidate_proxy_cache(self, address: int, quantity: int) -> None:
@@ -344,9 +347,16 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         fast_regs = [r for r in MONITORING_REGISTERS if r.group in FAST_GROUPS]
         fast_total = len(fast_regs)
+        generation_before = self._client.connection_generation
 
         try:
             batch_result = await self._client.read_registers_batch(fast_regs)
+            if self._client.connection_generation != generation_before:
+                self._last_slow_data = {}
+                self._slow_tick = 5
+                self._proxy_observations.clear()
+            rejected = {r.name for r in fast_regs if r.address in getattr(self._client, "retained_quality_addresses", set())}
+            batch_result = {name: value for name, value in batch_result.items() if name not in rejected}
             self._observe_for_proxy(fast_regs, batch_result)
             data.update(batch_result)
             # QA-3: take a single snapshot of the suppressed-address set via the
@@ -392,17 +402,24 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             slow_regs = [r for r in MONITORING_REGISTERS if r.group in SLOW_GROUPS]
             try:
                 slow_result = await self._client.read_registers_batch(slow_regs)
+                if self._client.connection_generation != generation_before:
+                    self._proxy_observations.clear()
+                    for register in slow_regs:
+                        data.pop(register.name, None)
+                rejected = {r.name for r in slow_regs if r.address in getattr(self._client, "retained_quality_addresses", set())}
+                slow_result = {name: value for name, value in slow_result.items() if name not in rejected}
                 self._observe_for_proxy(slow_regs, slow_result)
                 self._last_slow_data = slow_result
                 self._last_slow_ts = time.monotonic()
-                self._slow_poll_stale = False
+                suppressed = self._client.unavailable_registers
+                self._slow_poll_stale = any(r.name not in slow_result and r.address not in suppressed for r in slow_regs)
                 data.update(slow_result)
             except ModbusConnectionError as err:
-                self._slow_poll_stale = bool(self._last_slow_data)
+                self._slow_poll_stale = True
                 self._observe_for_proxy(slow_regs, {})
                 _LOGGER.debug("Slow-poll connection lost: %s", err)
             except ModbusClientError as err:
-                self._slow_poll_stale = bool(self._last_slow_data)
+                self._slow_poll_stale = True
                 self._observe_for_proxy(slow_regs, {})
                 _LOGGER.debug("Slow-poll batch failed: %s", err)
 

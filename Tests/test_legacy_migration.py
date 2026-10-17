@@ -1073,3 +1073,52 @@ async def test_migration_reuses_existing_target_device_without_losing_entities(h
     assert entities.async_get(target_entity.entity_id) is not None
     assert devices.async_get(target_device.id) is not None
     assert devices.async_get(old_device.id) is None
+
+
+@pytest.mark.parametrize("operation", ["migrate", "adopt", "cleanup"])
+async def test_ambiguous_devices_are_rejected_before_any_mutation(hass, operation):
+    from homeassistant.exceptions import HomeAssistantError
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.7"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, data={CONF_HOST: "10.0.0.7"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    devices, entities = dr.async_get(hass), er.async_get(hass)
+    old = devices.async_get_or_create(config_entry_id=source.entry_id,
+        identifiers={(LEGACY_DOMAIN,"A"),(LEGACY_DOMAIN,"B")})
+    for serial in ("A","B"):
+        devices.async_get_or_create(config_entry_id=target.entry_id,identifiers={(DOMAIN,serial)})
+    entity = entities.async_get_or_create("sensor",LEGACY_DOMAIN,f"{source.entry_id}_power",
+        config_entry=source,device_id=old.id)
+    original_data, original_options = dict(target.data),dict(target.options)
+    with pytest.raises(HomeAssistantError,match="multiple target devices"):
+        if operation == "migrate":
+            await migrate_legacy_plenticore_entry(hass,target.entry_id,source.entry_id)
+        elif operation == "adopt":
+            await adopt_legacy_entity_ids(hass,target.entry_id,source.entry_id,dry_run=False)
+        else:
+            await finalize_legacy_cleanup(hass,target.entry_id,source.entry_id)
+    assert dict(target.data) == original_data and dict(target.options) == original_options
+    assert entities.async_get(entity.entity_id) == entity
+    assert devices.async_get(old.id) == old
+
+
+@pytest.mark.parametrize("existing_target",[False,True])
+async def test_cleanup_reconciles_previous_partial_device_migration(hass,existing_target):
+    if not hasattr(dr.DeviceEntry,"config_entry_id"):
+        pytest.skip("Regression for single-owner device registries")
+    target = MockConfigEntry(domain=DOMAIN,data={CONF_HOST:"10.0.0.7"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN,data={CONF_HOST:"10.0.0.7"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    devices,entities = dr.async_get(hass),er.async_get(hass)
+    old=devices.async_get_or_create(config_entry_id=source.entry_id,identifiers={(LEGACY_DOMAIN,"PARTIAL")})
+    target_device=devices.async_get_or_create(config_entry_id=target.entry_id,identifiers={(DOMAIN,"PARTIAL")}) if existing_target else None
+    entity=entities.async_get_or_create("sensor",LEGACY_DOMAIN,f"{source.entry_id}_power",config_entry=source,device_id=old.id)
+    entities.async_update_entity(entity.entity_id,config_entry_id=target.entry_id)
+    with patch.object(hass.config_entries,"async_reload",AsyncMock(return_value=True)):
+        await finalize_legacy_cleanup(hass,target.entry_id,source.entry_id)
+    preserved=entities.async_get(entity.entity_id)
+    assert preserved is not None
+    assert preserved.config_entry_id == target.entry_id
+    assert preserved.device_id == (target_device.id if target_device else old.id)
+    assert devices.async_get(preserved.device_id) is not None

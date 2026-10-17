@@ -30,6 +30,14 @@ class CommunicationState:
             value = saved.get(key)
             if type(value) is int and value >= 0:
                 setattr(self, key, value)
+        stamp = saved.get("last_success_at")
+        if isinstance(stamp, str):
+            try:
+                parsed = datetime.fromisoformat(stamp)
+                if parsed.tzinfo is not None:
+                    self.last_success_at = parsed.isoformat()
+            except ValueError:
+                pass
         history = saved.get("history")
         if isinstance(history, list):
             for item in history[-HISTORY_LIMIT:]:

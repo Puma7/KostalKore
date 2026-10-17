@@ -29,6 +29,21 @@ _LOGGER: Final = logging.getLogger(__name__)
 LEGACY_DOMAIN: Final[str] = "kostal_plenticore"
 
 
+def _preflight_devices(hass: HomeAssistant, source_entry_id: str, target_entry_id: str) -> None:
+    """Reject ambiguous ownership before changing entries or either registry."""
+    registry = dr.async_get(hass)
+    targets = dr.async_entries_for_config_entry(registry, target_entry_id)
+    for device in dr.async_entries_for_config_entry(registry, source_entry_id):
+        identifiers = device.identifiers | {
+            (DOMAIN, value) for domain, value in device.identifiers if domain == LEGACY_DOMAIN
+        }
+        matches = [target for target in targets if target.id != device.id and (
+            identifiers & target.identifiers or device.connections & target.connections
+        )]
+        if len(matches) > 1:
+            raise HomeAssistantError("Legacy device matches multiple target devices; resolve duplicates first.")
+
+
 def _async_transfer_device(
     hass: HomeAssistant,
     registry: dr.DeviceRegistry,
@@ -299,6 +314,7 @@ async def adopt_legacy_entity_ids(
         target_entry_id=target_entry.entry_id,
         dry_run=dry_run,
     )
+    _preflight_devices(hass, source_entry.entry_id, target_entry.entry_id)
 
     entity_registry = er.async_get(hass)
     source_entities = list(
@@ -411,6 +427,7 @@ async def migrate_legacy_plenticore_entry(
 
     merged_data = _merge_entry_data(target_entry, source_entry)
     merged_options = _merge_options(target_entry, source_entry)
+    _preflight_devices(hass, source_entry.entry_id, target_entry.entry_id)
     hass.config_entries.async_update_entry(
         target_entry,
         title=source_entry.title,
@@ -536,6 +553,7 @@ async def finalize_legacy_cleanup(
         source_entry_id=source_entry.entry_id,
         target_entry_id=target_entry.entry_id,
     )
+    _preflight_devices(hass, source_entry.entry_id, target_entry.entry_id)
 
     entity_registry = er.async_get(hass)
     source_entities = list(
@@ -575,7 +593,16 @@ async def finalize_legacy_cleanup(
         ):
             device_registry.async_update_device(source_device.id, new_identifiers=cleaned_ids)
         if hasattr(dr.DeviceEntry, "config_entry_id"):
-            device_registry.async_remove_device(source_device.id)
+            preserved = any(entity.config_entry_id == target_entry.entry_id for entity in
+                            er.async_entries_for_device(entity_registry, source_device.id, include_disabled_entities=True))
+            if preserved:
+                target_device = _async_transfer_device(hass, device_registry, source_device, target_entry.entry_id)
+                if target_device is not None and target_device.id == source_device.id:
+                    device_registry.async_update_device(target_device.id, new_identifiers=cleaned_ids)
+                else:
+                    device_registry.async_remove_device(source_device.id)
+            else:
+                device_registry.async_remove_device(source_device.id)
             result.detached_legacy_devices += 1
         else:
             updated = device_registry.async_update_device(
