@@ -13,6 +13,14 @@ them for replay. Existing installer/SoC-controller/register-owner arbitration
 still applies. A readable limit is not evidence that all external battery
 controllers can safely own the same battery at once.
 
+G3 cyclic entity limits require readback before starting their keepalive. A new
+command cancels the previous keepalive before attempting its replacement. Failed
+writes, lost communication epochs and changed Modbus command ownership halt the
+old lease, with a visible notification. It does not automatically resurrect when
+the connection recovers. Native firmware fallback limits can still take effect;
+configure and verify them on the actual device. Preferred grid-source selection
+also excludes failed/retained sources and non-finite readings.
+
 Essential REST process/settings failures keep last values in the display cache,
 but the affected process sensors and setting controls become unavailable. This
 lets consumers such as Inverter Charge Night distinguish retained data from

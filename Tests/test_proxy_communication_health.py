@@ -50,6 +50,14 @@ async def test_non_finite_cache_is_not_fabricated_zero(bad):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+async def test_non_finite_upstream_float_is_a_gateway_failure(bad):
+    server, _ = proxy(raw=struct.pack(">f", bad))
+    result = await server._process_pdu(struct.pack(">BHH", 3, REG_PM_TOTAL_ACTIVE.address, 2), 71)
+    assert result == b"\x83\x04"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("raw", [b"\x00\x01", b"\x00" * 6])
 async def test_short_or_oversize_forwarded_reply_is_a_gateway_failure(raw):
     server, _ = proxy(raw=raw)

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import math
 import struct
 import time
 from datetime import timedelta
@@ -530,6 +531,13 @@ class ModbusTcpProxyServer:
             if len(raw) != quantity * 2:
                 _LOGGER.warning("Proxy: invalid upstream reply length at %d", start_addr)
                 return None
+            for reg in ALL_REGISTERS:
+                if (reg.data_type == DataType.FLOAT32 and reg.address >= start_addr
+                        and reg.address + reg.count <= start_addr + quantity):
+                    offset = (reg.address - start_addr) * 2
+                    if not math.isfinite(self._decode_for_write(reg, raw[offset:offset + 4])):
+                        _LOGGER.warning("Proxy: non-finite upstream value at %d", reg.address)
+                        return None
             self._forwarded_reads += 1
             _LOGGER.debug(
                 "Proxy: forwarded read at addr=%d qty=%d (%d bytes)",

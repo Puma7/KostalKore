@@ -1039,13 +1039,13 @@ class SettingDataUpdateCoordinator(
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         """Keep last values for display, but expose failed setting reads."""
-        before = self._last_success_ts
+        self._communication_roundtrip_ok = False
         try:
             result = await self._async_fetch_settings()
         except UpdateFailed:
             self.communication_stale = True
             raise
-        self.communication_stale = bool(self._fetch) and self._last_success_ts == before
+        self.communication_stale = bool(self._fetch) and not self._communication_roundtrip_ok
         return result
 
     async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:
@@ -1072,6 +1072,7 @@ class SettingDataUpdateCoordinator(
             )
             self._last_result = result
             self._last_success_ts = time.monotonic()  # NEU: TTL-Stempel
+            self._communication_roundtrip_ok = True
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy once settings communication recovers.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:

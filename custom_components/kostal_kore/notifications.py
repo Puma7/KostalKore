@@ -23,6 +23,22 @@ _LOGGER: Final = logging.getLogger(__name__)
 NOTIFICATION_PREFIX: Final[str] = "kostal_kore"
 
 
+def notify_control_lease_lost(hass: HomeAssistant | None, entry_id: str) -> None:
+    """A halted keepalive must be visible even if the next poll recovers."""
+    if hass is None or not entry_id:
+        return
+    from homeassistant.components import persistent_notification
+    persistent_notification.async_create(
+        hass,
+        "Die zyklische Batteriesteuerung wurde nach einem Kommunikations- oder "
+        "Steuerungswechsel angehalten. Letzte Gerätesollwerte und geräteeigene "
+        "Rückfallwerte können weiterwirken. Aktuelle Daten, Steuerungszuständigkeit "
+        "und die Kommunikationsdiagnose prüfen. Eine neue Regelentscheidung ist erforderlich.",
+        title="Kostal KORE: zyklische Steuerung angehalten",
+        notification_id=f"kostal_kore_{entry_id}_control_lease",
+    )
+
+
 async def notify(
     hass: HomeAssistant,
     notification_id: str,

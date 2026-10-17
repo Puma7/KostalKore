@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -2554,7 +2555,7 @@ class PreferredGridPowerSensor(
 
     def _resolve(self) -> tuple[str, float | None, bool, str]:
         ksem_val = None
-        if self.coordinator.data:
+        if self.coordinator.data and self.coordinator.last_update_success is not False:
             raw_ksem = self.coordinator.data.get("net_active_power_w")
             if raw_ksem is not None:
                 try:
@@ -2563,8 +2564,9 @@ class PreferredGridPowerSensor(
                     ksem_val = None
 
         modbus_val = None
-        if self._modbus_coordinator is not None and self._modbus_coordinator.data:
-            raw_modbus = self._modbus_coordinator.data.get("pm_total_active")
+        if self._modbus_coordinator is not None:
+            observed = self._modbus_coordinator.proxy_cache_data
+            raw_modbus = observed.get("pm_total_active") if isinstance(observed, dict) else None
             if raw_modbus is not None:
                 try:
                     modbus_val = float(raw_modbus)
@@ -2572,7 +2574,9 @@ class PreferredGridPowerSensor(
                     modbus_val = None
 
         rest_val = None
-        if self._process_coordinator.data:
+        if (self._process_coordinator.data
+                and self._process_coordinator.last_update_success is not False
+                and getattr(self._process_coordinator, "communication_stale", False) is not True):
             raw_rest = (
                 self._process_coordinator.data.get(ModuleId.DEVICES_LOCAL, {}).get("Grid_P")
             )
@@ -2582,6 +2586,9 @@ class PreferredGridPowerSensor(
                 except (TypeError, ValueError):
                     rest_val = None
 
+        ksem_val = ksem_val if ksem_val is not None and math.isfinite(ksem_val) else None
+        modbus_val = modbus_val if modbus_val is not None and math.isfinite(modbus_val) else None
+        rest_val = rest_val if rest_val is not None and math.isfinite(rest_val) else None
         conflict = False
         confidence = "high"
         if ksem_val is not None and modbus_val is not None:

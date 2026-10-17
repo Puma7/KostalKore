@@ -390,6 +390,7 @@ async def test_sensor_event_diagnostic_preferred_grid_and_data_sensor_paths() ->
 
     modbus_pref = MagicMock()
     modbus_pref.data = {"pm_total_active": "1500"}
+    modbus_pref.proxy_cache_data = dict(modbus_pref.data)
     modbus_pref.async_add_listener = MagicMock(return_value=MagicMock())
 
     pref = sensor_mod.PreferredGridPowerSensor(
@@ -417,10 +418,12 @@ async def test_sensor_event_diagnostic_preferred_grid_and_data_sensor_paths() ->
 
     ksem_pref.data = {}
     modbus_pref.data = {"pm_total_active": "250.7"}
+    modbus_pref.proxy_cache_data = dict(modbus_pref.data)
     assert pref.native_value == 251
     assert pref.extra_state_attributes["source"] == "modbus_powermeter"
 
     modbus_pref.data = {}
+    modbus_pref.proxy_cache_data = dict(modbus_pref.data)
     process_coord.data = {"devices:local": {"Grid_P": "-80.2"}}
     assert pref.native_value == -80
     assert pref.extra_state_attributes["source"] == "rest_grid_p"
@@ -432,6 +435,7 @@ async def test_sensor_event_diagnostic_preferred_grid_and_data_sensor_paths() ->
 
     ksem_pref.data = {"net_active_power_w": "90"}
     modbus_pref.data = {"pm_total_active": "120"}
+    modbus_pref.proxy_cache_data = dict(modbus_pref.data)
     process_coord.data = {"devices:local": {"Grid_P": "-10"}}
     assert pref.extra_state_attributes["source_conflict"] is False
 

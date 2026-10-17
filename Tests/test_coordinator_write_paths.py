@@ -401,6 +401,9 @@ async def test_process_setting_event_and_select_remaining_edges(
     plenticore = Plenticore(hass, entry)
     plenticore._client = MagicMock()
     plenticore.hass = None
+    # This data-path test deliberately detaches HA I/O; incident reporting is
+    # exercised against a real owner in test_communication_runtime.py.
+    plenticore.async_report_rest_communication = AsyncMock()
 
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",

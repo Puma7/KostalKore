@@ -44,6 +44,9 @@ def _make_process_coord(hass: HomeAssistant, fetch: dict) -> "ProcessDataUpdateC
 
     entry = _mock_entry()
     p = Plenticore.__new__(Plenticore)
+    from custom_components.kostal_kore.communication import CommunicationState
+    p.rest_communication = CommunicationState()
+    p._communication_store = SimpleNamespace(async_save=AsyncMock())
     p.hass = hass
     p.config_entry = entry
     p._client = MagicMock()

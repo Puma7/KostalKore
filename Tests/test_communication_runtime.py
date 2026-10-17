@@ -19,6 +19,7 @@ from custom_components.kostal_kore.diagnostics import (
 )
 from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 from custom_components.kostal_kore.modbus_registers import REG_PM_TOTAL_ACTIVE
+from custom_components.kostal_kore.sensor import PreferredGridPowerSensor
 
 
 def test_observation_age_epoch_and_missing_poll_result():
@@ -50,6 +51,19 @@ def test_observation_age_epoch_and_missing_poll_result():
     assert co.proxy_cache_data == {reg.name: 1600}
     co._client.connected = False
     assert co.proxy_cache_data == {}
+
+
+def test_grid_source_selection_never_uses_retained_values_after_loss():
+    sensor = object.__new__(PreferredGridPowerSensor)
+    sensor.coordinator = SimpleNamespace(data={"net_active_power_w": 100}, last_update_success=False)
+    sensor._modbus_coordinator = SimpleNamespace(data={"pm_total_active": 200}, proxy_cache_data={})
+    sensor._process_coordinator = SimpleNamespace(data={"devices:local": {"Grid_P": 300}},
+                                                last_update_success=True, communication_stale=True)
+    assert sensor.available is False
+    sensor._process_coordinator.communication_stale = False
+    assert sensor.native_value == 300
+    sensor._modbus_coordinator.proxy_cache_data = {"pm_total_active": 400}
+    assert sensor.native_value == 400
 
 
 @pytest.mark.asyncio
