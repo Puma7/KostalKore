@@ -29,6 +29,9 @@ class _DummyPlenticore:
     async def async_setup(self) -> bool:
         return True
 
+    async def async_finish_rest_setup(self) -> None:
+        pass
+
     async def async_unload(self) -> None:
         pass
 

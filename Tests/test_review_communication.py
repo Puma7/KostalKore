@@ -49,7 +49,7 @@ async def test_partial_rest_success_does_not_renew_retained_soc(tmp_path, missin
     co._last_success_ts = time.monotonic()
     await co._async_update_data()
     assert co.communication_stale is True
-    owner.async_report_rest_communication.assert_awaited_once_with(False)
+    owner.async_report_rest_communication.assert_awaited_once_with(False, source="process")
 
 
 @pytest.mark.asyncio
@@ -163,6 +163,9 @@ async def test_no_settings_subscribers_do_not_create_a_false_outage(tmp_path):
         co = SettingDataUpdateCoordinator(hass, MagicMock(), logging.getLogger(__name__), "empty", timedelta(seconds=5), owner)
     assert await co._async_update_data() == {}
     assert co.communication_stale is False
+    owner.async_report_rest_communication.assert_not_awaited()
+    co.finish_rest_subscription_setup()
+    await co._async_update_data()
     owner.async_report_rest_communication.assert_awaited_once_with(None, source=f"settings:{id(co)}")
 
 

@@ -8,7 +8,11 @@ from homeassistant.core import HomeAssistant, is_callback
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.kostal_kore.communication import CommunicationState
-from custom_components.kostal_kore.coordinator import Plenticore, SettingDataUpdateCoordinator
+from custom_components.kostal_kore.coordinator import (
+    Plenticore,
+    ProcessDataUpdateCoordinator,
+    SettingDataUpdateCoordinator,
+)
 from Tests.test_third_review_communication import coordinator
 
 
@@ -17,7 +21,10 @@ def owner_for(hass):
     owner.hass, owner.config_entry = hass, SimpleNamespace(entry_id="lifecycle")
     owner.rest_communication, owner._rest_poll_health = CommunicationState(), {}
     owner._communication_store = SimpleNamespace(async_save=AsyncMock())
-    owner._client = SimpleNamespace(get_setting_values=AsyncMock(side_effect=TimeoutError()))
+    owner._client = SimpleNamespace(
+        get_setting_values=AsyncMock(side_effect=TimeoutError()),
+        get_process_data_values=AsyncMock(side_effect=TimeoutError()),
+    )
     return owner
 
 
@@ -29,22 +36,23 @@ async def drain():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("other_failed", [False, True])
-async def test_last_fetch_removal_unregisters_only_its_own_health(tmp_path, other_failed):
+@pytest.mark.parametrize("kind", [SettingDataUpdateCoordinator, ProcessDataUpdateCoordinator])
+async def test_last_fetch_removal_unregisters_only_its_own_health(tmp_path, other_failed, kind):
     hass = HomeAssistant(str(tmp_path))
     owner = owner_for(hass)
-    item = coordinator(SettingDataUpdateCoordinator, hass, owner)
+    item = coordinator(kind, hass, owner)
     item._fetch["battery"] = ["limit"]
     with patch("homeassistant.components.persistent_notification.async_create"):
-        await owner.async_report_rest_communication(not other_failed)
+        await owner.async_report_rest_communication(not other_failed, source="other")
         with pytest.raises(UpdateFailed):
             await item._async_update_data()
-        source = f"settings:{id(item)}"
+        source = item.rest_communication_source
         assert owner._rest_poll_health[source] is False
         item.stop_fetch_data("battery", "limit")
         await drain()
         assert source not in owner._rest_poll_health
         assert bool(owner.rest_communication.faults) is other_failed
-        assert owner._rest_poll_health == {"process": not other_failed}
+        assert owner._rest_poll_health == {"other": not other_failed}
 
 
 @pytest.mark.asyncio
@@ -87,10 +95,11 @@ async def test_context_only_removal_releases_the_source(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_queued_cleanup_rechecks_new_demand(tmp_path):
+@pytest.mark.parametrize("kind", [SettingDataUpdateCoordinator, ProcessDataUpdateCoordinator])
+async def test_queued_cleanup_rechecks_new_demand(tmp_path, kind):
     hass = HomeAssistant(str(tmp_path))
     owner = owner_for(hass)
-    item = coordinator(SettingDataUpdateCoordinator, hass, owner)
+    item = coordinator(kind, hass, owner)
     item._fetch["battery"] = ["limit"]
     with patch("homeassistant.components.persistent_notification.async_create"):
         with pytest.raises(UpdateFailed):
@@ -98,18 +107,20 @@ async def test_queued_cleanup_rechecks_new_demand(tmp_path):
         item.stop_fetch_data("battery", "limit")
         item._fetch["battery"] = ["another_limit"]
         await drain()
-        assert owner._rest_poll_health[f"settings:{id(item)}"] is False
+        assert owner._rest_poll_health[item.rest_communication_source] is False
         assert owner.rest_communication.faults
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("shutdown", [False, True])
-async def test_late_failure_cannot_resurrect_a_removed_source(tmp_path, shutdown):
+@pytest.mark.parametrize("kind", [SettingDataUpdateCoordinator, ProcessDataUpdateCoordinator])
+async def test_late_failure_cannot_resurrect_a_removed_source(tmp_path, shutdown, kind):
     hass = HomeAssistant(str(tmp_path))
     owner = owner_for(hass)
-    item = coordinator(SettingDataUpdateCoordinator, hass, owner)
+    item = coordinator(kind, hass, owner)
     item._fetch["battery"] = ["limit"]
     started, finish = asyncio.Event(), asyncio.Event()
+    item.finish_rest_subscription_setup()
 
     async def fail_later(*args):
         started.set()
@@ -117,8 +128,9 @@ async def test_late_failure_cannot_resurrect_a_removed_source(tmp_path, shutdown
         raise TimeoutError()
 
     with patch("homeassistant.components.persistent_notification.async_create"):
-        await owner.async_report_rest_communication(False, source=f"settings:{id(item)}")
+        await owner.async_report_rest_communication(False, source=item.rest_communication_source)
         owner._client.get_setting_values.side_effect = fail_later
+        owner._client.get_process_data_values.side_effect = fail_later
         task = asyncio.create_task(item._async_update_data())
         await started.wait()
         if shutdown:

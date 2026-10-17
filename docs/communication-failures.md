@@ -12,6 +12,8 @@ before the reply was lost. The proxy counts uncertain writes and does not queue
 them for replay. Existing installer/SoC-controller/register-owner arbitration
 still applies. A readable limit is not evidence that all external battery
 controllers can safely own the same battery at once.
+`pending_write_confirmations` counts affected register words: a confirmed shorter
+write only clears its own words from an earlier uncertain FC16 range.
 
 G3 cyclic entity limits require readback before starting their keepalive. A new
 command cancels the previous keepalive before attempting its replacement. Failed
@@ -31,6 +33,11 @@ Assistant notifications, retaining recovery receipts and bounded history. Those
 histories survive integration restart. Proxy counters/history cover its current
 runtime. Repeated polls do not create additional notifications; an ongoing
 incident is reminded daily.
+Recovery waits until platform discovery has finished and every active REST
+polling coordinator has returned a successful round trip. Disabled/removed
+readers are retired; late responses cannot resurrect their health channel.
+Shutdown and integration reload do not turn an outstanding incident into a
+recovery notification just because their readers are being removed.
 
 In the integration options, **Expected proxy traffic timeout** enables an
 aggregate client-traffic watchdog. Default 0 disables it: an unused proxy and a

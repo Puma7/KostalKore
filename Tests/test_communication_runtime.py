@@ -115,7 +115,7 @@ async def test_cached_process_data_stays_unavailable_until_real_recovery(tmp_pat
     co._last_success_ts = time.monotonic()
     assert await co._async_update_data() == co._last_result
     assert co.communication_stale is True
-    owner.async_report_rest_communication.assert_awaited_once_with(False)
+    owner.async_report_rest_communication.assert_awaited_once_with(False, source="process")
     client.get_process_data_values = AsyncMock(return_value={
         "devices:local:battery": {"SoC": SimpleNamespace(value=21)},
     })

@@ -127,7 +127,9 @@ class Plenticore:
         self.hass = hass
         self.config_entry = config_entry
         self.rest_communication = CommunicationState()
-        self._rest_poll_health: dict[str, bool] = {}
+        self._rest_poll_health: dict[str, bool | None] = {}
+        self._rest_coordinators: list[PlenticoreUpdateCoordinator[Any]] = []
+        self._rest_setup_complete = False
         self._communication_store = Store[dict[str, Any]](
             hass, 1, f"kostal_kore_rest_communication_{config_entry.entry_id}",
         )
@@ -157,14 +159,38 @@ class Plenticore:
         return cast(str, self.config_entry.data[CONF_HOST])
 
     async def async_report_rest_communication(self, healthy: bool | None, *, source: str = "process") -> None:
-        """Recover only once every observed REST polling channel is healthy."""
+        """Recover only once every active REST polling channel is healthy."""
         if healthy is None:
             if source not in self._rest_poll_health:
                 return
             self._rest_poll_health.pop(source)
         else:
             self._rest_poll_health[source] = healthy
-        healthy = all(self._rest_poll_health.values())
+        await self._async_publish_rest_health()
+
+    def register_rest_coordinator(self, coordinator: PlenticoreUpdateCoordinator[Any]) -> None:
+        """Reserve an untested channel before its entities can start polling."""
+        if not hasattr(self, "_rest_coordinators"):
+            self._rest_coordinators = []
+        self._rest_coordinators.append(coordinator)
+        self._rest_poll_health[coordinator.rest_communication_source] = None
+
+    async def async_finish_rest_setup(self) -> None:
+        """HA has awaited all platform entity additions, including disabled ones."""
+        for coordinator in self._rest_coordinators:
+            coordinator.finish_rest_subscription_setup()
+            await coordinator._release_rest_health()
+        self._rest_setup_complete = True
+        await self._async_publish_rest_health()
+
+    async def _async_publish_rest_health(self) -> None:
+        healthy = not any(value is False for value in self._rest_poll_health.values())
+        if healthy and (
+            any(value is None for value in self._rest_poll_health.values())
+            or not getattr(self, "_rest_setup_complete", True)
+            or self.hass.is_stopping
+        ):
+            return
         health = self.rest_communication
         if not health.observe([] if healthy else ["rest"], dt_util.now()):
             return
@@ -463,6 +489,9 @@ class Plenticore:
 
     async def async_unload(self) -> None:
         """Unload the Plenticore API client."""
+        self._rest_setup_complete = False
+        for coordinator in getattr(self, "_rest_coordinators", ()):
+            await coordinator.async_shutdown()
         remove_listener = self._shutdown_remove_listener
         self._shutdown_remove_listener = None
         if remove_listener:
@@ -725,6 +754,72 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         self._fetch: dict[str, list[str]] = defaultdict(list)
         self._fetch_refcount: dict[tuple[str, str], int] = defaultdict(int)
         self._plenticore = plenticore
+        self._rest_health_stopped = False
+        self._rest_subscription_setup_complete = False
+        register = getattr(plenticore, "register_rest_coordinator", None)
+        if callable(register):
+            register(self)
+
+    @property
+    def rest_communication_source(self) -> str:
+        """Identify the process channel independently of settings channels."""
+        return "process"
+
+    def _has_rest_demand(self) -> bool:
+        return any(self._fetch.values())
+
+    def finish_rest_subscription_setup(self) -> None:
+        """Allow removal of channels with no enabled entities or forced reads."""
+        self._rest_subscription_setup_complete = True
+
+    async def _release_rest_health(self, *, force: bool = False) -> None:
+        """Recheck demand after queued removals and late request completions."""
+        if not force and (self._has_rest_demand() or not getattr(self, "_rest_subscription_setup_complete", False)):
+            return
+        report = getattr(self._plenticore, "async_report_rest_communication", None)
+        if callable(report):
+            await report(None, source=self.rest_communication_source)
+
+    def _schedule_rest_health_cleanup(self) -> None:
+        if not self._has_rest_demand():
+            @callback
+            def cleanup() -> None:
+                self.hass.async_create_task(self._release_rest_health(), "kostal_rest_health_cleanup")
+
+            self.hass.loop.call_soon(cleanup)
+
+    async def _report_rest_result(self, healthy: bool) -> None:
+        """Never resurrect a channel removed while its request was in flight."""
+        stopped = getattr(self, "_rest_health_stopped", False)
+        if self._has_rest_demand() and not stopped:
+            self._rest_subscription_setup_complete = True
+            report = getattr(self._plenticore, "async_report_rest_communication", None)
+            if callable(report):
+                await report(healthy, source=self.rest_communication_source)
+        else:
+            await self._release_rest_health(force=stopped)
+
+    @callback
+    def async_add_listener(self, update_callback: CALLBACK_TYPE, context: Any = None) -> CALLBACK_TYPE:
+        """Reconcile context demand when HA removes an entity listener."""
+        if context is not None:
+            self._rest_subscription_setup_complete = True
+        remove = super().async_add_listener(update_callback, context)
+
+        @callback
+        def unsubscribe() -> None:
+            remove()
+            self._schedule_rest_health_cleanup()
+
+        return unsubscribe
+
+    async def async_shutdown(self) -> None:
+        """Release this source even when no further polling will occur."""
+        self._rest_health_stopped = True
+        try:
+            await super().async_shutdown()
+        finally:
+            await self._release_rest_health(force=True)
 
     def start_fetch_data(self, module_id: str, data_id: str) -> CALLBACK_TYPE:
         """Start fetching the given data (module-id and data-id).
@@ -737,6 +832,7 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
             Callback function to cancel the scheduled refresh.
         """
         key = (module_id, data_id)
+        self._rest_subscription_setup_complete = True
         self._fetch_refcount[key] += 1
 
         if self._fetch_refcount[key] > 1:
@@ -778,6 +874,7 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
                     pass
                 if not self._fetch[module_id]:
                     self._fetch.pop(module_id, None)
+        self._schedule_rest_health_cleanup()
 
 
 class AdaptivePollingCoordinatorMixin:
@@ -858,18 +955,15 @@ class ProcessDataUpdateCoordinator(
         """Expose transport loss separately from availability of display cache."""
         self._communication_roundtrip_ok = False
         self.fresh_fields.clear()
-        report = getattr(self._plenticore, "async_report_rest_communication", None)
         try:
             result = await self._async_fetch_process_data()
         except UpdateFailed:
             self.communication_stale = True
-            if callable(report):
-                await report(False)
+            await self._report_rest_result(False)
             raise
-        requested = any(self._fetch.values())
+        requested = self._has_rest_demand() and not getattr(self, "_rest_health_stopped", False)
         self.communication_stale = requested and not self._communication_roundtrip_ok
-        if requested and callable(report):
-            await report(not self.communication_stale)
+        await self._report_rest_result(not self.communication_stale)
         return result
 
     async def _async_fetch_process_data(self) -> dict[str, dict[str, str]]:
@@ -1065,51 +1159,14 @@ class SettingDataUpdateCoordinator(
             failure_multiplier_cap=8,
         )
 
-    def _has_settings_demand(self) -> bool:
-        """Keep a health channel only while real settings are subscribed."""
-        return any(self._fetch.values()) or bool(tuple(self.async_contexts()))
+    @property
+    def rest_communication_source(self) -> str:
+        """Keep number and switch coordinators independent of each other."""
+        return f"settings:{id(self)}"
 
-    async def _release_settings_health(self, *, force: bool = False) -> None:
-        """Remove inactive sources; recheck after queued subscription changes."""
-        if not force and self._has_settings_demand():
-            return
-        report = getattr(self._plenticore, "async_report_rest_communication", None)
-        if callable(report):
-            await report(None, source=f"settings:{id(self)}")
-
-    def _schedule_settings_health_cleanup(self) -> None:
-        if not self._has_settings_demand():
-            @callback
-            def cleanup() -> None:
-                self.hass.async_create_task(self._release_settings_health(),
-                                            "kostal_settings_health_cleanup")
-
-            self.hass.loop.call_soon(cleanup)
-
-    def stop_fetch_data(self, module_id: str, data_id: str) -> None:
-        """Drop a channel after its final explicit subscription is removed."""
-        super().stop_fetch_data(module_id, data_id)
-        self._schedule_settings_health_cleanup()
-
-    @callback
-    def async_add_listener(self, update_callback: CALLBACK_TYPE, context: Any = None) -> CALLBACK_TYPE:
-        """Reconcile context-only demand after HA removes a listener."""
-        remove = super().async_add_listener(update_callback, context)
-
-        @callback
-        def unsubscribe() -> None:
-            remove()
-            self._schedule_settings_health_cleanup()
-
-        return unsubscribe
-
-    async def async_shutdown(self) -> None:
-        """Release this source even when no further polling will occur."""
-        self._rest_health_stopped = True
-        try:
-            await super().async_shutdown()
-        finally:
-            await self._release_settings_health(force=True)
+    def _has_rest_demand(self) -> bool:
+        """Settings can be requested explicitly or through listener contexts."""
+        return super()._has_rest_demand() or bool(tuple(self.async_contexts()))
 
     def _stale_cache_usable(self) -> bool:
         """Return True if cached settings are within STALE_DATA_MAX_AGE_SECONDS."""
@@ -1120,23 +1177,15 @@ class SettingDataUpdateCoordinator(
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         """Keep last values for display, but expose failed setting reads."""
         self._communication_roundtrip_ok = False
-        report = getattr(self._plenticore, "async_report_rest_communication", None)
         try:
             result = await self._async_fetch_settings()
         except UpdateFailed:
             self.communication_stale = True
-            if (self._has_settings_demand() and not getattr(self, "_rest_health_stopped", False)
-                    and callable(report)):
-                await report(False, source=f"settings:{id(self)}")
-            else:
-                await self._release_settings_health(force=getattr(self, "_rest_health_stopped", False))
+            await self._report_rest_result(False)
             raise
-        requested = self._has_settings_demand() and not getattr(self, "_rest_health_stopped", False)
+        requested = self._has_rest_demand() and not getattr(self, "_rest_health_stopped", False)
         self.communication_stale = requested and not self._communication_roundtrip_ok
-        if requested and callable(report):
-            await report(not self.communication_stale, source=f"settings:{id(self)}")
-        else:
-            await self._release_settings_health(force=getattr(self, "_rest_health_stopped", False))
+        await self._report_rest_result(not self.communication_stale)
         return result
 
     async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:

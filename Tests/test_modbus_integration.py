@@ -346,6 +346,9 @@ async def _run_setup_with_mqtt_bridge(
         async def async_setup(self):
             return True
 
+        async def async_finish_rest_setup(self):
+            pass
+
         async def async_unload(self):
             pass
 
@@ -573,6 +576,9 @@ async def test_setup_entry_mqtt_bridge_start_error_does_not_fail_setup(
 
         async def async_setup(self):
             return True
+
+        async def async_finish_rest_setup(self):
+            pass
 
         async def async_unload(self):
             pass

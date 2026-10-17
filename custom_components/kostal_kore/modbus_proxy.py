@@ -454,11 +454,16 @@ class ModbusTcpProxyServer:
                     self._read_failures.discard(key)
             if fc in (FC_WRITE_SINGLE, FC_WRITE_MULTIPLE) and len(pdu) >= 5:
                 address = struct.unpack(">H", pdu[1:3])[0]
-                if response[0] & 0x80 and response[1] == 0x04:
-                    if len(self._write_failures) < 64:
-                        self._write_failures.add(address)
-                elif not response[0] & 0x80:
-                    self._write_failures.discard(address)
+                quantity = 1 if fc == FC_WRITE_SINGLE else struct.unpack(">H", pdu[3:5])[0]
+                if 1 <= quantity <= 123 and address + quantity <= 65536:
+                    # Track every affected word, bounded by the Modbus address
+                    # space. A shorter overlapping acknowledgement only confirms
+                    # the words actually overwritten; reads cannot confirm writes.
+                    affected = range(address, address + quantity)
+                    if response[0] & 0x80 and response[1] == 0x04:
+                        self._write_failures.update(affected)
+                    elif not response[0] & 0x80:
+                        self._write_failures.difference_update(affected)
             self._upstream_failed = bool(self._read_failures)
             await self._check_client_watchdog()
         return response
@@ -665,7 +670,7 @@ class ModbusTcpProxyServer:
         quantity = struct.unpack(">H", pdu[3:5])[0]
         byte_count = pdu[5]
 
-        if quantity < 1 or quantity > 123 or byte_count != quantity * 2:
+        if quantity < 1 or quantity > 123 or start_addr + quantity > 65536 or byte_count != quantity * 2:
             return self._error_response(FC_WRITE_MULTIPLE, 0x03)
 
         if len(pdu) < 6 + byte_count:
