@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -347,6 +348,15 @@ SENSOR_PROCESS_DATA = [
         formatter="format_round",
     ),
     # DC sensors will be generated dynamically based on available strings
+    PlenticoreSensorEntityDescription(
+        module_id=ModuleId.DEVICES_LOCAL,
+        key="Grid2Bat_P",
+        name="Grid to Battery Power",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        formatter="format_round",
+    ),
     PlenticoreSensorEntityDescription(
         module_id=ModuleId.DEVICES_LOCAL,
         key="PV2Bat_P",
@@ -2554,7 +2564,7 @@ class PreferredGridPowerSensor(
 
     def _resolve(self) -> tuple[str, float | None, bool, str]:
         ksem_val = None
-        if self.coordinator.data:
+        if self.coordinator.data and self.coordinator.last_update_success is not False:
             raw_ksem = self.coordinator.data.get("net_active_power_w")
             if raw_ksem is not None:
                 try:
@@ -2563,8 +2573,9 @@ class PreferredGridPowerSensor(
                     ksem_val = None
 
         modbus_val = None
-        if self._modbus_coordinator is not None and self._modbus_coordinator.data:
-            raw_modbus = self._modbus_coordinator.data.get("pm_total_active")
+        if self._modbus_coordinator is not None:
+            observed = self._modbus_coordinator.proxy_cache_data
+            raw_modbus = observed.get("pm_total_active") if isinstance(observed, dict) else None
             if raw_modbus is not None:
                 try:
                     modbus_val = float(raw_modbus)
@@ -2572,7 +2583,10 @@ class PreferredGridPowerSensor(
                     modbus_val = None
 
         rest_val = None
-        if self._process_coordinator.data:
+        if (self._process_coordinator.data
+                and self._process_coordinator.last_update_success is not False
+                and (getattr(self._process_coordinator, "communication_stale", False) is not True
+                     or (ModuleId.DEVICES_LOCAL, "Grid_P") in self._process_coordinator.fresh_fields)):
             raw_rest = (
                 self._process_coordinator.data.get(ModuleId.DEVICES_LOCAL, {}).get("Grid_P")
             )
@@ -2582,6 +2596,9 @@ class PreferredGridPowerSensor(
                 except (TypeError, ValueError):
                     rest_val = None
 
+        ksem_val = ksem_val if ksem_val is not None and math.isfinite(ksem_val) else None
+        modbus_val = modbus_val if modbus_val is not None and math.isfinite(modbus_val) else None
+        rest_val = rest_val if rest_val is not None and math.isfinite(rest_val) else None
         conflict = False
         confidence = "high"
         if ksem_val is not None and modbus_val is not None:
@@ -2644,9 +2661,12 @@ class PlenticoreDataSensor(
         """Return if entity is available."""
         return (
             super().available
+            and (getattr(self.coordinator, "communication_stale", False) is not True
+                 or (self.module_id, self.data_id) in self.coordinator.fresh_fields)
             and self.coordinator.data is not None
             and self.module_id in self.coordinator.data
             and self.data_id in self.coordinator.data[self.module_id]
+            and self._formatter(self.coordinator.data[self.module_id][self.data_id]) is not None
         )
 
     async def async_added_to_hass(self) -> None:

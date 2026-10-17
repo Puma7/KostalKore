@@ -44,6 +44,10 @@ def _make_process_coord(hass: HomeAssistant, fetch: dict) -> "ProcessDataUpdateC
 
     entry = _mock_entry()
     p = Plenticore.__new__(Plenticore)
+    from custom_components.kostal_kore.communication import CommunicationState
+    p.rest_communication = CommunicationState()
+    p._rest_poll_health = {}
+    p._communication_store = SimpleNamespace(async_save=AsyncMock())
     p.hass = hass
     p.config_entry = entry
     p._client = MagicMock()
@@ -62,6 +66,7 @@ def _make_process_coord(hass: HomeAssistant, fetch: dict) -> "ProcessDataUpdateC
         proc.last_update_success = True
         proc._fetch = fetch
         proc._last_result = {}
+        proc.fresh_fields = set()
         proc._plenticore = p
         proc.update_interval = timedelta(seconds=10)
         # AdaptivePollingCoordinatorMixin attrs
@@ -802,6 +807,7 @@ async def test_high05_settings_stale_cache_expires_after_ttl(hass: HomeAssistant
     p._client.get_setting_values = AsyncMock(
         side_effect=ApiException("[503] internal communication error")
     )
+    p.async_report_rest_communication = AsyncMock()
 
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",

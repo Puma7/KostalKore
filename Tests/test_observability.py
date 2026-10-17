@@ -602,6 +602,7 @@ def test_modbus_coordinator_write_hook_logs_ok(monkeypatch):
     client.write_register = AsyncMock(return_value=None)
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
@@ -632,6 +633,7 @@ def test_modbus_coordinator_write_hook_logs_error_on_exception(monkeypatch):
     client.write_register = AsyncMock(side_effect=ModbusClientError("timeout"))
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
 
@@ -661,6 +663,7 @@ def test_modbus_coordinator_write_register_honors_audit_source():
     client.write_register = AsyncMock(return_value=None)
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
@@ -689,6 +692,7 @@ def test_modbus_coordinator_write_register_logs_non_modbus_exceptions():
     client.write_register = AsyncMock(side_effect=TimeoutError("connection lost"))
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
 
@@ -719,6 +723,7 @@ def test_modbus_coordinator_write_by_address_logs_ok():
     client.write_by_address = AsyncMock(return_value=None)
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
@@ -747,6 +752,7 @@ def test_modbus_coordinator_write_by_address_logs_error():
     client.write_by_address = AsyncMock(side_effect=RuntimeError("nope"))
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
 
@@ -769,6 +775,7 @@ def test_modbus_coordinator_poll_phase_property():
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._slow_tick = 3
     assert coord.poll_phase == 3
 
@@ -777,6 +784,7 @@ def test_modbus_coordinator_slow_data_age_none_when_never_polled():
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._last_slow_ts = 0.0
     assert coord.slow_data_age_s is None
 
@@ -785,6 +793,7 @@ def test_modbus_coordinator_slow_data_age_positive_after_poll():
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._last_slow_ts = time.monotonic() - 15.0
     age = coord.slow_data_age_s
     assert age is not None
@@ -795,6 +804,7 @@ def test_modbus_coordinator_update_count_property():
     from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
 
     coord = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coord._proxy_observations = {}
     coord._update_count = 99
     assert coord.update_count == 99
 

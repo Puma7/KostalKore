@@ -18,7 +18,10 @@ def _coord(
     data: dict[str, object] | None = None,
 ) -> MagicMock:
     coord = MagicMock()
-    coord.client = SimpleNamespace(read_register=AsyncMock())
+    coord.client = SimpleNamespace(read_register=AsyncMock(), connected=True, connection_generation=1)
+    coord._communication_entry_id = ""  # data-path fixture has no HA notification runtime
+    coord.slow_poll_stale = False
+    coord.communication = SimpleNamespace(faults=(), incidents=0)
     coord.device_info_data = device_info_data or {}
     coord.data = data
     coord.last_update_success = True
@@ -216,6 +219,13 @@ async def test_modbus_number_entity_paths() -> None:
     coord.async_write_register.assert_not_awaited()
 
     coord.client.read_register = AsyncMock(return_value=300.0)
+    with pytest.raises(mod.ModbusClientError, match="unconfirmed"):
+        await entity.async_set_native_value(100)
+    coord.async_write_register.assert_awaited_once_with(mod.REG_G3_MAX_CHARGE, 100)
+    coord.async_request_refresh.assert_not_awaited()
+    assert entity._keepalive_value is None
+    coord.async_write_register.reset_mock()
+    coord.client.read_register = AsyncMock(return_value=100.0)
     await entity.async_set_native_value(100)
     coord.async_write_register.assert_awaited_once_with(mod.REG_G3_MAX_CHARGE, 100)
     coord.async_request_refresh.assert_awaited_once()
@@ -225,9 +235,11 @@ async def test_modbus_number_entity_paths() -> None:
     coord.async_request_refresh.reset_mock()
     entity._keepalive_task = None
     coord.client.read_register = AsyncMock(side_effect=ValueError("skip verify"))
-    await entity.async_set_native_value(150)
+    with pytest.raises(mod.ModbusClientError, match="unconfirmed"):
+        await entity.async_set_native_value(150)
     coord.async_write_register.assert_awaited_once_with(mod.REG_G3_MAX_CHARGE, 150)
-    coord.async_request_refresh.assert_awaited_once()
+    coord.async_request_refresh.assert_not_awaited()
+    assert entity._keepalive_value is None
 
     non_cyclic = mod.ModbusNumberEntity(
         coordinator=coord,
@@ -269,6 +281,7 @@ async def test_modbus_number_entity_paths() -> None:
     assert entity._get_keepalive_interval() == 30
 
     entity._keepalive_value = 111
+    coord.last_commanded.side_effect = lambda name: entity._keepalive_value
     entity._keepalive_task = None
     coord.async_write_register = AsyncMock(
         side_effect=lambda *_args, **_kwargs: setattr(entity, "_keepalive_value", None)

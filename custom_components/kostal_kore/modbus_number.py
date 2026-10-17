@@ -29,7 +29,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .modbus_client import ModbusClientError  # noqa: F401
-from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .modbus_coordinator import SLOW_GROUPS, ModbusDataUpdateCoordinator
 from .modbus_registers import (
     REG_ACTIVE_POWER_SETPOINT,
     REG_BAT_CHARGE_DC_ABS_POWER,
@@ -44,6 +44,7 @@ from .modbus_registers import (
     REG_INVERTER_MAX_POWER,
     ModbusRegister,
 )
+from .notifications import clear_control_lease_notice, notify_control_lease_lost
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -308,11 +309,15 @@ class ModbusNumberEntity(
         self._attr_device_info = device_info
         self._keepalive_task: asyncio.Task[None] | None = None
         self._keepalive_value: float | None = None
+        self._keepalive_generation: int | None = None
+        self._keepalive_incidents = 0
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return if entity is available."""
-        return self.coordinator.data is not None and super().available
+        return (self.coordinator.data is not None and super().available
+                and not (self._register.group in SLOW_GROUPS
+                         and self.coordinator.slow_poll_stale is True))
 
     @property
     def native_value(self) -> float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -401,11 +406,19 @@ class ModbusNumberEntity(
         # The coordinator records the commanded value for every write path
         # (see async_write_register); write-only registers like the curtailment
         # setpoint read it back through native_value / the attributes.
+        if self._register.name in G3_CYCLIC_REGISTERS:
+            self._cancel_keepalive()
         await self.coordinator.async_write_register(self._register, value)
+        write_generation = self.coordinator.client.connection_generation
 
+        verified = False
         try:
             readback = await self.coordinator.client.read_register(self._register)
-            if abs(float(readback) - value) > self._attr_native_step:
+            observed = float(readback)
+            tolerance = self._attr_native_step if value != 0 else 0
+            retained: set[int] = getattr(self.coordinator.client, "retained_quality_addresses", set())
+            verified = self.coordinator.client.connection_generation == write_generation and self._register.address not in retained and math.isfinite(observed) and abs(observed - value) <= tolerance
+            if not verified:
                 _LOGGER.warning(
                     "Read-back mismatch for %s: wrote %s, read %s",
                     self._register.name, value, readback,
@@ -413,14 +426,25 @@ class ModbusNumberEntity(
         except Exception:
             _LOGGER.debug("Read-back verification skipped for %s", self._register.name)
 
+        if self._register.name in G3_CYCLIC_REGISTERS and not verified:
+            notify_control_lease_lost(getattr(self, "hass", None),
+                                      getattr(self.coordinator, "_communication_entry_id", ""),
+                                      control=f"modbus_{self._register.name}")
+            raise ModbusClientError("Cyclic limit readback is unconfirmed; keepalive was not started")
+
         await self.coordinator.async_request_refresh()
 
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
+            clear_control_lease_notice(getattr(self, "hass", None),
+                                       getattr(self.coordinator, "_communication_entry_id", ""),
+                                       control=f"modbus_{self._register.name}")
 
     def _start_keepalive(self, value: float) -> None:
         """Start or update the keepalive task for G3 cyclic registers."""
         self._keepalive_value = value
+        self._keepalive_generation = self.coordinator.client.connection_generation
+        self._keepalive_incidents = self.coordinator.communication.incidents
         if self._keepalive_task and not self._keepalive_task.done():
             return
         self._keepalive_task = self.hass.async_create_task(
@@ -439,6 +463,20 @@ class ModbusNumberEntity(
                 await asyncio.sleep(interval)
                 if self._keepalive_value is None:
                     break
+                if (not self.coordinator.client.connected
+                        or self.coordinator.last_update_success is False
+                        or self.coordinator.slow_poll_stale is True
+                        or bool(self.coordinator.communication.faults)
+                        or self.coordinator.communication.incidents != self._keepalive_incidents
+                        or self.coordinator.client.connection_generation != self._keepalive_generation
+                        or self.coordinator.last_commanded(self._register.name) != self._keepalive_value):
+                    _LOGGER.warning("G3 keepalive lease lost for %s; explicit control is required before resuming",
+                                    self._register.name)
+                    self._keepalive_value = None
+                    notify_control_lease_lost(getattr(self, "hass", None),
+                                              getattr(self.coordinator, "_communication_entry_id", ""),
+                                              control=f"modbus_{self._register.name}")
+                    break
                 try:
                     await self.coordinator.async_write_register(
                         self._register, self._keepalive_value
@@ -452,6 +490,11 @@ class ModbusNumberEntity(
                         "G3 keepalive write failed for %s: %s",
                         self._register.name, err,
                     )
+                    self._keepalive_value = None
+                    notify_control_lease_lost(getattr(self, "hass", None),
+                                              getattr(self.coordinator, "_communication_entry_id", ""),
+                                              control=f"modbus_{self._register.name}")
+                    break
         except asyncio.CancelledError:
             return
         except Exception as exc:

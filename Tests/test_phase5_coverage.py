@@ -88,10 +88,13 @@ async def test_async_setup_entry_success(
 ) -> None:
     class DummyPlenticore:
         def __init__(self, *_args):
-            pass
+            self.rest_setup_finished = False
 
         async def async_setup(self) -> bool:
             return True
+
+        async def async_finish_rest_setup(self) -> None:
+            self.rest_setup_finished = True
 
     mock_config_entry.add_to_hass(hass)
 
@@ -102,6 +105,7 @@ async def test_async_setup_entry_success(
         AsyncMock(return_value=True),
     ):
         assert await kp_init.async_setup_entry(hass, mock_config_entry) is True
+        assert mock_config_entry.runtime_data.rest_setup_finished is True
 
 
 @pytest.mark.asyncio

@@ -1048,6 +1048,7 @@ class PlenticoreDataSwitch(
         """Return if entity is available."""
         return (
             super().available
+            and getattr(self.coordinator, "communication_stale", False) is not True
             and self.coordinator.data is not None
             and self.module_id in self.coordinator.data
             and self.data_id in self.coordinator.data[self.module_id]
@@ -1086,6 +1087,8 @@ class PlenticoreDataSwitch(
             return None  # Return None during startup to show "unknown" state
 
         value = self.coordinator.data[self.module_id][self.data_id]
+        if value not in (self.on_value, self.off_value):
+            return None
         return bool(value == self._is_on)
 
 

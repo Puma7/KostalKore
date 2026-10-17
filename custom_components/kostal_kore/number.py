@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Any, Final
@@ -22,6 +23,7 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -43,6 +45,7 @@ from .helper import (
     parse_modbus_exception,
     requires_installer_service_code,
 )
+from .notifications import clear_control_lease_notice, notify_control_lease_lost
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1618,6 +1621,7 @@ class PlenticoreDataNumber(
 
             self._keepalive_task: asyncio.Task[None] | None = None
             self._keepalive_value: float | None = None
+            self._keepalive_incidents: int | None = None
 
             # overwrite from retrieved setting data if available
             if setting_data is not None:
@@ -1662,7 +1666,8 @@ class PlenticoreDataNumber(
             for candidate in self._iter_data_id_candidates()
         )
 
-        return base_available and has_data and has_module and has_value
+        return (base_available and has_data and has_module and has_value
+                and getattr(self.coordinator, "communication_stale", False) is not True)
 
     def _requires_installer(self, data_id_for_write: str) -> bool:
         """Return if this control requires installer service code."""
@@ -1710,11 +1715,14 @@ class PlenticoreDataNumber(
         if not self.hass:
             return
         self._keepalive_value = value
+        owner = getattr(self.coordinator, "_plenticore", None)
+        incidents = getattr(getattr(owner, "rest_communication", None), "incidents", None)
+        self._keepalive_incidents = incidents if type(incidents) is int else None
         if self._keepalive_task and not self._keepalive_task.done():
             return
         self._keepalive_task = self.hass.async_create_task(self._run_keepalive())
 
-    _MAX_CONSECUTIVE_KA_FAILURES: Final = 3
+    _MAX_CONSECUTIVE_KA_FAILURES: Final = 1
 
     async def _run_keepalive(self) -> None:
         """Re-apply G3 limit values cyclically to avoid fallback activation."""
@@ -1723,6 +1731,16 @@ class PlenticoreDataNumber(
             while self._keepalive_value is not None:
                 await asyncio.sleep(self._get_keepalive_interval())
                 if self._keepalive_value is None:
+                    break
+                owner = getattr(self.coordinator, "_plenticore", None)
+                incidents = getattr(getattr(owner, "rest_communication", None), "incidents", None)
+                if (self.coordinator.last_update_success is False
+                        or getattr(self.coordinator, "communication_stale", False) is True
+                        or (self._keepalive_incidents is not None and incidents != self._keepalive_incidents)):
+                    _LOGGER.warning("REST keepalive lease lost; explicit control is required before resuming")
+                    self._keepalive_value = None
+                    notify_control_lease_lost(getattr(self, "hass", None), getattr(self, "entry_id", ""),
+                                              control=f"rest_{self.module_id}_{self.data_id}")
                     break
                 data_id_for_write = self._resolve_data_id_for_write()
                 if not self._should_keepalive(data_id_for_write):
@@ -1761,6 +1779,9 @@ class PlenticoreDataNumber(
                             data_id_for_write,
                             consecutive_failures,
                         )
+                        self._keepalive_value = None
+                        notify_control_lease_lost(getattr(self, "hass", None), getattr(self, "entry_id", ""),
+                                                  control=f"rest_{self.module_id}_{self.data_id}")
                         break
         except asyncio.CancelledError:
             return
@@ -1807,6 +1828,8 @@ class PlenticoreDataNumber(
 
     async def async_set_native_value(self, value: float) -> None:
         """Set a new value."""
+        if not math.isfinite(value):
+            raise ServiceValidationError("Number value must be finite")
         data_id_for_write = self._resolve_data_id_for_write()
         # Enhanced safety logging and validation for battery controls
         if is_battery_control(data_id_for_write):
@@ -1852,6 +1875,9 @@ class PlenticoreDataNumber(
             )
 
         str_value = self._formatter_back(value)
+        if self._should_keepalive(data_id_for_write):
+            # A failed replacement must not leave the old cyclic command alive.
+            self._cancel_keepalive()
         await self.coordinator.async_write_data(
             self.module_id, {data_id_for_write: str_value}
         )
@@ -1859,6 +1885,8 @@ class PlenticoreDataNumber(
 
         if self._should_keepalive(data_id_for_write):
             self._start_keepalive(value)
+            clear_control_lease_notice(getattr(self, "hass", None), getattr(self, "entry_id", ""),
+                                       control=f"rest_{self.module_id}_{self.data_id}")
 
     def _iter_data_id_candidates(self) -> list[str]:
         """Return possible data_ids for legacy compatibility."""

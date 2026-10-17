@@ -83,9 +83,11 @@ def test_register_debug_bundle_service_registers_once():
 
     async_register_debug_bundle_service(hass)
 
-    hass.services.async_register.assert_called_once_with(
-        DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, hass.services.async_register.call_args[0][2]
-    )
+    calls = hass.services.async_register.call_args_list
+    assert len(calls) == 2
+    assert {c.args[:2] for c in calls} == {
+        (DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE), (DOMAIN, "communication_diagnostics"),
+    }
 
 
 def test_register_debug_bundle_service_idempotent():
@@ -117,7 +119,9 @@ def test_unregister_debug_bundle_service_removes_when_no_domain_data():
 
     async_unregister_debug_bundle_service_if_unused(hass)
 
-    hass.services.async_remove.assert_called_once_with(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE)
+    assert [c.args for c in hass.services.async_remove.call_args_list] == [
+        (DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE), (DOMAIN, "communication_diagnostics"),
+    ]
 
 
 # ---------------------------------------------------------------------------

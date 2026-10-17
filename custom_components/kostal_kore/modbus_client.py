@@ -200,6 +200,7 @@ class KostalModbusClient:
         self._unavailable_suppressed: dict[int, float] = {}
         self._last_exc_code: int | None = None
         self._last_good_values: dict[int, Any] = {}
+        self.observation_generations: dict[int, int] = {}
         self._outlier_policy = outlier_policy
         self._closing = False
         # Monotonic counter of successful (re)connections, bumped in connect().
@@ -410,6 +411,7 @@ class KostalModbusClient:
         for attempt in range(1 + MAX_RETRIES):
             try:
                 raw = await self._raw_read(register.address, register.count)
+                observation_generation = self.connection_generation
                 if register.address in self._unavailable_strikes:
                     self._unavailable_strikes.pop(register.address, None)
                     _LOGGER.info(
@@ -418,6 +420,8 @@ class KostalModbusClient:
                     )
                 decoded = self._decode(raw, register)
                 filtered = self._apply_quality_filter(register, decoded)
+                if register.address not in self.retained_quality_addresses:
+                    self.observation_generations[register.address] = observation_generation
                 self._last_good_values[register.address] = filtered
                 return filtered
             except ModbusPermanentError:
@@ -459,6 +463,9 @@ class KostalModbusClient:
 
     def _apply_quality_filter(self, register: ModbusRegister, value: Any) -> Any:
         """Apply per-register quality guards (sentinel/outlier filtering)."""
+        if not hasattr(self, "retained_quality_addresses"):
+            self.retained_quality_addresses: set[int] = set()
+        self.retained_quality_addresses.discard(register.address)
         # Known inverter quirk: register 575 can return 32767 as invalid/sentinel.
         if register.address == 575:
             try:
@@ -471,6 +478,7 @@ class KostalModbusClient:
                             value,
                             previous,
                         )
+                        self.retained_quality_addresses.add(register.address)
                         return previous
                     raise ModbusReadError(
                         f"Register {register.name} returned invalid sentinel value {value}"
@@ -484,6 +492,7 @@ class KostalModbusClient:
             if math.isnan(numeric_value) or math.isinf(numeric_value):
                 previous = self._last_good_values.get(register.address)
                 if previous is not None and self._outlier_policy == "keep_last":
+                    self.retained_quality_addresses.add(register.address)
                     return previous
                 raise ModbusReadError(
                     f"Register {register.name} returned NaN/Infinity"
@@ -501,6 +510,7 @@ class KostalModbusClient:
                             numeric_value,
                             previous,
                         )
+                        self.retained_quality_addresses.add(register.address)
                         return previous
                     raise ModbusReadError(
                         f"Register {register.name} value {numeric_value} exceeds absolute outlier limit"
@@ -636,6 +646,7 @@ class KostalModbusClient:
 
             try:
                 raw_all = await self._raw_read(start_addr, total_count)
+                observation_generation = self.connection_generation
                 offset = 0
                 for reg in group:
                     reg_bytes = raw_all[offset * 2 : (offset + reg.count) * 2]
@@ -643,6 +654,8 @@ class KostalModbusClient:
                     try:
                         decoded = self._decode(reg_bytes, reg)
                         filtered = self._apply_quality_filter(reg, decoded)
+                        if reg.address not in self.retained_quality_addresses:
+                            self.observation_generations[reg.address] = observation_generation
                         self._last_good_values[reg.address] = filtered
                         if reg.address in self._unavailable_strikes:
                             self._unavailable_strikes.pop(reg.address, None)

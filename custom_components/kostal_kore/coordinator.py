@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 from collections import defaultdict, deque
@@ -12,15 +13,18 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from aiohttp.client_exceptions import ClientError
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from pykoplenti import (
     ApiClient,
     ApiException,
@@ -29,6 +33,7 @@ from pykoplenti import (
     ExtendedApiClient,
 )
 
+from .communication import CommunicationState
 from .const import ADVANCED_WRITE_ARM_TTL_SECONDS, CONF_SERVICE_CODE, DOMAIN
 from .helper import (
     ModbusException,  # noqa: F401
@@ -91,6 +96,29 @@ else:
     PlenticoreConfigEntry = ConfigEntry
 
 
+def _setting_values_equal(expected: str, actual: str) -> bool:
+    """Numeric readback must be finite; textual settings must match exactly."""
+    try:
+        wanted, observed = float(expected), float(actual)
+    except (TypeError, ValueError):
+        return expected == actual
+    return math.isfinite(wanted) and math.isfinite(observed) and abs(wanted - observed) <= 1e-3
+
+
+def _process_value_text(value: Any) -> str:
+    """Preserve textual device states but never renew unusable feedback."""
+    text = str(value)
+    if value is None or text.strip().casefold() in {"", "none", "null"}:
+        raise ValueError("Missing process value")
+    try:
+        numeric = float(text)
+    except ValueError:
+        return text
+    if not math.isfinite(numeric):
+        raise ValueError("Non-finite process value")
+    return text
+
+
 class Plenticore:
     """Manages the Plenticore API."""
 
@@ -98,6 +126,13 @@ class Plenticore:
         """Create a new plenticore manager instance."""
         self.hass = hass
         self.config_entry = config_entry
+        self.rest_communication = CommunicationState()
+        self._rest_poll_health: dict[str, bool | None] = {}
+        self._rest_coordinators: list[PlenticoreUpdateCoordinator[Any]] = []
+        self._rest_setup_complete = False
+        self._communication_store = Store[dict[str, Any]](
+            hass, 1, f"kostal_kore_rest_communication_{config_entry.entry_id}",
+        )
         self._request_scheduler: Any = None
 
         self._client: ApiClient | None = None
@@ -122,6 +157,51 @@ class Plenticore:
     def host(self) -> str:
         """Return the host of the Plenticore inverter."""
         return cast(str, self.config_entry.data[CONF_HOST])
+
+    async def async_report_rest_communication(self, healthy: bool | None, *, source: str = "process") -> None:
+        """Recover only once every active REST polling channel is healthy."""
+        if healthy is None:
+            if source not in self._rest_poll_health:
+                return
+            self._rest_poll_health.pop(source)
+        else:
+            self._rest_poll_health[source] = healthy
+        await self._async_publish_rest_health()
+
+    def register_rest_coordinator(self, coordinator: PlenticoreUpdateCoordinator[Any]) -> None:
+        """Reserve an untested channel before its entities can start polling."""
+        if not hasattr(self, "_rest_coordinators"):
+            self._rest_coordinators = []
+        self._rest_coordinators.append(coordinator)
+        self._rest_poll_health[coordinator.rest_communication_source] = None
+
+    async def async_finish_rest_setup(self) -> None:
+        """HA has awaited all platform entity additions, including disabled ones."""
+        for coordinator in self._rest_coordinators:
+            coordinator.finish_rest_subscription_setup()
+            await coordinator._release_rest_health()
+        self._rest_setup_complete = True
+        await self._async_publish_rest_health()
+
+    async def _async_publish_rest_health(self) -> None:
+        healthy = not any(value is False for value in self._rest_poll_health.values())
+        if healthy and (
+            any(value is None for value in self._rest_poll_health.values())
+            or not getattr(self, "_rest_setup_complete", True)
+            or self.hass.is_stopping
+        ):
+            return
+        health = self.rest_communication
+        if not health.observe([] if healthy else ["rest"], dt_util.now()):
+            return
+        persistent_notification.async_create(
+            self.hass, health.message(), title="Kostal KORE: REST-Kommunikation",
+            notification_id=f"kostal_kore_{self.config_entry.entry_id}_rest_communication",
+        )
+        try:
+            await self._communication_store.async_save(health.snapshot())
+        except Exception:
+            _LOGGER.exception("Cannot persist REST communication incident history")
 
     @property
     def client(self) -> ApiClient:
@@ -186,6 +266,10 @@ class Plenticore:
 
     async def async_setup(self) -> bool:
         """Set up Plenticore API client."""
+        try:
+            self.rest_communication = CommunicationState(await self._communication_store.async_load())
+        except Exception:
+            _LOGGER.exception("Cannot load REST communication incident history")
         session = async_get_clientsession(self.hass)
         if self._request_scheduler is not None:
             from .scheduled_session import ScheduledSession
@@ -405,6 +489,9 @@ class Plenticore:
 
     async def async_unload(self) -> None:
         """Unload the Plenticore API client."""
+        self._rest_setup_complete = False
+        for coordinator in getattr(self, "_rest_coordinators", ()):
+            await coordinator.async_shutdown()
         remove_listener = self._shutdown_remove_listener
         self._shutdown_remove_listener = None
         if remove_listener:
@@ -615,18 +702,8 @@ class DataUpdateCoordinatorMixin:
                         continue
                     actual = str(verify_values[data_id])
                     expected_s = str(expected)
-                    try:
-                        expected_f = float(expected_s)
-                        actual_f = float(actual)
-                        if abs(expected_f - actual_f) > 1e-3:
-                            mismatches.append(
-                                f"{data_id}: expected {expected_s}, got {actual}"
-                            )
-                    except (TypeError, ValueError):
-                        if actual != expected_s:
-                            mismatches.append(
-                                f"{data_id}: expected {expected_s}, got {actual}"
-                            )
+                    if not _setting_values_equal(expected_s, actual):
+                        mismatches.append(f"{data_id}: expected {expected_s}, got {actual}")
 
                 if mismatches and strict_verify:
                     raise HomeAssistantError(
@@ -677,6 +754,72 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
         self._fetch: dict[str, list[str]] = defaultdict(list)
         self._fetch_refcount: dict[tuple[str, str], int] = defaultdict(int)
         self._plenticore = plenticore
+        self._rest_health_stopped = False
+        self._rest_subscription_setup_complete = False
+        register = getattr(plenticore, "register_rest_coordinator", None)
+        if callable(register):
+            register(self)
+
+    @property
+    def rest_communication_source(self) -> str:
+        """Identify the process channel independently of settings channels."""
+        return "process"
+
+    def _has_rest_demand(self) -> bool:
+        return any(self._fetch.values())
+
+    def finish_rest_subscription_setup(self) -> None:
+        """Allow removal of channels with no enabled entities or forced reads."""
+        self._rest_subscription_setup_complete = True
+
+    async def _release_rest_health(self, *, force: bool = False) -> None:
+        """Recheck demand after queued removals and late request completions."""
+        if not force and (self._has_rest_demand() or not getattr(self, "_rest_subscription_setup_complete", False)):
+            return
+        report = getattr(self._plenticore, "async_report_rest_communication", None)
+        if callable(report):
+            await report(None, source=self.rest_communication_source)
+
+    def _schedule_rest_health_cleanup(self) -> None:
+        if not self._has_rest_demand():
+            @callback
+            def cleanup() -> None:
+                self.hass.async_create_task(self._release_rest_health(), "kostal_rest_health_cleanup")
+
+            self.hass.loop.call_soon(cleanup)
+
+    async def _report_rest_result(self, healthy: bool) -> None:
+        """Never resurrect a channel removed while its request was in flight."""
+        stopped = getattr(self, "_rest_health_stopped", False)
+        if self._has_rest_demand() and not stopped:
+            self._rest_subscription_setup_complete = True
+            report = getattr(self._plenticore, "async_report_rest_communication", None)
+            if callable(report):
+                await report(healthy, source=self.rest_communication_source)
+        else:
+            await self._release_rest_health(force=stopped)
+
+    @callback
+    def async_add_listener(self, update_callback: CALLBACK_TYPE, context: Any = None) -> CALLBACK_TYPE:
+        """Reconcile context demand when HA removes an entity listener."""
+        if context is not None:
+            self._rest_subscription_setup_complete = True
+        remove = super().async_add_listener(update_callback, context)
+
+        @callback
+        def unsubscribe() -> None:
+            remove()
+            self._schedule_rest_health_cleanup()
+
+        return unsubscribe
+
+    async def async_shutdown(self) -> None:
+        """Release this source even when no further polling will occur."""
+        self._rest_health_stopped = True
+        try:
+            await super().async_shutdown()
+        finally:
+            await self._release_rest_health(force=True)
 
     def start_fetch_data(self, module_id: str, data_id: str) -> CALLBACK_TYPE:
         """Start fetching the given data (module-id and data-id).
@@ -689,6 +832,7 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
             Callback function to cancel the scheduled refresh.
         """
         key = (module_id, data_id)
+        self._rest_subscription_setup_complete = True
         self._fetch_refcount[key] += 1
 
         if self._fetch_refcount[key] > 1:
@@ -728,6 +872,9 @@ class PlenticoreUpdateCoordinator(DataUpdateCoordinator[_DataT]):
                     self._fetch[module_id].remove(data_id)
                 except ValueError:
                     pass
+                if not self._fetch[module_id]:
+                    self._fetch.pop(module_id, None)
+        self._schedule_rest_health_cleanup()
 
 
 class AdaptivePollingCoordinatorMixin:
@@ -788,6 +935,7 @@ class ProcessDataUpdateCoordinator(
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_result: dict[str, dict[str, str]] = {}
+        self.fresh_fields: set[tuple[str, str]] = set()
         # NEU: Zeitstempel des letzten erfolgreichen Fetches für Stale-TTL.
         self._last_success_ts: float = 0.0
         self._init_adaptive_polling(
@@ -804,16 +952,32 @@ class ProcessDataUpdateCoordinator(
         return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> dict[str, dict[str, str]]:
+        """Expose transport loss separately from availability of display cache."""
+        self._communication_roundtrip_ok = False
+        self.fresh_fields.clear()
+        try:
+            result = await self._async_fetch_process_data()
+        except UpdateFailed:
+            self.communication_stale = True
+            await self._report_rest_result(False)
+            raise
+        requested = self._has_rest_demand() and not getattr(self, "_rest_health_stopped", False)
+        self.communication_stale = requested and not self._communication_roundtrip_ok
+        await self._report_rest_result(not self.communication_stale)
+        return result
+
+    async def _async_fetch_process_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
 
-        if not self._fetch or client is None:
+        fetch = {module: ids for module, ids in self._fetch.items() if ids}
+        if not fetch or client is None:
             return {}
 
         _LOGGER.debug("Fetching %s for %s", self.name, self._fetch)
 
         try:
             fetched_data = await asyncio.wait_for(
-                client.get_process_data_values(self._fetch),
+                client.get_process_data_values(fetch),
                 timeout=15.0
             )
             # CHANGELOG (Codex, 2026-02-05):
@@ -863,7 +1027,7 @@ class ProcessDataUpdateCoordinator(
                 await asyncio.sleep(3.0)
                 try:
                     fetched_data = await asyncio.wait_for(
-                        client.get_process_data_values(self._fetch),
+                        client.get_process_data_values(fetch),
                         timeout=15.0,
                     )
                     self._record_success()  # GEÄNDERT: only record success, not prior failure
@@ -894,6 +1058,7 @@ class ProcessDataUpdateCoordinator(
         #   cascade where backfilled values are re-cached and perpetuated forever.
         result: dict[str, dict[str, str]] = {}
         fresh_result: dict[str, dict[str, str]] = {}
+        partial_response = bool(set(fetch) - set(fetched_data))
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
@@ -904,27 +1069,32 @@ class ProcessDataUpdateCoordinator(
                 else:
                     _LOGGER.warning("Unsupported data type for module %s: %s", module_id, type(module_data))
                     result[module_id] = {}
+                    partial_response = True
                     continue
             except (AttributeError, TypeError) as err:
                 _LOGGER.warning("Error inspecting module %s: %s", module_id, err)
                 result[module_id] = {}
+                partial_response = True
                 continue
 
             # Bug #7: parse field-by-field instead of as one dict-comprehension.
+            partial_response = partial_response or bool(set(fetch.get(module_id, ())) - set(keys))
             # Previously, a single bad ProcessData.value access wiped the entire
             # module's data and made every sensor on it "unavailable".
             result[module_id] = {}
             failed_fields: list[str] = []
             for process_data_id in keys:
                 try:
-                    result[module_id][process_data_id] = str(module_data[process_data_id].value)
+                    result[module_id][process_data_id] = _process_value_text(module_data[process_data_id].value)
                 except (AttributeError, TypeError, KeyError, ValueError):
                     failed_fields.append(process_data_id)
 
             # Snapshot fresh fields BEFORE backfill so _last_result stays stale-free. // GEÄNDERT
             fresh_result[module_id] = dict(result[module_id])
+            self.fresh_fields.update((module_id, key) for key in fresh_result[module_id])
 
             if failed_fields:
+                partial_response = True
                 last_module = self._last_result.get(module_id, {})
                 restored: list[str] = []
                 still_missing: list[str] = []
@@ -963,6 +1133,7 @@ class ProcessDataUpdateCoordinator(
                 any_fresh_data = True
         if any_fresh_data:
             self._last_success_ts = time.monotonic()  # für Stale-TTL-Check
+            self._communication_roundtrip_ok = not partial_response
         return result
 
 
@@ -988,6 +1159,15 @@ class SettingDataUpdateCoordinator(
             failure_multiplier_cap=8,
         )
 
+    @property
+    def rest_communication_source(self) -> str:
+        """Keep number and switch coordinators independent of each other."""
+        return f"settings:{id(self)}"
+
+    def _has_rest_demand(self) -> bool:
+        """Settings can be requested explicitly or through listener contexts."""
+        return super()._has_rest_demand() or bool(tuple(self.async_contexts()))
+
     def _stale_cache_usable(self) -> bool:
         """Return True if cached settings are within STALE_DATA_MAX_AGE_SECONDS."""
         if not self._last_result or self._last_success_ts <= 0.0:
@@ -995,13 +1175,28 @@ class SettingDataUpdateCoordinator(
         return (time.monotonic() - self._last_success_ts) < STALE_DATA_MAX_AGE_SECONDS
 
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
+        """Keep last values for display, but expose failed setting reads."""
+        self._communication_roundtrip_ok = False
+        try:
+            result = await self._async_fetch_settings()
+        except UpdateFailed:
+            self.communication_stale = True
+            await self._report_rest_result(False)
+            raise
+        requested = self._has_rest_demand() and not getattr(self, "_rest_health_stopped", False)
+        self.communication_stale = requested and not self._communication_roundtrip_ok
+        await self._report_rest_result(not self.communication_stale)
+        return result
+
+    async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:
         if (client := self._plenticore.client) is None:
             return {}
 
         fetch = defaultdict(set)
 
         for module_id, data_ids in self._fetch.items():
-            fetch[module_id].update(data_ids)
+            if data_ids:
+                fetch[module_id].update(data_ids)
 
         for module_id, data_id in self.async_contexts():
             fetch[module_id].add(data_id)
@@ -1018,6 +1213,7 @@ class SettingDataUpdateCoordinator(
             )
             self._last_result = result
             self._last_success_ts = time.monotonic()  # NEU: TTL-Stempel
+            self._communication_roundtrip_ok = True
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear inverter_busy once settings communication recovers.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:

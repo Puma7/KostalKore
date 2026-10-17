@@ -37,9 +37,10 @@ def _make_proxy(
 ) -> ModbusTcpProxyServer:
     coordinator = MagicMock()
     coordinator.data = data or {}
+    coordinator.proxy_cache_data = dict(coordinator.data)
     coordinator.async_write_by_address = AsyncMock()
     coordinator.async_write_register = AsyncMock()
-    coordinator.client = client
+    coordinator.client = client if client is not None else SimpleNamespace(connected=True)
 
     soc_controller = SimpleNamespace(active=soc_active, target_soc=55.0)
     return ModbusTcpProxyServer(
@@ -85,8 +86,10 @@ def test_modbus_proxy_encode_and_build_image_paths() -> None:
     assert _encode_value(-2, sint32_reg, "little") == struct.pack(">HH", 0xFFFE, 0xFFFF)
     assert _encode_value(2, sint32_reg, "little") == struct.pack(">HH", 2, 0)
     assert _encode_value(-2, sint32_reg, "big") == struct.pack(">i", -2)
-    assert _encode_value(float("nan"), float_reg) == struct.pack(">HH", 0, 0)
-    assert _encode_value(float("inf"), float_reg, "big") == struct.pack(">f", 0.0)
+    with pytest.raises(ValueError):
+        _encode_value(float("nan"), float_reg)
+    with pytest.raises(ValueError):
+        _encode_value(float("inf"), float_reg, "big")
     assert _encode_value("AB", string_reg) == b"AB\x00\x00"
     assert _encode_value(True, bool_reg) == struct.pack(">H", 1)
     assert _encode_value(255, uint8_reg) == struct.pack(">H", 255)

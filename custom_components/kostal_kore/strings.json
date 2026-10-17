@@ -16,7 +16,8 @@
           "ksem_enabled": "Enable external KSEM source",
           "ksem_host": "KSEM Host/IP (empty = inverter host)",
           "ksem_port": "KSEM Modbus TCP Port",
-          "ksem_unit_id": "KSEM Modbus Unit ID"
+          "ksem_unit_id": "KSEM Modbus Unit ID",
+          "modbus_proxy_client_timeout_s": "Expected proxy traffic timeout (seconds, 0 = disabled)"
         }
       },
       "modbus_test": {
@@ -89,7 +90,8 @@
           "ksem_enabled": "Enable external KSEM source",
           "ksem_host": "KSEM Host/IP (empty = inverter host)",
           "ksem_port": "KSEM Modbus TCP Port",
-          "ksem_unit_id": "KSEM Modbus Unit ID"
+          "ksem_unit_id": "KSEM Modbus Unit ID",
+          "modbus_proxy_client_timeout_s": "Expected proxy traffic timeout (seconds, 0 = disabled)"
         }
       },
       "setup_modbus_test": {

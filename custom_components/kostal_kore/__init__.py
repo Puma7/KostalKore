@@ -302,7 +302,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             endianness="little" if endianness == "auto" else endianness,
             request_scheduler=request_scheduler,
         )
-        modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client)
+        modbus_coordinator = ModbusDataUpdateCoordinator(hass, modbus_client, entry_id=entry.entry_id)
         try:
             await modbus_coordinator.async_setup()
             # detect_endianness() is already called inside async_setup(),
@@ -362,6 +362,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 installer_access=installer_access,
                 hass=hass,
                 entry_id=entry.entry_id,
+                client_timeout_s=float(entry.options.get("modbus_proxy_client_timeout_s", 0)),
             )
             try:
                 await modbus_proxy.start()
@@ -583,6 +584,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 raise ConfigEntryNotReady(
                     f"Modbus platform setup failed: {modbus_err}"
                 ) from modbus_err
+        await plenticore.async_finish_rest_setup()
         trace.phase_end("platform_forward")
     except ConfigEntryNotReady:
         trace.warning(
@@ -676,6 +678,7 @@ async def _rollback_setup(
     plenticore: Plenticore,
 ) -> None:
     """Clean up runtime objects after a failed platform-forwarding attempt."""
+    plenticore._rest_setup_complete = False
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
     loaded = _platforms_to_unload(entry_data)
     if loaded:
@@ -826,6 +829,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     trace.phase_begin("unload_entry")
     loaded = _platforms_to_unload(entry_data)
     trace.info("unload platforms: %s", [p.value for p in loaded])
+    runtime = getattr(entry, "runtime_data", None)
+    if runtime is not None:
+        runtime._rest_setup_complete = False
 
     # Stop Modbus consumers before tearing down the shared client/coordinator.
     # SoC/grid limiter may still write registers; stopping them first prevents
