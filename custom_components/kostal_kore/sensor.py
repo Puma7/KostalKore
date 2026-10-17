@@ -2666,6 +2666,7 @@ class PlenticoreDataSensor(
             and self.coordinator.data is not None
             and self.module_id in self.coordinator.data
             and self.data_id in self.coordinator.data[self.module_id]
+            and self._formatter(self.coordinator.data[self.module_id][self.data_id]) is not None
         )
 
     async def async_added_to_hass(self) -> None:

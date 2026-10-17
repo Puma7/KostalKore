@@ -94,6 +94,7 @@ async def test_partial_rest_keeps_fresh_fields_available(tmp_path, broken):
     def sensor(key):
         entity = object.__new__(PlenticoreDataSensor)
         entity.coordinator, entity.module_id, entity.data_id = co, "battery", key
+        entity._formatter = lambda value: float(value)
         return entity
 
     assert co.communication_stale is True
