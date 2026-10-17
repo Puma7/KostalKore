@@ -307,7 +307,7 @@ async def test_modbus_coordinator_update_read_info_and_write_paths(hass) -> None
     coordinator._slow_tick = 0
     await coordinator.async_write_register(REG_BAT_MAX_CHARGE_LIMIT, 1800)
     client.write_register.assert_awaited_with(REG_BAT_MAX_CHARGE_LIMIT, 1800)
-    assert coordinator.slow_tick == 5
+    assert coordinator._slow_tick == 5
 
     client.write_register = AsyncMock(side_effect=ModbusClientError("write failed"))
     with pytest.raises(ModbusClientError):
