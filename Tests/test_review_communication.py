@@ -162,7 +162,7 @@ async def test_no_settings_subscribers_do_not_create_a_false_outage(tmp_path):
         co = SettingDataUpdateCoordinator(hass, MagicMock(), logging.getLogger(__name__), "empty", timedelta(seconds=5), owner)
     assert await co._async_update_data() == {}
     assert co.communication_stale is False
-    owner.async_report_rest_communication.assert_not_awaited()
+    owner.async_report_rest_communication.assert_awaited_once_with(None, source=f"settings:{id(co)}")
 
 
 @pytest.mark.asyncio

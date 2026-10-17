@@ -16,7 +16,7 @@ from aiohttp.client_exceptions import ClientError
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -156,9 +156,14 @@ class Plenticore:
         """Return the host of the Plenticore inverter."""
         return cast(str, self.config_entry.data[CONF_HOST])
 
-    async def async_report_rest_communication(self, healthy: bool, *, source: str = "process") -> None:
+    async def async_report_rest_communication(self, healthy: bool | None, *, source: str = "process") -> None:
         """Recover only once every observed REST polling channel is healthy."""
-        self._rest_poll_health[source] = healthy
+        if healthy is None:
+            if source not in self._rest_poll_health:
+                return
+            self._rest_poll_health.pop(source)
+        else:
+            self._rest_poll_health[source] = healthy
         healthy = all(self._rest_poll_health.values())
         health = self.rest_communication
         if not health.observe([] if healthy else ["rest"], dt_util.now()):
@@ -1060,6 +1065,52 @@ class SettingDataUpdateCoordinator(
             failure_multiplier_cap=8,
         )
 
+    def _has_settings_demand(self) -> bool:
+        """Keep a health channel only while real settings are subscribed."""
+        return any(self._fetch.values()) or bool(tuple(self.async_contexts()))
+
+    async def _release_settings_health(self, *, force: bool = False) -> None:
+        """Remove inactive sources; recheck after queued subscription changes."""
+        if not force and self._has_settings_demand():
+            return
+        report = getattr(self._plenticore, "async_report_rest_communication", None)
+        if callable(report):
+            await report(None, source=f"settings:{id(self)}")
+
+    def _schedule_settings_health_cleanup(self) -> None:
+        if not self._has_settings_demand():
+            @callback
+            def cleanup() -> None:
+                self.hass.async_create_task(self._release_settings_health(),
+                                            "kostal_settings_health_cleanup")
+
+            self.hass.loop.call_soon(cleanup)
+
+    def stop_fetch_data(self, module_id: str, data_id: str) -> None:
+        """Drop a channel after its final explicit subscription is removed."""
+        super().stop_fetch_data(module_id, data_id)
+        self._schedule_settings_health_cleanup()
+
+    @callback
+    def async_add_listener(self, update_callback: CALLBACK_TYPE, context: Any = None) -> CALLBACK_TYPE:
+        """Reconcile context-only demand after HA removes a listener."""
+        remove = super().async_add_listener(update_callback, context)
+
+        @callback
+        def unsubscribe() -> None:
+            remove()
+            self._schedule_settings_health_cleanup()
+
+        return unsubscribe
+
+    async def async_shutdown(self) -> None:
+        """Release this source even when no further polling will occur."""
+        self._rest_health_stopped = True
+        try:
+            await super().async_shutdown()
+        finally:
+            await self._release_settings_health(force=True)
+
     def _stale_cache_usable(self) -> bool:
         """Return True if cached settings are within STALE_DATA_MAX_AGE_SECONDS."""
         if not self._last_result or self._last_success_ts <= 0.0:
@@ -1069,18 +1120,23 @@ class SettingDataUpdateCoordinator(
     async def _async_update_data(self) -> Mapping[str, Mapping[str, str]]:
         """Keep last values for display, but expose failed setting reads."""
         self._communication_roundtrip_ok = False
-        requested = bool(self._fetch or tuple(self.async_contexts()))
         report = getattr(self._plenticore, "async_report_rest_communication", None)
         try:
             result = await self._async_fetch_settings()
         except UpdateFailed:
             self.communication_stale = True
-            if callable(report):
+            if (self._has_settings_demand() and not getattr(self, "_rest_health_stopped", False)
+                    and callable(report)):
                 await report(False, source=f"settings:{id(self)}")
+            else:
+                await self._release_settings_health(force=getattr(self, "_rest_health_stopped", False))
             raise
+        requested = self._has_settings_demand() and not getattr(self, "_rest_health_stopped", False)
         self.communication_stale = requested and not self._communication_roundtrip_ok
         if requested and callable(report):
             await report(not self.communication_stale, source=f"settings:{id(self)}")
+        else:
+            await self._release_settings_health(force=getattr(self, "_rest_health_stopped", False))
         return result
 
     async def _async_fetch_settings(self) -> Mapping[str, Mapping[str, str]]:
