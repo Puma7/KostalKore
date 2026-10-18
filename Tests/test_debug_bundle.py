@@ -21,6 +21,13 @@ from custom_components.kostal_kore.diagnostics import (
 )
 from custom_components.kostal_kore.write_audit import WriteAuditLog, WriteEvent
 
+
+def _mock_hass():
+    hass = MagicMock()
+    hass.config.path.side_effect = lambda *parts: os.path.join("/config", *parts)
+    return hass
+
+
 # ---------------------------------------------------------------------------
 # Helper: minimal entry_store for the bundle export
 # ---------------------------------------------------------------------------
@@ -78,7 +85,7 @@ def _minimal_store() -> dict:
 
 
 def test_register_debug_bundle_service_registers_once():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.has_service.return_value = False
 
     async_register_debug_bundle_service(hass)
@@ -91,7 +98,7 @@ def test_register_debug_bundle_service_registers_once():
 
 
 def test_register_debug_bundle_service_idempotent():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.has_service.return_value = True
 
     async_register_debug_bundle_service(hass)
@@ -105,7 +112,7 @@ def test_register_debug_bundle_service_idempotent():
 
 
 def test_unregister_debug_bundle_service_skips_when_domain_data_present():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.data = {DOMAIN: {"entry_id_1": {}}}
 
     async_unregister_debug_bundle_service_if_unused(hass)
@@ -114,7 +121,7 @@ def test_unregister_debug_bundle_service_skips_when_domain_data_present():
 
 
 def test_unregister_debug_bundle_service_removes_when_no_domain_data():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.data = {DOMAIN: {}}  # empty → falsy
 
     async_unregister_debug_bundle_service_if_unused(hass)
@@ -124,6 +131,13 @@ def test_unregister_debug_bundle_service_removes_when_no_domain_data():
     ]
 
 
+def test_unregister_debug_bundle_service_ignores_lifecycle_bookkeeping():
+    hass = _mock_hass()
+    hass.data = {DOMAIN: {"_entry_lifecycle": {"synthetic": {}}}}
+    async_unregister_debug_bundle_service_if_unused(hass)
+    assert hass.services.async_remove.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # _export_bundle_for_entry
 # ---------------------------------------------------------------------------
@@ -131,7 +145,7 @@ def test_unregister_debug_bundle_service_removes_when_no_domain_data():
 
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_happy_path(tmp_path):
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     store = _minimal_store()
@@ -165,7 +179,7 @@ async def test_export_bundle_for_entry_happy_path(tmp_path):
 
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_health_exception_handled(tmp_path):
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     store = _minimal_store()
@@ -186,7 +200,7 @@ async def test_export_bundle_for_entry_health_exception_handled(tmp_path):
 
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_fire_safety_exception_handled():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     store = _minimal_store()
@@ -209,7 +223,7 @@ async def test_export_bundle_for_entry_fire_safety_exception_handled():
 
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_proxy_exception_handled():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     store = _minimal_store()
@@ -233,7 +247,7 @@ async def test_export_bundle_for_entry_proxy_exception_handled():
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_rest_snapshot_exception_handled():
     """process_coordinator.data access failure must not crash the bundle."""
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     store = _minimal_store()
@@ -256,7 +270,7 @@ async def test_export_bundle_for_entry_rest_snapshot_exception_handled():
 
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_oserror_raises():
-    hass = MagicMock()
+    hass = _mock_hass()
 
     def _raise_os(*args, **kwargs):
         raise OSError("no space left")
@@ -277,7 +291,7 @@ async def test_export_bundle_redacts_sensitive_nested_values():
     """service_code and password keys in snapshots must be redacted."""
     from homeassistant.components.diagnostics import REDACTED
 
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     store = _minimal_store()
@@ -303,7 +317,7 @@ async def test_export_bundle_redacts_sensitive_nested_values():
 
 @pytest.mark.asyncio
 async def test_export_bundle_for_entry_system_info_exception_handled():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
     store = _minimal_store()
     # Remove non-essential items to simplify
@@ -335,7 +349,7 @@ async def test_export_bundle_for_entry_system_info_exception_handled():
 
 @pytest.mark.asyncio
 async def test_handle_export_debug_bundle_happy_path():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.async_call = AsyncMock()
     hass.data = {
         DOMAIN: {
@@ -356,7 +370,7 @@ async def test_handle_export_debug_bundle_happy_path():
 
 @pytest.mark.asyncio
 async def test_handle_export_debug_bundle_skips_non_dict_entry():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.async_call = AsyncMock()
     hass.data = {
         DOMAIN: {
@@ -377,7 +391,7 @@ async def test_handle_export_debug_bundle_skips_non_dict_entry():
 
 @pytest.mark.asyncio
 async def test_handle_export_debug_bundle_records_error_on_exception():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.async_call = AsyncMock()
     hass.data = {
         DOMAIN: {
@@ -397,7 +411,7 @@ async def test_handle_export_debug_bundle_records_error_on_exception():
 
 @pytest.mark.asyncio
 async def test_handle_export_debug_bundle_no_domain_data():
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.async_call = AsyncMock()
     hass.data = {}  # no DOMAIN key
 
@@ -415,7 +429,7 @@ async def test_handle_export_debug_bundle_no_domain_data():
 @pytest.mark.asyncio
 async def test_register_debug_bundle_service_handler_delegates():
     """The registered _handler closure delegates to _handle_export_debug_bundle."""
-    hass = MagicMock()
+    hass = _mock_hass()
     hass.services.has_service.return_value = False
 
     async_register_debug_bundle_service(hass)
@@ -439,7 +453,7 @@ async def test_register_debug_bundle_service_handler_delegates():
 async def test_diagnostics_event_coordinator_branch():
     """event_coordinator in entry_store populates data['events']."""
     entry_id = "testentry01"
-    hass = MagicMock()
+    hass = _mock_hass()
 
     event_coord = MagicMock()
     event_coord.data = {"AlarmEvent": "active"}

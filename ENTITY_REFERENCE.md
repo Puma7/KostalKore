@@ -290,6 +290,9 @@ eingestuft.
 | **Reset Modbus Registers** | Button | Setzt alle temporär deaktivierten Register zurück. Nach Firmware-Update oder Inverterwechsel drücken, damit neue Register erkannt werden. |
 | **Run Modbus Diagnostics** | Button | Liest alle Register und erstellt einen ausführlichen Diagnosebericht als HA Persistent Notification. 100% read-only, kein Schreibzugriff. |
 
+Diagnosedownload, Debug-Aktion und die Einordnung von Ladegrenzen werden in
+[Diagnoseberichte](docs/DIAGNOSTIC_REPORTS.md) beschrieben.
+
 ---
 
 ## Schwellwert-Referenz

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Resolve debug exports against the actual Home Assistant configuration directory,
+  skip internal lifecycle bookkeeping, and return download URLs/errors directly
+  from the action when response data is requested. Standard integration diagnostics
+  now include cached Modbus values, byte order and freshness, plus requested,
+  missing and fresh REST fields for each polling channel. Diagnostic collection
+  does not send control writes or additional device reads.
 - Accept plausible cumulative Wh totals above 10 MWh instead of freezing them
   in the quality cache or reporting a permanently partial Modbus poll. ENERGY/Wh
   counters use a bounded 100 GWh allowance; negative/non-finite/corrupt values
