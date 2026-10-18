@@ -541,6 +541,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     }
     entry_store = hass.data[DOMAIN][entry.entry_id]
     if battery_soh_calc is not None:
+        battery_soh_calc.register_stop_listener()
         entry.async_on_unload(battery_soh_calc.cancel_pending_save)
 
     # Start the optional MQTT bridge only after it is registered in entry_store,
@@ -681,8 +682,6 @@ async def _rollback_setup(
     plenticore._rest_setup_complete = False
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
     loaded = _platforms_to_unload(entry_data)
-    if loaded:
-        await _async_unload_loaded_platforms(hass, entry, loaded)
     proxy = entry_data.get("modbus_proxy")
     if proxy:
         await _await_cleanup_step("Modbus proxy stop", proxy.stop())
@@ -711,6 +710,11 @@ async def _rollback_setup(
         await _await_cleanup_step(
             "Event coordinator shutdown", event_coordinator.async_shutdown()
         )
+    battery_soh_calc = entry_data.get("battery_soh_calc")
+    if battery_soh_calc is not None:
+        await _await_cleanup_step("Battery SoH persistence", battery_soh_calc.async_shutdown())
+    if loaded:
+        await _async_unload_loaded_platforms(hass, entry, loaded)
     await plenticore.async_unload()
     _LOGGER.warning("Rolled back partial setup for %s", entry.title)
 
@@ -854,7 +858,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
             "Modbus coordinator shutdown", modbus_coordinator.async_shutdown()
         )
 
-    # Tear down entity platforms while coordinators are stopped or idle —
+    battery_soh_calc = entry_data.get("battery_soh_calc")
+    if battery_soh_calc is not None:
+        await _await_cleanup_step("Battery SoH persistence", battery_soh_calc.async_shutdown())
+
+    # Tear down entity platforms while coordinators are stopped or idle -
     # entities call coordinator.async_remove_listener during their teardown.
     trace.log_unload_phase("entity_platforms")
     unload_ok = await _async_unload_loaded_platforms(hass, entry, loaded)

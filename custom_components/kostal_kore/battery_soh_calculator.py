@@ -19,9 +19,11 @@ import asyncio
 import logging
 import time
 from collections import deque
-from typing import Any, Final
+from collections.abc import Callable
+from typing import Any, Final, cast
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers.storage import Store
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -101,6 +103,12 @@ class BatterySohCalculator:
         )
         self._loaded: bool = False
         self._save_task: asyncio.Task[None] | None = None
+        self._save_writing = False
+        self._has_updates = False
+        self._storage_load_failed = False
+        self._remove_stop_listener: Callable[[], None] | None = None
+        self._stopped = False
+        self._shutdown_lock = asyncio.Lock()
         self._baseline_capacity_wh: float | None = None
         self._baseline_set_at: float | None = None  # unix ts
         self._current_capacity_wh: float | None = None
@@ -123,8 +131,10 @@ class BatterySohCalculator:
     async def async_load(self) -> None:
         try:
             raw = await self._store.async_load()
+            self._storage_load_failed = False
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator load failed: %s", e)
+            self._storage_load_failed = True
             raw = None
         if isinstance(raw, dict):
             self._baseline_capacity_wh = _opt_float(raw.get("baseline_capacity_wh"))
@@ -136,32 +146,99 @@ class BatterySohCalculator:
                         self._samples.append(parsed)  # type: ignore[arg-type]
         self._loaded = True
 
+    def register_stop_listener(self) -> None:
+        """Attach only after the setup owner can reach us for rollback."""
+        if self._remove_stop_listener is None:
+            self._remove_stop_listener = self._hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP, self.async_shutdown
+            )
+
     async def async_save(self) -> None:
+        if self._storage_load_failed:
+            # New telemetry cannot reconstruct an unreadable saved history.
+            # Preserve that file until a successful load on the next reload.
+            return
+        write = asyncio.create_task(self._async_save_snapshot({
+            "baseline_capacity_wh": self._baseline_capacity_wh,
+            "baseline_set_at": self._baseline_set_at,
+            "samples": [list(s) for s in self._samples],
+        }))
         try:
-            await self._store.async_save({
-                "baseline_capacity_wh": self._baseline_capacity_wh,
-                "baseline_set_at": self._baseline_set_at,
-                "samples": [list(s) for s in self._samples],
-            })
+            await asyncio.shield(write)
+        except asyncio.CancelledError:
+            # A cleanup timeout cannot stop executor-backed file I/O.
+            # The owned writer handles storage errors itself, so they cannot
+            # replace this cancellation while we wait for actual completion.
+            await write
+            raise
+
+    async def _async_save_snapshot(self, data: dict[str, Any]) -> None:
+        """Consume storage errors inside the owned task, including after cancel."""
+        try:
+            await self._store.async_save(data)
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator save failed: %s", e)
 
     def schedule_save(self) -> None:
         """Persist state with debounce (at most one save task in flight)."""
+        if self._stopped:
+            return
         if self._save_task is not None and not self._save_task.done():
             return
-        self._save_task = self._hass.async_create_task(self._debounced_save())
+        self._save_task = self._hass.async_create_background_task(
+            self._debounced_save(), "kostal_kore battery SoH save"
+        )
 
     def cancel_pending_save(self) -> None:
-        """Cancel any in-flight debounced save (call on entry unload)."""
-        if self._save_task is not None and not self._save_task.done():
+        """Cancel a sleeping debounce; async_shutdown awaits active Store I/O."""
+        if self._save_task is not None and not self._save_task.done() and not self._save_writing:
             self._save_task.cancel()
+        if self._remove_stop_listener is not None:
+            self._remove_stop_listener()
+            self._remove_stop_listener = None
+
+    async def async_shutdown(self, _event: Event | None = None) -> None:
+        """Serialize final persistence with any concurrent unload/stop handler."""
+        async with self._shutdown_lock:
+            if not self._stopped:
+                await self._async_shutdown_locked(_event)
+
+    async def _async_shutdown_locked(self, _event: Event | None) -> None:
+        """Quiesce input, finish active I/O, then flush before HA's final write."""
+        self._stopped = True
+        if _event is not None:
+            # The one-shot event listener has already removed itself.
+            self._remove_stop_listener = None
+        task = self._save_task
+        owner = cast(asyncio.Task[None], asyncio.current_task())
+        owner_cancelled = False
+        self.cancel_pending_save()
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                # A deliberately cancelled sleeper is different from the
+                # cleanup timeout cancelling this shutdown coroutine.
+                owner_cancelled = owner.cancelling() > 0
+        self._save_task = None
+        # Store can log WriteError and return normally. A completed debounce
+        # is not a durable acknowledgement: always retry accepted live state
+        # at shutdown, including updates coalesced during an older snapshot.
+        # Never-loaded/unchanged state still needs no final write.
+        if self._has_updates:
+            await self.async_save()
+        if owner_cancelled:
+            raise asyncio.CancelledError
 
     async def _debounced_save(self) -> None:
         try:
             await asyncio.sleep(_SAVE_DEBOUNCE_S)
+            # Cancelling an executor-backed Store write only cancels its
+            # waiter, not the file operation. Cleanup must await this phase.
+            self._save_writing = True
             await self.async_save()
         finally:
+            self._save_writing = False
             self._save_task = None
 
     # ---------- Update path ----------
@@ -171,6 +248,10 @@ class BatterySohCalculator:
 
         Caller schedules async_save() when this returns True.
         """
+        # The stop boundary freezes the accepted snapshot. A Modbus refresh
+        # that completes later must not mutate data after final persistence.
+        if self._stopped:
+            return False
         cap = _opt_float(data.get("battery_work_capacity"))
         if cap is None or cap <= 0 or cap > _MAX_PLAUSIBLE_CAPACITY_WH:
             return False
@@ -217,6 +298,8 @@ class BatterySohCalculator:
             self._last_sample_mono = now_mono
             changed = True
 
+        if changed:
+            self._has_updates = True
         return changed
 
     # ---------- Derived values ----------

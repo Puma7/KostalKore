@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Flush pending battery SoH baseline and samples during Home Assistant stop,
+  entry unload and setup rollback. Cancel a sleeping debounce and await an
+  already active Store write before
+  saving, detach its stop listener and reject late save scheduling. Delayed
+  saves remain debounced background work instead of holding up HA shutdown.
+  Concurrent cleanup is serialized and saves any unsaved live snapshot,
+  including updates coalesced during a previous write. Rollback clears SoH
+  state before fallible platform teardown.
+  Once shutdown starts, late producer callbacks cannot mutate the final
+  snapshot or schedule more writes.
+  A cancelled save owner also waits for its shielded Store operation to finish,
+  preventing cleanup timeouts from leaving stale executor writes detached.
+  Shutdown preserves its owner's timeout cancellation after required writes.
+  Cancellation is preserved even when the awaited Store write fails. The
+  final flush retries accepted live data even when Home Assistant has logged
+  and suppressed an earlier disk-write error; unchanged state is not written.
+  A failed storage load blocks writes until a successful reload so existing
+  history is not overwritten. Stop listeners are attached only after the
+  calculator is reachable by setup rollback.
+
 ## [3.0.5] — 2026-07-09 — Quieter Logbook (fast-changing diagnostic sensors)
 
 Two diagnostic sensors were flooding the Home Assistant **Logbook** because their
