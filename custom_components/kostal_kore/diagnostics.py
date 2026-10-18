@@ -47,6 +47,47 @@ def communication_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
         result["proxy"] = proxy.communication_diagnostics()
     return result
 
+
+def runtime_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
+    """Expose cached values and polling demand without contacting the device."""
+    result: dict[str, Any] = {}
+    modbus = entry_store.get("modbus_coordinator")
+    if modbus is not None:
+        result["modbus"] = {
+            "snapshot": dict(modbus.data or {}),
+            "endianness": modbus.client.endianness,
+            "last_update_success": modbus.last_update_success,
+            "slow_poll_stale": modbus.slow_poll_stale,
+            "slow_data_age_s": modbus.slow_data_age_s,
+            "retained_quality_addresses": sorted(modbus.client.retained_quality_addresses),
+        }
+    process = entry_store.get("process_coordinator")
+    owner = getattr(process, "_plenticore", None)
+    coordinators = getattr(owner, "_rest_coordinators", [])
+    channels: list[dict[str, Any]] = []
+    for coordinator in coordinators:
+        requested = {
+            (str(module), str(key))
+            for module, keys in coordinator._fetch.items() for key in keys
+        }
+        requested.update((str(module), str(key)) for module, key in coordinator.async_contexts())
+        data = coordinator.data or {}
+        missing = sorted(
+            (module, key) for module, key in requested
+            if key not in data.get(module, {})
+        )
+        channels.append({
+            "name": coordinator.name,
+            "source": coordinator.rest_communication_source,
+            "last_update_success": coordinator.last_update_success,
+            "communication_stale": getattr(coordinator, "communication_stale", None),
+            "requested_fields": sorted(requested),
+            "missing_fields": missing,
+            "fresh_fields": sorted(getattr(coordinator, "fresh_fields", set())),
+        })
+    result["rest_channels"] = channels
+    return async_redact_data(result, TO_REDACT)
+
 # Data redaction constants (config entry diagnostics + export_debug_bundle).
 TO_REDACT: Final[set[str]] = {
     CONF_PASSWORD,
@@ -61,6 +102,10 @@ TO_REDACT: Final[set[str]] = {
     "token",
     "secret",
     "authorization",
+    "serial_number",
+    "battery_serial",
+    "battery_serial_alt",
+    "network_name",
 }
 
 # Diagnostics constants
@@ -255,6 +300,7 @@ async def async_get_config_entry_diagnostics(
         }
 
     data["communication"] = communication_snapshot(entry_store or {})
+    data["runtime"] = runtime_snapshot(entry_store or {})
     return data
 
 
@@ -262,13 +308,13 @@ async def async_get_config_entry_diagnostics(
 # export_debug_bundle service
 # ---------------------------------------------------------------------------
 
-async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Collect a full diagnostic snapshot and write it to /config/www/."""
+async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Write diagnostic snapshots and return their download URLs to the caller."""
     bundles: list[str] = []
     errors: list[str] = []
 
     for entry_id, entry_store in hass.data.get(DOMAIN, {}).items():
-        if not isinstance(entry_store, dict):
+        if entry_id.startswith("_") or not isinstance(entry_store, dict):
             continue
         try:
             path = await _export_bundle_for_entry(hass, entry_id, entry_store)
@@ -278,7 +324,7 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             errors.append(f"{entry_id}: {err}")
 
     if bundles:
-        urls = "\n".join(f"/local/{os.path.basename(p)}" for p in bundles)
+        urls = "\n".join(f"[Download {os.path.basename(p)}](/local/{os.path.basename(p)})" for p in bundles)
         msg = f"Debug bundle(s) written:\n{urls}"
     else:
         msg = "No debug bundle written."
@@ -293,7 +339,12 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             "message": msg,
             "notification_id": "kore_debug_bundle",
         },
+        blocking=True,
     )
+    return {
+        "bundles": [{"url": f"/local/{os.path.basename(path)}"} for path in bundles],
+        "errors": errors,
+    }
 
 
 async def _export_bundle_for_entry(
@@ -318,6 +369,7 @@ async def _export_bundle_for_entry(
         "entry_id": entry_id,
         "ha_version": ha_info.get("version", "unknown"),
         "communication": communication_snapshot(entry_store),
+        "runtime": runtime_snapshot(entry_store),
     }
 
     if health_mon is not None and hasattr(health_mon, "get_health_summary"):
@@ -399,7 +451,7 @@ async def _export_bundle_for_entry(
     _now = datetime.now(tz=timezone.utc)
     ts_str = _now.strftime("%Y%m%dT%H%M%S") + f"{_now.microsecond // 1000:03d}"
     filename = f"kore_debug_{entry_id[:8]}_{ts_str}.json"
-    path = f"/config/www/{filename}"
+    path = hass.config.path("www", filename)
 
     def _write(p: str, data: dict[str, Any]) -> None:
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -420,7 +472,7 @@ def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
     async def communication_diagnostics(call: ServiceCall) -> ServiceResponse:
         return {str(entry_id): communication_snapshot(store)
                 for entry_id, store in hass.data.get(DOMAIN, {}).items()
-                if isinstance(store, dict)}
+                if not str(entry_id).startswith("_") and isinstance(store, dict)}
 
     if not hass.services.has_service(DOMAIN, "communication_diagnostics"):
         hass.services.async_register(
@@ -430,15 +482,19 @@ def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
         return
 
-    async def _handler(call: ServiceCall) -> None:
-        await _handle_export_debug_bundle(hass, call)
+    async def _handler(call: ServiceCall) -> ServiceResponse:
+        return await _handle_export_debug_bundle(hass, call)
 
-    hass.services.async_register(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, _handler)
+    hass.services.async_register(
+        DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, _handler,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
 
 def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None:
     """Unregister the service when no more KORE entries remain."""
-    if hass.data.get(DOMAIN):
+    if any(not str(key).startswith("_") and isinstance(store, dict)
+           for key, store in hass.data.get(DOMAIN, {}).items()):
         return
     hass.services.async_remove(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE)
     hass.services.async_remove(DOMAIN, "communication_diagnostics")
