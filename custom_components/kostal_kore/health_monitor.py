@@ -17,6 +17,7 @@ Monitored parameter categories:
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import deque
 from collections.abc import Mapping
@@ -386,9 +387,14 @@ class InverterHealthMonitor:
     # Data ingestion
     # ------------------------------------------------------------------
 
-    def update_from_modbus(self, data: dict[str, Any]) -> None:
+    def update_from_modbus(self, data: dict[str, Any], *, isolation_current: bool = True) -> None:
         """Feed Modbus register data into the health monitor."""
         self._total_polls += 1
+        # Each poll must establish a usable isolation observation again. Keep
+        # the previous sample for assessment, never as a substitute live value.
+        self._isolation_modbus_unavailable = True
+        self._isolation_modbus_off_scale = False
+        self._isolation_last_modbus_raw = None
         self._apply_grid_profile(data)
         total_dc = _safe_float(data.get("total_dc_power"))
         pv_active = total_dc is not None and total_dc > 5
@@ -424,6 +430,8 @@ class InverterHealthMonitor:
                 try:
                     fval = float(val)
                     if key == "isolation_resistance":
+                        if not isolation_current or not math.isfinite(fval):
+                            continue
                         self._isolation_last_modbus_raw = fval
                         expects_measurement = isolation_measurement_expected(
                             pv_active=pv_active,

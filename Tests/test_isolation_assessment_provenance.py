@@ -89,3 +89,38 @@ def test_modbus_sample_becomes_historical_in_standby_without_clearing_warning():
     assert attrs["last_recorded_ohm"] == 0
     assert attrs["current_measurement_ohm"] is None
     assert monitor.overall_health == HealthLevel.CRITICAL
+
+
+@pytest.mark.parametrize("previous", [0.0, 5_000_000.0])
+@pytest.mark.parametrize("frame,is_current", [
+    ({}, True), ({"isolation_resistance": None}, True),
+    ({"isolation_resistance": "invalid"}, True),
+    ({"isolation_resistance": float("nan")}, True),
+    ({"isolation_resistance": float("inf")}, True),
+    ({"isolation_resistance": float("-inf")}, True),
+    ({"isolation_resistance": 1_000_000.0}, False),
+])
+def test_missing_invalid_or_quality_retained_poll_is_historical(previous, frame, is_current):
+    monitor = InverterHealthMonitor()
+    monitor.update_from_modbus({
+        "isolation_resistance": previous, "total_dc_power": 1500.0, "inverter_state": 6,
+    })
+    old_level = monitor.overall_health
+    old_score = monitor.health_score
+    monitor.update_from_modbus(
+        {"total_dc_power": 1500.0, "inverter_state": 6, **frame},
+        isolation_current=is_current,
+    )
+    attrs = monitor.isolation_modbus_attributes()
+    assert monitor.get_isolation_resistance_ohm() is None
+    assert attrs["assessment_basis"] == "historical"
+    assert attrs["current_measurement_ohm"] is None
+    assert attrs["modbus_raw_ohm"] is None
+    assert attrs["last_recorded_ohm"] == previous
+    assert monitor.isolation.sample_count == 1
+    assert monitor.overall_health == old_level
+    assert monitor.health_score == old_score
+    monitor.update_from_modbus({
+        "isolation_resistance": previous, "total_dc_power": 1500.0, "inverter_state": 6,
+    })
+    assert monitor.isolation_modbus_attributes()["assessment_basis"] == "current"

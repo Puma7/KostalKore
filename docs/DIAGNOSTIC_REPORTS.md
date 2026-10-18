@@ -87,3 +87,5 @@ attributes expose `assessment_basis` (`current`, `historical`, `unavailable`),
 live measurement does not establish that an earlier low value was erroneous.
 Compare the next valid measurement during operation with the inverter's own
 diagnostics before classifying the retained assessment.
+Missing, invalid and quality-retained isolation responses also mark the live
+measurement unavailable while retaining its previous assessment.

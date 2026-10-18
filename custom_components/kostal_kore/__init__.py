@@ -449,7 +449,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         def _feed_health_data() -> None:  # pragma: no cover
             data = modbus_coordinator.data
             if data:
-                health_monitor.update_from_modbus(data)
+                from .modbus_registers import REG_ISOLATION_RESISTANCE
+                health_monitor.update_from_modbus(
+                    data,
+                    isolation_current=(modbus_coordinator.last_update_success
+                                       and REG_ISOLATION_RESISTANCE.address not in getattr(
+                                           modbus_coordinator.client, "retained_quality_addresses", ()
+                                       )),
+                )
                 degradation_tracker.update_from_modbus(data)
                 if battery_soh_calc.update_from_modbus(data):
                     battery_soh_calc.schedule_save()
