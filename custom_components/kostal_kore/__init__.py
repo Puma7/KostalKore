@@ -448,7 +448,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         @callback
         def _feed_health_data() -> None:  # pragma: no cover
             data = modbus_coordinator.data
-            if data:
+            if not data:
+                health_monitor.invalidate_isolation_measurement()
+            else:
                 from .modbus_registers import REG_ISOLATION_RESISTANCE
                 health_monitor.update_from_modbus(
                     data,

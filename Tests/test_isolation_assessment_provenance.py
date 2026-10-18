@@ -32,6 +32,7 @@ async def test_restored_low_sample_stays_historical_until_valid_poll(
     assert attrs["assessment_basis"] == "historical"
     assert attrs["sample_origin"] == "restored"
     assert attrs["current_measurement_ohm"] is None
+    assert monitor.get_isolation_resistance_ohm() is None
     warning = IsolationWarning(monitor, "synthetic", {})
     assert warning.is_on is True
 
@@ -124,3 +125,24 @@ def test_missing_invalid_or_quality_retained_poll_is_historical(previous, frame,
         "isolation_resistance": previous, "total_dc_power": 1500.0, "inverter_state": 6,
     })
     assert monitor.isolation_modbus_attributes()["assessment_basis"] == "current"
+
+
+def test_isolation_only_invalidation_preserves_other_tracker_context():
+    monitor = InverterHealthMonitor()
+    monitor.update_from_modbus({
+        "isolation_resistance": 0.0, "total_dc_power": 1500.0,
+        "inverter_state": 6, "grid_frequency": 60.0,
+        "phase1_voltage": 120.0, "phase2_voltage": 120.0, "phase3_voltage": 120.0,
+    })
+    frequency = monitor.grid_frequency.current
+    threshold = monitor.grid_frequency.critical_high
+    samples = monitor.grid_frequency.sample_count
+    polls = monitor._total_polls
+    monitor.invalidate_isolation_measurement()
+    assert monitor.get_isolation_resistance_ohm() is None
+    assert monitor.isolation_modbus_attributes()["assessment_basis"] == "historical"
+    assert monitor.grid_frequency.current == frequency
+    assert monitor.grid_frequency.critical_high == threshold
+    assert monitor.grid_frequency.sample_count == samples
+    assert monitor._total_polls == polls
+    assert monitor.overall_health == HealthLevel.CRITICAL

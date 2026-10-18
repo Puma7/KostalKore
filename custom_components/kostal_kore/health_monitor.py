@@ -352,7 +352,7 @@ class InverterHealthMonitor:
         self._inverter_state_changes: deque[HealthEvent] = deque(maxlen=100)
         self._last_inverter_state: int | None = None
         self._isolation_last_modbus_raw: float | None = None
-        self._isolation_modbus_unavailable: bool = False
+        self._isolation_modbus_unavailable: bool = True
         self._isolation_modbus_off_scale: bool = False
         self._isolation_sample_origin: str = "none"
 
@@ -387,14 +387,18 @@ class InverterHealthMonitor:
     # Data ingestion
     # ------------------------------------------------------------------
 
+    def invalidate_isolation_measurement(self) -> None:
+        """Keep the assessment but invalidate the unavailable live observation."""
+        self._isolation_modbus_unavailable = True
+        self._isolation_modbus_off_scale = False
+        self._isolation_last_modbus_raw = None
+
     def update_from_modbus(self, data: dict[str, Any], *, isolation_current: bool = True) -> None:
         """Feed Modbus register data into the health monitor."""
         self._total_polls += 1
         # Each poll must establish a usable isolation observation again. Keep
         # the previous sample for assessment, never as a substitute live value.
-        self._isolation_modbus_unavailable = True
-        self._isolation_modbus_off_scale = False
-        self._isolation_last_modbus_raw = None
+        self.invalidate_isolation_measurement()
         self._apply_grid_profile(data)
         total_dc = _safe_float(data.get("total_dc_power"))
         pv_active = total_dc is not None and total_dc > 5
