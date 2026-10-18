@@ -102,7 +102,7 @@ async def test_idle_shutdown_is_idempotent_and_load_does_not_duplicate_stop_list
         calc.schedule_save()
         assert calc._save_task is None
         assert calc._remove_stop_listener is None
-        store.async_save.assert_awaited_once()
+        store.async_save.assert_not_awaited()
 
 
 async def test_shutdown_saves_update_arriving_during_previous_snapshot_write(hass):
@@ -201,6 +201,7 @@ async def test_shutdown_awaits_active_store_write_without_cancelling_it(hass):
 @pytest.mark.parametrize("shutdown", [False, True], ids=["direct_save", "final_save"])
 async def test_cancelled_save_owner_waits_until_store_write_finishes(hass, shutdown):
     calc = BatterySohCalculator(hass, "cancelled_owner")
+    calc.update_from_modbus({"battery_work_capacity": 35000})
     entered, finish, written = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def store_write(data):
@@ -222,3 +223,58 @@ async def test_cancelled_save_owner_waits_until_store_write_finishes(hass, shutd
         assert owner.cancelled()
         assert written.is_set()
         save.assert_awaited_once()
+
+
+async def test_shutdown_propagates_owner_cancellation_after_flushing_active_writer(hass):
+    calc = BatterySohCalculator(hass, "cancelled_shutdown")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    snapshots = []
+
+    async def store_write(data):
+        snapshots.append(data)
+        if len(snapshots) == 1:
+            entered.set()
+            await finish.wait()
+
+    with patch.object(calc._store, "async_save", side_effect=store_write):
+        calc.update_from_modbus({"battery_work_capacity": 35000})
+        with patch("custom_components.kostal_kore.battery_soh_calculator._SAVE_DEBOUNCE_S", 0):
+            calc.schedule_save()
+            writer = calc._save_task
+            await entered.wait()
+            calc.update_from_modbus({"battery_work_capacity": 36000})
+            calc.schedule_save()
+            shutdown = asyncio.create_task(calc.async_shutdown())
+            await asyncio.sleep(0)
+            shutdown.cancel()
+            try:
+                await asyncio.sleep(0)
+                assert not shutdown.done()
+            finally:
+                finish.set()
+                await asyncio.gather(shutdown, writer, return_exceptions=True)
+    assert shutdown.cancelled(), "shutdown must preserve its owner's timeout cancellation"
+    assert [data["baseline_capacity_wh"] for data in snapshots] == [35000, 36000]
+
+
+@pytest.mark.parametrize("new_sample", [False, True])
+async def test_failed_load_never_overwrites_existing_history(hass, hass_storage, new_sample):
+    key = "failed_restore"
+    original = {"baseline_capacity_wh": 35000, "baseline_set_at": 1700000000,
+                "samples": [[.4, 35000, 1700000000]]}
+    hass_storage[key] = {"version": 2, "minor_version": 1, "key": key, "data": original}
+    calc = BatterySohCalculator(hass, key)
+    with patch.object(calc._store, "async_load", side_effect=OSError("transient read failure")):
+        await calc.async_load()
+    if new_sample:
+        calc.update_from_modbus({"battery_work_capacity": 36000})
+        calc.schedule_save()
+    await calc.async_shutdown()
+    assert hass_storage[key]["data"] == original
+    restored = BatterySohCalculator(hass, key)
+    try:
+        await restored.async_load()
+        assert restored.baseline_capacity_wh == 35000
+        assert restored.sample_count == 1
+    finally:
+        restored.cancel_pending_save()

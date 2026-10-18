@@ -20,7 +20,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant
@@ -104,6 +104,9 @@ class BatterySohCalculator:
         self._loaded: bool = False
         self._save_task: asyncio.Task[None] | None = None
         self._save_writing = False
+        self._revision = 0
+        self._saved_revision = 0
+        self._storage_load_failed = False
         self._remove_stop_listener: Callable[[], None] | None = None
         self._stopped = False
         self._shutdown_lock = asyncio.Lock()
@@ -129,8 +132,10 @@ class BatterySohCalculator:
     async def async_load(self) -> None:
         try:
             raw = await self._store.async_load()
+            self._storage_load_failed = False
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator load failed: %s", e)
+            self._storage_load_failed = True
             raw = None
         if isinstance(raw, dict):
             self._baseline_capacity_wh = _opt_float(raw.get("baseline_capacity_wh"))
@@ -147,12 +152,16 @@ class BatterySohCalculator:
             )
 
     async def async_save(self) -> None:
+        if self._storage_load_failed:
+            # New telemetry cannot reconstruct an unreadable saved history.
+            # Preserve that file until a successful load on the next reload.
+            return
         try:
-            write = asyncio.create_task(self._store.async_save({
+            write = asyncio.create_task(self._async_save_snapshot({
                 "baseline_capacity_wh": self._baseline_capacity_wh,
                 "baseline_set_at": self._baseline_set_at,
                 "samples": [list(s) for s in self._samples],
-            }))
+            }, self._revision))
             try:
                 await asyncio.shield(write)
             except asyncio.CancelledError:
@@ -163,6 +172,10 @@ class BatterySohCalculator:
                 raise
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator save failed: %s", e)
+
+    async def _async_save_snapshot(self, data: dict[str, Any], revision: int) -> None:
+        await self._store.async_save(data)
+        self._saved_revision = max(self._saved_revision, revision)
 
     def schedule_save(self) -> None:
         """Persist state with debounce (at most one save task in flight)."""
@@ -195,16 +208,23 @@ class BatterySohCalculator:
             # The one-shot event listener has already removed itself.
             self._remove_stop_listener = None
         task = self._save_task
+        owner = cast(asyncio.Task[None], asyncio.current_task())
+        owner_cancelled = False
         self.cancel_pending_save()
         if task is not None:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                # A deliberately cancelled sleeper is different from the
+                # cleanup timeout cancelling this shutdown coroutine.
+                owner_cancelled = owner.cancelling() > 0
         self._save_task = None
-        # A sample may have changed while the previous Store snapshot was
-        # writing. No pending task does not prove the live state is persisted.
-        await self.async_save()
+        # Include changes coalesced during the previous snapshot, but leave
+        # clean or never-loaded state alone (especially after a load error).
+        if self._revision != self._saved_revision:
+            await self.async_save()
+        if owner_cancelled:
+            raise asyncio.CancelledError
 
     async def _debounced_save(self) -> None:
         try:
@@ -274,6 +294,8 @@ class BatterySohCalculator:
             self._last_sample_mono = now_mono
             changed = True
 
+        if changed:
+            self._revision += 1
         return changed
 
     # ---------- Derived values ----------
