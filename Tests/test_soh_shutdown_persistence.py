@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.util.file import WriteError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.battery_soh_calculator import BatterySohCalculator
-from custom_components.kostal_kore.const import DOMAIN
+from custom_components.kostal_kore.const import CONF_MODBUS_ENABLED, DOMAIN
 
 
 @pytest.mark.parametrize("started", [False, True])
@@ -20,6 +21,7 @@ async def test_stop_flushes_pending_soh_before_debounce_expires(hass, started):
         store.async_save = AsyncMock()
         calc = BatterySohCalculator(hass, "shutdown")
         await calc.async_load()
+        calc.register_stop_listener()
         calc.update_from_modbus({"battery_work_capacity": 35000, "total_dc_discharge": 400})
         calc.schedule_save()
         task = calc._save_task
@@ -49,6 +51,7 @@ async def test_entry_cleanup_flushes_real_store_and_detaches_listener(hass, hass
     entry.runtime_data = runtime
     calc = BatterySohCalculator(hass, "soh_reload")
     await calc.async_load()
+    calc.register_stop_listener()
     calc.update_from_modbus({"battery_work_capacity": 35000, "total_dc_discharge": 400})
     calc.schedule_save()
     task = calc._save_task
@@ -94,8 +97,10 @@ async def test_idle_shutdown_is_idempotent_and_load_does_not_duplicate_stop_list
         store.async_save = AsyncMock()
         calc = BatterySohCalculator(hass, "idle")
         await calc.async_load()
+        calc.register_stop_listener()
         listener = calc._remove_stop_listener
         await calc.async_load()
+        calc.register_stop_listener()
         assert calc._remove_stop_listener is listener
         await calc.async_shutdown()
         await calc.async_shutdown()
@@ -136,6 +141,7 @@ async def test_rollback_closes_soh_before_platform_teardown_can_raise(hass):
     entry.add_to_hass(hass)
     calc = BatterySohCalculator(hass, "rollback_failure")
     await calc.async_load()
+    calc.register_stop_listener()
     calc.schedule_save()
     hass.data[DOMAIN] = {entry.entry_id: {"battery_soh_calc": calc}}
     integration = importlib.import_module("custom_components.kostal_kore.__init__")
@@ -278,3 +284,66 @@ async def test_failed_load_never_overwrites_existing_history(hass, hass_storage,
         assert restored.sample_count == 1
     finally:
         restored.cancel_pending_save()
+
+
+@pytest.mark.parametrize("shutdown", [False, True], ids=["direct_save", "final_save"])
+async def test_cancelled_save_preserves_cancellation_when_store_fails(hass, shutdown):
+    calc = BatterySohCalculator(hass, "cancelled_failed_write")
+    calc.update_from_modbus({"battery_work_capacity": 35000})
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def failed_write(data):
+        entered.set()
+        await finish.wait()
+        raise OSError("disk unavailable")
+
+    with patch.object(calc._store, "async_save", side_effect=failed_write):
+        owner = asyncio.create_task(calc.async_shutdown() if shutdown else calc.async_save())
+        await entered.wait()
+        owner.cancel()
+        await asyncio.sleep(0)
+        assert not owner.done()
+        finish.set()
+        await asyncio.gather(owner, return_exceptions=True)
+    assert owner.cancelled(), "a storage failure must not consume the owner's cancellation"
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+async def test_setup_failure_before_runtime_handoff_does_not_retain_stop_listener(hass, failure):
+    entry = MockConfigEntry(domain=DOMAIN, title="early failure", data={"host": "127.0.0.1"},
+                            options={CONF_MODBUS_ENABLED: True})
+    entry.add_to_hass(hass)
+    runtime = SimpleNamespace(async_setup=AsyncMock(return_value=True))
+    events = SimpleNamespace(async_config_entry_first_refresh=AsyncMock())
+    modbus = SimpleNamespace(async_setup=AsyncMock(), device_info_data={},
+                             _restore_isolation_sample=AsyncMock(side_effect=failure))
+    integration = importlib.import_module("custom_components.kostal_kore.__init__")
+    before = hass.bus.async_listeners().get(EVENT_HOMEASSISTANT_STOP, 0)
+    with patch.object(integration, "Plenticore", return_value=runtime), \
+         patch.object(integration, "EventDataUpdateCoordinator", return_value=events), \
+         patch.object(integration, "ModbusDataUpdateCoordinator", return_value=modbus), \
+         patch("custom_components.kostal_kore.battery_soc_controller.BatterySocController"):
+        for _ in range(2):
+            with pytest.raises(failure):
+                await integration.async_setup_entry(hass, entry)
+            assert hass.bus.async_listeners().get(EVENT_HOMEASSISTANT_STOP, 0) == before
+
+
+async def test_shutdown_retries_a_store_write_error_hidden_by_home_assistant(hass, hass_storage):
+    key = "suppressed_write_error"
+    original = {"baseline_capacity_wh": 34000, "baseline_set_at": 1700000000, "samples": []}
+    hass_storage[key] = {"version": 2, "minor_version": 1, "key": key, "data": original}
+    calc = BatterySohCalculator(hass, key)
+    await calc.async_load()
+    calc.update_from_modbus({"battery_work_capacity": 35000})
+    try:
+        # Store catches WriteError and returns normally: this is not a durable ack.
+        with patch.object(calc._store, "_async_write_data", side_effect=WriteError("disk full")), \
+             patch("custom_components.kostal_kore.battery_soh_calculator._SAVE_DEBOUNCE_S", 0):
+            calc.schedule_save()
+            await calc._save_task
+        assert hass_storage[key]["data"] == original
+        await calc.async_shutdown()
+        assert hass_storage[key]["data"]["baseline_capacity_wh"] == 35000
+    finally:
+        calc.cancel_pending_save()

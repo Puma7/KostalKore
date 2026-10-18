@@ -104,8 +104,7 @@ class BatterySohCalculator:
         self._loaded: bool = False
         self._save_task: asyncio.Task[None] | None = None
         self._save_writing = False
-        self._revision = 0
-        self._saved_revision = 0
+        self._has_updates = False
         self._storage_load_failed = False
         self._remove_stop_listener: Callable[[], None] | None = None
         self._stopped = False
@@ -146,6 +145,9 @@ class BatterySohCalculator:
                     if all(p is not None for p in parsed):
                         self._samples.append(parsed)  # type: ignore[arg-type]
         self._loaded = True
+
+    def register_stop_listener(self) -> None:
+        """Attach only after the setup owner can reach us for rollback."""
         if self._remove_stop_listener is None:
             self._remove_stop_listener = self._hass.bus.async_listen_once(
                 EVENT_HOMEASSISTANT_STOP, self.async_shutdown
@@ -156,26 +158,26 @@ class BatterySohCalculator:
             # New telemetry cannot reconstruct an unreadable saved history.
             # Preserve that file until a successful load on the next reload.
             return
+        write = asyncio.create_task(self._async_save_snapshot({
+            "baseline_capacity_wh": self._baseline_capacity_wh,
+            "baseline_set_at": self._baseline_set_at,
+            "samples": [list(s) for s in self._samples],
+        }))
         try:
-            write = asyncio.create_task(self._async_save_snapshot({
-                "baseline_capacity_wh": self._baseline_capacity_wh,
-                "baseline_set_at": self._baseline_set_at,
-                "samples": [list(s) for s in self._samples],
-            }, self._revision))
-            try:
-                await asyncio.shield(write)
-            except asyncio.CancelledError:
-                # A cleanup timeout cannot stop executor-backed file I/O.
-                # Keep its owner alive until the write ends, then propagate
-                # cancellation so no detached stale snapshot can finish later.
-                await write
-                raise
+            await asyncio.shield(write)
+        except asyncio.CancelledError:
+            # A cleanup timeout cannot stop executor-backed file I/O.
+            # The owned writer handles storage errors itself, so they cannot
+            # replace this cancellation while we wait for actual completion.
+            await write
+            raise
+
+    async def _async_save_snapshot(self, data: dict[str, Any]) -> None:
+        """Consume storage errors inside the owned task, including after cancel."""
+        try:
+            await self._store.async_save(data)
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator save failed: %s", e)
-
-    async def _async_save_snapshot(self, data: dict[str, Any], revision: int) -> None:
-        await self._store.async_save(data)
-        self._saved_revision = max(self._saved_revision, revision)
 
     def schedule_save(self) -> None:
         """Persist state with debounce (at most one save task in flight)."""
@@ -219,9 +221,11 @@ class BatterySohCalculator:
                 # cleanup timeout cancelling this shutdown coroutine.
                 owner_cancelled = owner.cancelling() > 0
         self._save_task = None
-        # Include changes coalesced during the previous snapshot, but leave
-        # clean or never-loaded state alone (especially after a load error).
-        if self._revision != self._saved_revision:
+        # Store can log WriteError and return normally. A completed debounce
+        # is not a durable acknowledgement: always retry accepted live state
+        # at shutdown, including updates coalesced during an older snapshot.
+        # Never-loaded/unchanged state still needs no final write.
+        if self._has_updates:
             await self.async_save()
         if owner_cancelled:
             raise asyncio.CancelledError
@@ -295,7 +299,7 @@ class BatterySohCalculator:
             changed = True
 
         if changed:
-            self._revision += 1
+            self._has_updates = True
         return changed
 
     # ---------- Derived values ----------

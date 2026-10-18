@@ -541,6 +541,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     }
     entry_store = hass.data[DOMAIN][entry.entry_id]
     if battery_soh_calc is not None:
+        battery_soh_calc.register_stop_listener()
         entry.async_on_unload(battery_soh_calc.cancel_pending_save)
 
     # Start the optional MQTT bridge only after it is registered in entry_store,

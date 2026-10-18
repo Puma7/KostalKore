@@ -21,8 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A cancelled save owner also waits for its shielded Store operation to finish,
   preventing cleanup timeouts from leaving stale executor writes detached.
   Shutdown preserves its owner's timeout cancellation after required writes.
-  Revision tracking skips clean snapshots, and a failed storage load blocks
-  writes until a successful reload so existing history is not overwritten.
+  Cancellation is preserved even when the awaited Store write fails. The
+  final flush retries accepted live data even when Home Assistant has logged
+  and suppressed an earlier disk-write error; unchanged state is not written.
+  A failed storage load blocks writes until a successful reload so existing
+  history is not overwritten. Stop listeners are attached only after the
+  calculator is reachable by setup rollback.
 
 ## [3.0.5] — 2026-07-09 — Quieter Logbook (fast-changing diagnostic sensors)
 
