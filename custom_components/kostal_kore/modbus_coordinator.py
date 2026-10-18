@@ -516,6 +516,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._health_monitor is not None and hasattr(self._health_monitor, "isolation"):
             self._health_monitor.isolation.record(iso_float)
+            self._health_monitor._isolation_sample_origin = "restored"
+            self._health_monitor.invalidate_isolation_measurement()
             _LOGGER.debug(
                 "Restored last isolation resistance: %.0f Ω", iso_float
             )

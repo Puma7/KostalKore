@@ -72,3 +72,20 @@ subscribed, including for the PV-sum sensor. Unsupported PV inputs are not
 requested. When catalog discovery fails, the physical-count fallback remains;
 if an advertised input disappears during polling, the communication fault is
 still reported. This does not replace missing PV data with zero.
+
+## Retained isolation assessments
+
+The health monitor can retain a previously recorded isolation sample, including
+one restored from storage. In standby the live Modbus reading can be unavailable
+while that retained sample still affects the health level and score.
+
+From 3.0.10, `health_summary.isolation_measurement` and the isolation-warning
+attributes expose `assessment_basis` (`current`, `historical`, `unavailable`),
+`sample_origin` (`modbus`, `restored`, `none`), `current_measurement_ohm` and
+`last_recorded_ohm`. The historical tracker value and warning are preserved;
+`kostal_display_mohm` is null when there is no current measurement. An unavailable
+live measurement does not establish that an earlier low value was erroneous.
+Compare the next valid measurement during operation with the inverter's own
+diagnostics before classifying the retained assessment.
+Missing, invalid and quality-retained isolation responses also mark the live
+measurement unavailable while retaining its previous assessment.

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Identify restored/historical isolation assessments separately from available
+  live measurements in health diagnostics and isolation-warning attributes.
+  An unavailable measurement no longer exposes a historical MOhm conversion as
+  current. Existing thresholds, retained warning decisions and health scores
+  remain unchanged until new valid device data arrives.
 - Discover PV sensor fields and calculated PV-sum subscriptions from the REST
   capability catalog instead of treating every physical DC connector as a PV
   input. Battery-assigned inputs no longer cause false partial-REST alarms.
