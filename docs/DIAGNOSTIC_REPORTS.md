@@ -44,3 +44,31 @@ controller set it, or whether the device returned it correctly. Compare a fresh
 diagnostic snapshot, inverter WebUI, management mode and recent control writes.
 Do not replace an unfamiliar value with a guessed default. A successful Modbus
 startup probe or a recovered Modbus channel does not establish REST health.
+
+## AC readings and separate control limits
+
+`AC Power` and `AC L1/L2/L3 Current/Power` use the inverter's
+`devices:local:ac` data. They describe the inverter AC connection, including its
+PV/battery conversion, rather than whole-house consumption. An idle inverter can
+therefore report zero current/power while the home imports power from the grid.
+`Grid Power`, `Home Power` and the `devices:local:powermeter` readings describe
+different measurement points; compare snapshots from the same time.
+
+`Battery Max Charge/Discharge Power (SoC Ctrl)` are local controller settings,
+initially 5,000 W (clamped to the inverter rating). They are used when that
+controller runs and are not readbacks of registers 1038/1040 or G3 1280/1282.
+The numeric Modbus entities display the actual decoded register observations.
+An inactive control mode does not prove that a readback limit is being enforced.
+
+Battery voltage reported as zero while the inverter/battery interface is idle
+does not establish zero cell voltage. Confirm battery state and availability
+with the inverter/BMS; KORE does not invent a replacement pack voltage.
+
+## PV inputs and REST communication
+
+The hardware DC-input count can include a battery connector. From 3.0.9, a
+successful REST capability catalog determines which PV modules and fields are
+subscribed, including for the PV-sum sensor. Unsupported PV inputs are not
+requested. When catalog discovery fails, the physical-count fallback remains;
+if an advertised input disappears during polling, the communication fault is
+still reported. This does not replace missing PV data with zero.

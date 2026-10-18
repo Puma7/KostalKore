@@ -138,3 +138,12 @@ being throttled by an active import cap (the 3.0.3 divergence warning already ca
 Also add a test asserting the `Inverter:ActivePowerConsumLimitation` number/switch entities are
 created when the datapoint is present (currently no coverage). Deferred only to avoid shipping a
 complex integration test without a local test runner; pick up alongside the items above.
+
+### Legacy battery-limit readbacks while native control is active
+Compare read-only feedback from 1038/1040 with the inverter WebUI, supported REST
+settings and device mode during standby and normal operation. Confirm the meaning
+and enforcement of fractional or unexpected legacy limits before changing them.
+Local SoC-controller defaults are separate configuration values; G3 1280/1282
+are separate cyclic limits. Do not infer any of these values from the others or
+replace device feedback with a guessed default. This requires real-hardware
+observations; simulator decoding checks alone cannot establish firmware behavior.

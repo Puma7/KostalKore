@@ -1639,6 +1639,13 @@ async def async_setup_entry(
                         entry.title,
                         plenticore.device_info,
                         dc_string_count,  # Pass discovered string count
+                        pv_modules=tuple(
+                            f"{MODULE_ID_PREFIX}{number}"
+                            for number in range(1, dc_string_count + 1)
+                            if not available_process_data or "P" in available_process_data.get(
+                                f"{MODULE_ID_PREFIX}{number}", {}
+                            )
+                        ),
                     )
                 )
                 continue
@@ -1696,14 +1703,18 @@ async def async_setup_entry(
                     )
                     continue
 
-                # If module is not available during initial fetch, but we know it should exist,
-                # create the sensor anyway (it will show as unavailable until data is available)
-                if module_id not in available_process_data:
+                # Physical DC inputs can be assigned to a battery. A successful
+                # REST catalog describes PV capability more precisely than the
+                # hardware input count. Retain fallback only when discovery failed.
+                if available_process_data and (
+                    module_id not in available_process_data
+                    or data_id not in available_process_data[module_id]
+                ):
                     _LOGGER.debug(
-                        "DC%d module temporarily unavailable during startup - creating %s sensor anyway",
+                        "DC%d has no advertised PV field %s - skipping sensor",
                         dc_num, data_id
                     )
-                    # Don't continue - create the sensor anyway
+                    continue
 
             filtered_descriptions.append(description)
 
@@ -2299,6 +2310,8 @@ class CalculatedPvSumSensor(
         platform_name: str,
         device_info: DeviceInfo,
         dc_string_count: int,  # Add discovered string count
+        *,
+        pv_modules: tuple[str, ...] | None = None,
     ) -> None:
         """Create a new calculated PV sum power Sensor."""
         super().__init__(coordinator)
@@ -2307,6 +2320,9 @@ class CalculatedPvSumSensor(
         self.module_id = description.module_id
         self.data_id = description.key
         self.dc_string_count = dc_string_count  # Store string count for safe fetching
+        self._pv_modules = (pv_modules if pv_modules is not None else tuple(
+            f"{MODULE_ID_PREFIX}{number}" for number in range(1, dc_string_count + 1)
+        ))
 
         self._formatter: Callable[[str], Any] = PlenticoreDataFormatter.get_method(
             description.formatter
@@ -2331,12 +2347,7 @@ class CalculatedPvSumSensor(
         total_power = 0.0
         available_pv_count = 0
 
-        # Bug #8/#9: iterate exactly dc_string_count strings using MODULE_ID_PREFIX.
-        # Earlier versions iterated all coordinator-data keys with a hardcoded
-        # "devices:local:pv" string, which (a) ignored the configured string
-        # count and (b) duplicated a magic value defined elsewhere.
-        for dc_num in range(1, self.dc_string_count + 1):
-            module_id = f"{MODULE_ID_PREFIX}{dc_num}"
+        for module_id in self._pv_modules:
             module_data = self.coordinator.data.get(module_id, {})
             if "P" in module_data:
                 try:
@@ -2359,23 +2370,23 @@ class CalculatedPvSumSensor(
             return False
 
         return any(
-            "P" in self.coordinator.data.get(f"{MODULE_ID_PREFIX}{dc_num}", {})
-            for dc_num in range(1, self.dc_string_count + 1)
+            "P" in self.coordinator.data.get(module_id, {})
+            for module_id in self._pv_modules
         )
 
     async def async_added_to_hass(self) -> None:
         """Register this entity on the Update Coordinator."""
         await super().async_added_to_hass()
         # Only fetch data for DC strings that actually exist (safe fetching)
-        _LOGGER.debug("PV Sum Sensor: Starting data fetch for %d DC strings", self.dc_string_count)
-        for dc_num in range(1, self.dc_string_count + 1):
-            self.coordinator.start_fetch_data(f"{MODULE_ID_PREFIX}{dc_num}", "P")
+        _LOGGER.debug("PV Sum Sensor: Starting data fetch for %d PV inputs", len(self._pv_modules))
+        for module_id in self._pv_modules:
+            self.coordinator.start_fetch_data(module_id, "P")
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister this entity from the Update Coordinator."""
         # Stop fetching data only for DC strings that exist
-        for dc_num in range(1, self.dc_string_count + 1):
-            self.coordinator.stop_fetch_data(f"{MODULE_ID_PREFIX}{dc_num}", "P")
+        for module_id in self._pv_modules:
+            self.coordinator.stop_fetch_data(module_id, "P")
         await super().async_will_remove_from_hass()
 
 

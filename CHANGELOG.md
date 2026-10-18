@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Discover PV sensor fields and calculated PV-sum subscriptions from the REST
+  capability catalog instead of treating every physical DC connector as a PV
+  input. Battery-assigned inputs no longer cause false partial-REST alarms.
+  A failed catalog request retains count-based fallback; loss of an advertised
+  PV input still reports a communication fault.
 - Resolve debug exports against the actual Home Assistant configuration directory,
   skip internal lifecycle bookkeeping, and return download URLs/errors directly
   from the action when response data is requested. Standard integration diagnostics
