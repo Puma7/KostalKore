@@ -144,3 +144,81 @@ async def test_rollback_closes_soh_before_platform_teardown_can_raise(hass):
             await integration._rollback_setup(hass, entry, SimpleNamespace(async_unload=AsyncMock()))
     assert calc._save_task is None
     assert calc._remove_stop_listener is None
+
+
+async def test_shutdown_quiesces_producer_before_final_snapshot_write(hass):
+    calc = BatterySohCalculator(hass, "final_snapshot")
+    calc.update_from_modbus({"battery_work_capacity": 35000})
+    snapshots, accepted = [], []
+
+    async def save_snapshot(data):
+        snapshots.append(data)
+        # A refresh started before STOP may finish while Store writes.
+        accepted.append(calc.update_from_modbus({"battery_work_capacity": 36000}))
+        calc.schedule_save()
+        await asyncio.sleep(0)
+
+    with patch.object(calc._store, "async_save", side_effect=save_snapshot):
+        await calc.async_shutdown()
+    assert accepted == [False]
+    assert calc.baseline_capacity_wh == 35000
+    assert snapshots[0]["baseline_capacity_wh"] == 35000
+    assert calc._save_task is None
+
+
+async def test_shutdown_awaits_active_store_write_without_cancelling_it(hass):
+    calc = BatterySohCalculator(hass, "active_write")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    snapshots = []
+
+    async def save_snapshot(data):
+        snapshots.append(data)
+        if len(snapshots) == 1:
+            entered.set()
+            await finish.wait()
+
+    with patch.object(calc._store, "async_save", side_effect=save_snapshot):
+        calc.update_from_modbus({"battery_work_capacity": 35000})
+        with patch("custom_components.kostal_kore.battery_soh_calculator._SAVE_DEBOUNCE_S", 0):
+            calc.schedule_save()
+            writer = calc._save_task
+            await asyncio.wait_for(entered.wait(), 1)
+            calc.update_from_modbus({"battery_work_capacity": 36000})
+            calc.schedule_save()
+            shutdown = asyncio.create_task(calc.async_shutdown())
+            try:
+                await asyncio.sleep(0)
+                assert not writer.cancelling()
+                assert not shutdown.done()
+                assert len(snapshots) == 1
+            finally:
+                finish.set()
+                await asyncio.gather(writer, shutdown, return_exceptions=True)
+    assert [data["baseline_capacity_wh"] for data in snapshots] == [35000, 36000]
+    assert calc._save_task is None
+
+
+@pytest.mark.parametrize("shutdown", [False, True], ids=["direct_save", "final_save"])
+async def test_cancelled_save_owner_waits_until_store_write_finishes(hass, shutdown):
+    calc = BatterySohCalculator(hass, "cancelled_owner")
+    entered, finish, written = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def store_write(data):
+        entered.set()
+        await finish.wait()
+        written.set()
+
+    with patch.object(calc._store, "async_save", side_effect=store_write) as save:
+        owner = asyncio.create_task(calc.async_shutdown() if shutdown else calc.async_save())
+        await asyncio.wait_for(entered.wait(), 1)
+        owner.cancel()  # Same cancellation used by the unload cleanup timeout.
+        try:
+            await asyncio.sleep(0)
+            assert not owner.done()
+            assert not written.is_set()
+        finally:
+            finish.set()
+            await asyncio.gather(owner, return_exceptions=True)
+        assert owner.cancelled()
+        assert written.is_set()
+        save.assert_awaited_once()

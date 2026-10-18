@@ -103,6 +103,7 @@ class BatterySohCalculator:
         )
         self._loaded: bool = False
         self._save_task: asyncio.Task[None] | None = None
+        self._save_writing = False
         self._remove_stop_listener: Callable[[], None] | None = None
         self._stopped = False
         self._shutdown_lock = asyncio.Lock()
@@ -147,11 +148,19 @@ class BatterySohCalculator:
 
     async def async_save(self) -> None:
         try:
-            await self._store.async_save({
+            write = asyncio.create_task(self._store.async_save({
                 "baseline_capacity_wh": self._baseline_capacity_wh,
                 "baseline_set_at": self._baseline_set_at,
                 "samples": [list(s) for s in self._samples],
-            })
+            }))
+            try:
+                await asyncio.shield(write)
+            except asyncio.CancelledError:
+                # A cleanup timeout cannot stop executor-backed file I/O.
+                # Keep its owner alive until the write ends, then propagate
+                # cancellation so no detached stale snapshot can finish later.
+                await write
+                raise
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("BatterySohCalculator save failed: %s", e)
 
@@ -166,8 +175,8 @@ class BatterySohCalculator:
         )
 
     def cancel_pending_save(self) -> None:
-        """Cancel any in-flight debounced save (call on entry unload)."""
-        if self._save_task is not None and not self._save_task.done():
+        """Cancel a sleeping debounce; async_shutdown awaits active Store I/O."""
+        if self._save_task is not None and not self._save_task.done() and not self._save_writing:
             self._save_task.cancel()
         if self._remove_stop_listener is not None:
             self._remove_stop_listener()
@@ -180,7 +189,7 @@ class BatterySohCalculator:
                 await self._async_shutdown_locked(_event)
 
     async def _async_shutdown_locked(self, _event: Event | None) -> None:
-        """Stop the debounce and flush pending data before HA's final write."""
+        """Quiesce input, finish active I/O, then flush before HA's final write."""
         self._stopped = True
         if _event is not None:
             # The one-shot event listener has already removed itself.
@@ -200,8 +209,12 @@ class BatterySohCalculator:
     async def _debounced_save(self) -> None:
         try:
             await asyncio.sleep(_SAVE_DEBOUNCE_S)
+            # Cancelling an executor-backed Store write only cancels its
+            # waiter, not the file operation. Cleanup must await this phase.
+            self._save_writing = True
             await self.async_save()
         finally:
+            self._save_writing = False
             self._save_task = None
 
     # ---------- Update path ----------
@@ -211,6 +224,10 @@ class BatterySohCalculator:
 
         Caller schedules async_save() when this returns True.
         """
+        # The stop boundary freezes the accepted snapshot. A Modbus refresh
+        # that completes later must not mutate data after final persistence.
+        if self._stopped:
+            return False
         cap = _opt_float(data.get("battery_work_capacity"))
         if cap is None or cap <= 0 or cap > _MAX_PLAUSIBLE_CAPACITY_WH:
             return False
