@@ -1,10 +1,19 @@
 # Hardware-Validation TODO — Kostal G3 firmware coexistence
 
 These follow-ups came out of cross-referencing the Kostal PLENTICORE G3 firmware
-changelog (up to FW 3.06.10, 2026-06) against KORE. They are **deferred because they
+changelog (updated through FW 3.07.03.27419, 2026-10) against KORE. They are **deferred because they
 require facts that can only be confirmed on a real inverter** (a register/REST value,
 a behavior, or an address that is not in any public doc KORE has). Each item lists the
 exact hardware question that unblocks it.
+
+The [firmware compatibility note](docs/FIRMWARE_COMPATIBILITY.md) records the
+documented 1024 correction and the backward-compatible 588 expansion. KORE does
+not select a new writer or change every model's register width on update.
+Before implementing either extension, validate generation, complete firmware
+build, scale/word layout and independent feedback on old and corrected devices.
+The same G3 release changes Smart AC-Link behavior, including mandatory use in
+MDC configurations; recheck the native-control coexistence questions below on
+that firmware rather than assuming a native mode can always be disabled.
 
 How to gather most of these: run KORE's debug bundle / diagnostics service, pull a REST
 `get_settings` dump (`pykoplenti` `get_setting_values`), and/or do a targeted Modbus scan
