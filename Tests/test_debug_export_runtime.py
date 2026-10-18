@@ -120,3 +120,20 @@ def test_runtime_snapshot_empty_caches_and_settings_channel():
     assert snapshot["rest_channels"][0]["missing_fields"] == []
     assert snapshot["rest_channels"][0]["fresh_fields"] == []
     assert snapshot["rest_channels"][0]["communication_stale"] is None
+
+
+@pytest.mark.parametrize("success,stale,expected", [
+    (True, False, [("devices:local", "Grid_P")]),
+    (True, True, []), (False, False, []), (True, None, []),
+])
+def test_settings_freshness_requires_a_successful_current_result(success, stale, expected):
+    store = _store()
+    channel = store["process_coordinator"]
+    del channel.fresh_fields
+    channel.last_update_success = success
+    channel.communication_stale = stale
+    snapshot = runtime_snapshot(store)["rest_channels"][0]
+    assert snapshot["fresh_fields"] == expected
+    assert snapshot["missing_fields"] == [
+        ("devices:local", "Dc_P"), ("devices:local:battery", "SoC"),
+    ]

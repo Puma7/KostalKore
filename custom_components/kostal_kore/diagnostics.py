@@ -76,14 +76,21 @@ def runtime_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
             (module, key) for module, key in requested
             if key not in data.get(module, {})
         )
+        stale = getattr(coordinator, "communication_stale", None)
+        fresh = getattr(coordinator, "fresh_fields", None)
+        if fresh is None:
+            # Settings polls replace data on success but can retain it after a
+            # failed request. Only a confirmed non-stale result is evidence.
+            fresh = (requested - set(missing)
+                     if coordinator.last_update_success and stale is False else set())
         channels.append({
             "name": coordinator.name,
             "source": coordinator.rest_communication_source,
             "last_update_success": coordinator.last_update_success,
-            "communication_stale": getattr(coordinator, "communication_stale", None),
+            "communication_stale": stale,
             "requested_fields": sorted(requested),
             "missing_fields": missing,
-            "fresh_fields": sorted(getattr(coordinator, "fresh_fields", set())),
+            "fresh_fields": sorted(fresh),
         })
     result["rest_channels"] = channels
     return async_redact_data(result, TO_REDACT)
@@ -343,7 +350,7 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
     )
     return {
         "bundles": [{"url": f"/local/{os.path.basename(path)}"} for path in bundles],
-        "errors": errors,
+        "errors": [error for error in errors],
     }
 
 
