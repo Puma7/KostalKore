@@ -82,6 +82,12 @@ class IsolationWarning(_HealthWarningBinarySensor):
             icon_off="mdi:flash-off",
         )
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs = super().extra_state_attributes
+        attrs.update(self._monitor.isolation_modbus_attributes())
+        return attrs
+
 
 class ControllerOverheatWarning(_HealthWarningBinarySensor):
     """Warning: controller temperature too high."""

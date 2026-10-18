@@ -353,6 +353,7 @@ class InverterHealthMonitor:
         self._isolation_last_modbus_raw: float | None = None
         self._isolation_modbus_unavailable: bool = False
         self._isolation_modbus_off_scale: bool = False
+        self._isolation_sample_origin: str = "none"
 
     @property
     def all_trackers(self) -> dict[str, ParameterTracker]:
@@ -444,6 +445,7 @@ class InverterHealthMonitor:
                                 self._isolation_modbus_unavailable = False
                                 self._isolation_modbus_off_scale = True
                                 self.isolation.record(ISOLATION_SENTINEL_OHM)
+                                self._isolation_sample_origin = "modbus"
                             else:
                                 self._isolation_modbus_unavailable = True
                                 self._isolation_modbus_off_scale = False
@@ -459,6 +461,7 @@ class InverterHealthMonitor:
                             continue
                         self._isolation_modbus_unavailable = False
                         fval = normalized_ohm
+                        self._isolation_sample_origin = "modbus"
                     tracker.record(fval)
                 except (TypeError, ValueError):
                     pass
@@ -591,7 +594,11 @@ class InverterHealthMonitor:
     def isolation_modbus_attributes(self) -> dict[str, Any]:
         """Diagnostic attributes for the isolation health sensor."""
         raw = self._isolation_last_modbus_raw
-        current = self.isolation.current
+        last_recorded = self.isolation.current
+        observed = self.get_isolation_resistance_ohm()
+        current = observed if self._isolation_sample_origin == "modbus" else None
+        basis = ("current" if current is not None else
+                 "historical" if last_recorded is not None else "unavailable")
         return {
             "modbus_raw_ohm": raw,
             "modbus_sentinel": (
@@ -600,6 +607,10 @@ class InverterHealthMonitor:
             "modbus_off_scale_high": self._isolation_modbus_off_scale,
             "modbus_measurement_unavailable": self._isolation_modbus_unavailable,
             "kostal_display_mohm": isolation_kostal_display_mohm(current),
+            "current_measurement_ohm": current,
+            "last_recorded_ohm": last_recorded,
+            "assessment_basis": basis,
+            "sample_origin": self._isolation_sample_origin,
         }
 
     def _apply_grid_profile(self, data: dict[str, Any]) -> None:
@@ -801,6 +812,7 @@ class InverterHealthMonitor:
         """Return a complete health summary for diagnostics."""
         summary: dict[str, Any] = {
             "overall_health": self.overall_health.value,
+            "isolation_measurement": self.isolation_modbus_attributes(),
             "health_score": self.health_score,
             "communication_reliability": round(self.communication_reliability, 1),
             "error_rate_per_hour": round(self.error_rate_per_hour, 1),
