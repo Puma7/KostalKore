@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Describe the Modbus success notification as a startup snapshot instead of
+  claiming that all battery registers are readable and the live link is healthy.
+  Direct users to current communication diagnostics when controls are unavailable.
+  Document the distinction between Modbus availability, local SoC-controller
+  settings and generation-specific G3 controls. Entity identities and existing
+  stale-data protection are preserved.
 - Flush pending battery SoH baseline and samples during Home Assistant stop,
   entry unload and setup rollback. Cancel a sleeping debounce and await an
   already active Store write before

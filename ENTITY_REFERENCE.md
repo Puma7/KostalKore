@@ -5,6 +5,33 @@ Hinweis: Verfügbarkeit einzelner Entities hängt von Inverter-Generation/Firmwa
 
 ---
 
+## Wenn Modbus-Regler ausgegraut sind
+
+`Battery Charge Power (Modbus)`, `Battery Max Charge Limit (Modbus)`,
+`Battery Max Discharge Limit (Modbus)` und `Active Power Setpoint (Modbus)`
+sind weiterhin vorhanden. Bei einem unvollständigen langsamen Modbus-Abruf
+(`modbus_partial`) markiert KORE die Regler dieser Gruppe als nicht verfügbar.
+Auch ein fehlender Energiewert kann das auslösen, obwohl einzelne Ladegrenzen
+erfolgreich gelesen wurden. Nach einem vollständigen erfolgreichen Abruf werden
+sie wieder verfügbar. Die Schutzprüfung verhindert, dass alte Rückmeldungen
+als aktuelle Werte erscheinen. Eine deaktivierte Entität oder eine Entität, die
+laut HA nicht mehr von der Integration bereitgestellt wird, ist ein anderer Fall.
+
+Die grüne Modbus-Startmeldung beschreibt nur die Prüfung beim Einrichten.
+Sie bestätigt weder alle Register noch den aktuellen Kommunikationszustand oder
+Schreibzugriff. Für eine Störung sind die aktuellen Kommunikationsdiagnosen
+und die Protokolle zum selben Zeitpunkt entscheidend.
+
+`Battery Max Charge Power (SoC Ctrl)` zeigt eine interne Einstellung des
+SoC-Reglers. Ein sichtbarer Wert beweist daher keinen erfolgreichen Geräteabruf.
+Die G3-Regler sind separate, generationsbezogene Einstellungen; ihre Eignung
+hängt von Modell und Firmware ab. Sie werden nicht pauschal als Ersatz für
+ausgefallene Modbus-Regler aktiviert oder zugewiesen.
+
+`Active Power Setpoint (Modbus)` begrenzt die Wechselrichter-Ausgangsleistung
+in Prozent und ist kein Batterieladeregler. Ohne zuvor von KORE gesendeten Schreibbefehl
+kann sein Wert unbekannt sein, da KORE diesen Sollwert nicht zyklisch ausliest.
+
 ## 1. Modbus-Register (Monitoring)
 
 ### 1.1 Geräte-Informationen
