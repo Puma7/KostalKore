@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Flush pending battery SoH baseline and samples during Home Assistant stop,
+  entry unload and setup rollback. Cancel and await the debounce task before
+  saving, detach its stop listener and reject late save scheduling. Delayed
+  saves remain debounced background work instead of holding up HA shutdown.
+
 ## [3.0.5] — 2026-07-09 — Quieter Logbook (fast-changing diagnostic sensors)
 
 Two diagnostic sensors were flooding the Home Assistant **Logbook** because their

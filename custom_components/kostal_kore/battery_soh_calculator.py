@@ -19,9 +19,11 @@ import asyncio
 import logging
 import time
 from collections import deque
+from collections.abc import Callable
 from typing import Any, Final
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers.storage import Store
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -101,6 +103,8 @@ class BatterySohCalculator:
         )
         self._loaded: bool = False
         self._save_task: asyncio.Task[None] | None = None
+        self._remove_stop_listener: Callable[[], None] | None = None
+        self._stopped = False
         self._baseline_capacity_wh: float | None = None
         self._baseline_set_at: float | None = None  # unix ts
         self._current_capacity_wh: float | None = None
@@ -135,6 +139,10 @@ class BatterySohCalculator:
                     if all(p is not None for p in parsed):
                         self._samples.append(parsed)  # type: ignore[arg-type]
         self._loaded = True
+        if self._remove_stop_listener is None:
+            self._remove_stop_listener = self._hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP, self.async_shutdown
+            )
 
     async def async_save(self) -> None:
         try:
@@ -148,14 +156,38 @@ class BatterySohCalculator:
 
     def schedule_save(self) -> None:
         """Persist state with debounce (at most one save task in flight)."""
+        if self._stopped:
+            return
         if self._save_task is not None and not self._save_task.done():
             return
-        self._save_task = self._hass.async_create_task(self._debounced_save())
+        self._save_task = self._hass.async_create_background_task(
+            self._debounced_save(), "kostal_kore battery SoH save"
+        )
 
     def cancel_pending_save(self) -> None:
         """Cancel any in-flight debounced save (call on entry unload)."""
         if self._save_task is not None and not self._save_task.done():
             self._save_task.cancel()
+        if self._remove_stop_listener is not None:
+            self._remove_stop_listener()
+            self._remove_stop_listener = None
+
+    async def async_shutdown(self, _event: Event | None = None) -> None:
+        """Stop the debounce and flush pending data before HA's final write."""
+        self._stopped = True
+        if _event is not None:
+            # The one-shot event listener has already removed itself.
+            self._remove_stop_listener = None
+        task = self._save_task
+        self.cancel_pending_save()
+        if task is None:
+            return
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        self._save_task = None
+        await self.async_save()
 
     async def _debounced_save(self) -> None:
         try:
