@@ -99,9 +99,12 @@ async def notify_modbus_probe_success(hass: HomeAssistant) -> None:
     await dismiss(hass, "modbus_write_failed")
     await notify(
         hass, "modbus_write_ok",
-        "Modbus-Verbindung aktiv",
-        "Modbus TCP Verbindung zum Inverter funktioniert.\n"
-        "Batterie-Register sind lesbar (Min SoC, Max SoC, Ladeleistung).\n\n"
+        "Modbus-Startprüfung erfolgreich",
+        "Die Modbus-Verbindung wurde beim Einrichten bestätigt.\n\n"
+        "Diese Startprüfung bestätigt weder einen vollständigen aktuellen "
+        "Registerabruf noch Schreibzugriff. Spätere Kommunikationsstörungen "
+        "können die Modbus-Entitäten unverfügbar machen. Den aktuellen Zustand "
+        "zeigt die Kommunikationsdiagnose.\n\n"
         "**Für Schreib-Zugriff** (Ladeleistung setzen, SoC-Limits ändern) muss "
         "im Inverter-WebUI die Einstellung 'Extern über Protokoll (Modbus TCP)' "
         "unter Service → Batterie-Einstellungen aktiv sein.",

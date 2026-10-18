@@ -75,7 +75,7 @@ async def test_notify_modbus_probe_helpers() -> None:
     )
     notify_mock.assert_has_awaits(
         [
-            call(hass, "modbus_write_ok", "Modbus-Verbindung aktiv", ANY, level="info"),
+            call(hass, "modbus_write_ok", "Modbus-Startprüfung erfolgreich", ANY, level="info"),
             call(hass, "modbus_write_failed", "Modbus-Batteriesteuerung nicht aktiviert", ANY, level="warning"),
         ],
         any_order=False,
