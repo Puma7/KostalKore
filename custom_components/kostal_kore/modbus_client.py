@@ -40,6 +40,7 @@ from .modbus_registers import (
     Access,
     DataType,
     ModbusRegister,
+    RegisterGroup,
 )
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -53,6 +54,9 @@ MAX_RETRIES: Final[int] = 2  # reduced from 5 – each reconnect takes ~10s; 2 r
 UNAVAILABLE_STRIKES_THRESHOLD: Final[int] = 3
 UNAVAILABLE_RESET_INTERVAL: Final[int] = 120
 OUTLIER_ABS_LIMIT_DEFAULT: Final[float] = 10_000_000.0
+# Accumulated Wh totals routinely exceed 10 MWh. Use the existing generation-
+# energy allowance for every Wh counter, without relaxing power/capacity guards.
+OUTLIER_ENERGY_WH_LIMIT: Final[float] = 100_000_000_000.0
 
 # SunSpec standard models end at address ~480 (Model 65535 end marker).
 # Registers below this threshold honor the byte_order setting for UINT32/SINT32.
@@ -73,7 +77,6 @@ OUTLIER_EXEMPT_ADDRESSES: Final[frozenset[int]] = frozenset({
 # Per-register absolute outlier limits that override the default.
 OUTLIER_ABS_LIMIT_OVERRIDES: Final[dict[int, float]] = {
     120: 500_000_000.0,    # isolation_resistance – healthy systems read 50-100 MΩ (up to 500 MΩ)
-    577: 100_000_000_000.0,  # generation_energy – lifetime Wh can reach GWh range
     104: 100_000_000.0,    # em_state – status register, not a measurement
     144: 10_000_000_000.0, # worktime – lifetime counter in seconds (>300 years headroom)
 }
@@ -498,23 +501,25 @@ class KostalModbusClient:
                     f"Register {register.name} returned NaN/Infinity"
                 )
             if register.address not in OUTLIER_EXEMPT_ADDRESSES:
+                energy_counter = register.group == RegisterGroup.ENERGY and register.unit == "Wh"
+                default_limit = OUTLIER_ENERGY_WH_LIMIT if energy_counter else OUTLIER_ABS_LIMIT_DEFAULT
                 abs_limit = OUTLIER_ABS_LIMIT_OVERRIDES.get(
-                    register.address, OUTLIER_ABS_LIMIT_DEFAULT
+                    register.address, default_limit
                 )
-                if abs(numeric_value) > abs_limit:
+                negative_energy = energy_counter and numeric_value < 0
+                if negative_energy or abs(numeric_value) > abs_limit:
                     previous = self._last_good_values.get(register.address)
                     if previous is not None and self._outlier_policy == "keep_last":
                         _LOGGER.debug(
-                            "Register %s outlier %s exceeds abs limit, keeping %s",
+                            "Register %s outlier %s is outside its valid range, keeping %s",
                             register.name,
                             numeric_value,
                             previous,
                         )
                         self.retained_quality_addresses.add(register.address)
                         return previous
-                    raise ModbusReadError(
-                        f"Register {register.name} value {numeric_value} exceeds absolute outlier limit"
-                    )
+                    reason = "is negative for a Wh counter" if negative_energy else "exceeds absolute outlier limit"
+                    raise ModbusReadError(f"Register {register.name} value {numeric_value} {reason}")
 
         return value
 

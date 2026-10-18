@@ -519,7 +519,8 @@ This integration uses the Kostal Plenticore local API. For detailed API informat
 - **Address 533**: Active Power Setpoint (%) (R/W)
 - **Address 583**: Reactive Power Setpoint (%) (R/W)
 - **Address 585**: Delta-cos φ Setpoint (R/W)
-- **Addresses 1024-1044**: Battery management controls (R/W)
+- **Address 1024**: Write-only signed/scaled AC battery setpoint (not enabled by KORE); **1025**: read-only scale factor. See [firmware compatibility](docs/FIRMWARE_COMPATIBILITY.md) for the documented G3 fix and current control-path policy.
+- **Addresses 1026-1044**: Read/write battery setpoints and limits, subject to model/firmware support.
 
 ### Data Formats
 - **U16**: Unsigned 16-bit integer (1 register)

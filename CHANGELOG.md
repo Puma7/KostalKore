@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Accept plausible cumulative Wh totals above 10 MWh instead of freezing them
+  in the quality cache or reporting a permanently partial Modbus poll. ENERGY/Wh
+  counters use a bounded 100 GWh allowance; negative/non-finite/corrupt values
+  remain invalid, with retained values explicitly marked stale. Existing power
+  and capacity limits remain unchanged.
+- Document the firmware-specific register-1024 correction and register-588
+  compatibility in KOSTAL G3 release 3.07.03.27419. Current charging paths remain
+  available to older/unknown firmware without enabling the unused 1024 path.
 - Describe the Modbus success notification as a startup snapshot instead of
   claiming that all battery registers are readable and the live link is healthy.
   Direct users to current communication diagnostics when controls are unavailable.
