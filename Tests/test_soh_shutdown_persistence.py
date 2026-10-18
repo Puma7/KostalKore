@@ -102,4 +102,45 @@ async def test_idle_shutdown_is_idempotent_and_load_does_not_duplicate_stop_list
         calc.schedule_save()
         assert calc._save_task is None
         assert calc._remove_stop_listener is None
-        store.async_save.assert_not_awaited()
+        store.async_save.assert_awaited_once()
+
+
+async def test_shutdown_saves_update_arriving_during_previous_snapshot_write(hass):
+    calc = BatterySohCalculator(hass, "inflight")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    snapshots = []
+
+    async def save_snapshot(data):
+        snapshots.append(data)
+        if len(snapshots) == 1:
+            entered.set()
+            await finish.wait()
+
+    with patch.object(calc._store, "async_save", side_effect=save_snapshot):
+        calc.update_from_modbus({"battery_work_capacity": 35000})
+        with patch("custom_components.kostal_kore.battery_soh_calculator._SAVE_DEBOUNCE_S", 0):
+            calc.schedule_save()
+            task = calc._save_task
+            await entered.wait()
+            calc.update_from_modbus({"battery_work_capacity": 36000})
+            calc.schedule_save()  # Coalesced while the old snapshot is writing.
+            finish.set()
+            await task
+        assert calc._save_task is None
+        await asyncio.gather(calc.async_shutdown(), calc.async_shutdown())
+    assert [data["baseline_capacity_wh"] for data in snapshots] == [35000, 36000]
+
+
+async def test_rollback_closes_soh_before_platform_teardown_can_raise(hass):
+    entry = MockConfigEntry(domain=DOMAIN, title="failed rollback")
+    entry.add_to_hass(hass)
+    calc = BatterySohCalculator(hass, "rollback_failure")
+    await calc.async_load()
+    calc.schedule_save()
+    hass.data[DOMAIN] = {entry.entry_id: {"battery_soh_calc": calc}}
+    integration = importlib.import_module("custom_components.kostal_kore.__init__")
+    with patch.object(integration, "_async_unload_loaded_platforms", AsyncMock(side_effect=RuntimeError("platform teardown"))):
+        with pytest.raises(RuntimeError, match="platform teardown"):
+            await integration._rollback_setup(hass, entry, SimpleNamespace(async_unload=AsyncMock()))
+    assert calc._save_task is None
+    assert calc._remove_stop_listener is None

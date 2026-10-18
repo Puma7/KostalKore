@@ -105,6 +105,7 @@ class BatterySohCalculator:
         self._save_task: asyncio.Task[None] | None = None
         self._remove_stop_listener: Callable[[], None] | None = None
         self._stopped = False
+        self._shutdown_lock = asyncio.Lock()
         self._baseline_capacity_wh: float | None = None
         self._baseline_set_at: float | None = None  # unix ts
         self._current_capacity_wh: float | None = None
@@ -173,6 +174,12 @@ class BatterySohCalculator:
             self._remove_stop_listener = None
 
     async def async_shutdown(self, _event: Event | None = None) -> None:
+        """Serialize final persistence with any concurrent unload/stop handler."""
+        async with self._shutdown_lock:
+            if not self._stopped:
+                await self._async_shutdown_locked(_event)
+
+    async def _async_shutdown_locked(self, _event: Event | None) -> None:
         """Stop the debounce and flush pending data before HA's final write."""
         self._stopped = True
         if _event is not None:
@@ -180,13 +187,14 @@ class BatterySohCalculator:
             self._remove_stop_listener = None
         task = self._save_task
         self.cancel_pending_save()
-        if task is None:
-            return
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         self._save_task = None
+        # A sample may have changed while the previous Store snapshot was
+        # writing. No pending task does not prove the live state is persisted.
         await self.async_save()
 
     async def _debounced_save(self) -> None:
