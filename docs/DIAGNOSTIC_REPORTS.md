@@ -109,4 +109,10 @@ Read-only and invalid number commands raise validation errors without writing.
 The final coordinator refresh must also retain the original connection
 generation and a healthy connected coordinator. A reconnect, disconnection or
 failed refresh invalidates the earlier confirmation and cannot start a G3
-keepalive lease. The next command may establish a new confirmation.
+keepalive lease. The refreshed register must still match the command and have
+current quality: a newer different, missing, non-finite or retained reading
+also invalidates confirmation. The next command may establish a new confirmation.
+For monitored controls the poll is awaited directly, bypassing request debounce;
+the per-register fresh observation is used rather than a merged slow-poll cache
+or failures of unrelated registers. Non-monitored readable controls still use
+their direct readback, and write-only register 533 retains its documented exception.
