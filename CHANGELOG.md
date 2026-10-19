@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Fail readable Modbus number commands when bounded readback verification cannot
+  confirm the value, rather than acknowledging an ignored command. Preserve the
+  write-only curtailment exception and cyclic keepalive confirmation. Read-only
+  and invalid commands now raise a service validation error.
 - Identify restored/historical isolation assessments separately from available
   live measurements in health diagnostics and isolation-warning attributes.
   An unavailable measurement no longer exposes a historical MOhm conversion as

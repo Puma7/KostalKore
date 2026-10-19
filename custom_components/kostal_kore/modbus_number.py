@@ -25,6 +25,7 @@ from homeassistant.components.number import (
     NumberMode,
 )
 from homeassistant.const import EntityCategory, UnitOfPower
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -53,6 +54,8 @@ G3_KEEPALIVE_DIVISOR: Final[float] = 2.0
 G3_KEEPALIVE_MIN_SECONDS: Final[int] = 15
 G3_KEEPALIVE_MAX_SECONDS: Final[int] = 300
 G3_DEFAULT_FALLBACK_SECONDS: Final[int] = 60
+READBACK_ATTEMPTS: Final[int] = 3
+READBACK_RETRY_SECONDS: Final[float] = 0.2
 
 G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_G3_MAX_CHARGE.name,
@@ -383,12 +386,12 @@ class ModbusNumberEntity(
                 "Write to %s blocked: inverter is not in 'External via MODBUS' mode",
                 self._register.name,
             )
-            return
+            raise ServiceValidationError("Inverter is not in external Modbus control mode")
         if math.isnan(value) or math.isinf(value):
             _LOGGER.error(
                 "Refusing to write NaN/Infinity to %s", self._register.name
             )
-            return
+            raise ServiceValidationError("Modbus number value must be finite")
         if not (self._attr_native_min_value <= value <= self._attr_native_max_value):
             _LOGGER.error(
                 "Value %s out of range [%s, %s] for %s",
@@ -397,7 +400,7 @@ class ModbusNumberEntity(
                 self._attr_native_max_value,
                 self._register.name,
             )
-            return
+            raise ServiceValidationError("Modbus number value is outside its allowed range")
 
         _LOGGER.info(
             "Writing %s = %s via Modbus (register %d)",
@@ -412,25 +415,38 @@ class ModbusNumberEntity(
         write_generation = self.coordinator.client.connection_generation
 
         verified = False
-        try:
-            readback = await self.coordinator.client.read_register(self._register)
-            observed = float(readback)
-            tolerance = self._attr_native_step if value != 0 else 0
-            retained: set[int] = getattr(self.coordinator.client, "retained_quality_addresses", set())
-            verified = self.coordinator.client.connection_generation == write_generation and self._register.address not in retained and math.isfinite(observed) and abs(observed - value) <= tolerance
-            if not verified:
-                _LOGGER.warning(
-                    "Read-back mismatch for %s: wrote %s, read %s",
-                    self._register.name, value, readback,
-                )
-        except Exception:
-            _LOGGER.debug("Read-back verification skipped for %s", self._register.name)
+        if self._register.name != CURTAILMENT_REGISTER_NAME:
+            for attempt in range(READBACK_ATTEMPTS):
+                if attempt:
+                    await asyncio.sleep(READBACK_RETRY_SECONDS)
+                try:
+                    readback = await self.coordinator.client.read_register(self._register)
+                    observed = float(readback)
+                    tolerance = self._attr_native_step if value != 0 else 0
+                    retained: set[int] = getattr(self.coordinator.client, "retained_quality_addresses", set())
+                    verified = self.coordinator.client.connection_generation == write_generation and self._register.address not in retained and math.isfinite(observed) and abs(observed - value) <= tolerance
+                    if verified:
+                        break
+                    if attempt == READBACK_ATTEMPTS - 1:
+                        _LOGGER.warning(
+                            "Read-back mismatch for %s: wrote %s, read %s",
+                            self._register.name, value, readback,
+                        )
+                except Exception:
+                    _LOGGER.debug("Read-back verification failed for %s", self._register.name)
 
         if self._register.name in G3_CYCLIC_REGISTERS and not verified:
             notify_control_lease_lost(getattr(self, "hass", None),
                                       getattr(self.coordinator, "_communication_entry_id", ""),
                                       control=f"modbus_{self._register.name}")
             raise ModbusClientError("Cyclic limit readback is unconfirmed; keepalive was not started")
+
+        if not verified and self._register.name != CURTAILMENT_REGISTER_NAME:
+            # A transport acknowledgement does not establish that the inverter
+            # accepted the limit. Publish a device refresh, then fail the call so
+            # controllers cannot treat an ignored command as an applied limit.
+            await self.coordinator.async_request_refresh()
+            raise ModbusClientError(f"Readback is unconfirmed for {self._register.name}")
 
         await self.coordinator.async_request_refresh()
 

@@ -1,0 +1,85 @@
+"""A readable Modbus limit must not acknowledge an unconfirmed command."""
+from unittest.mock import AsyncMock
+
+import pytest
+from homeassistant.exceptions import ServiceValidationError
+
+from custom_components.kostal_kore import modbus_number as mod
+from Tests.test_wave9_modbus_number_coverage import _coord, _device_info
+
+
+def entity(coord, *, read_only=False):
+    return mod.ModbusNumberEntity(
+        coordinator=coord, register=mod.REG_BAT_MAX_CHARGE_LIMIT,
+        name="Synthetic limit", icon="mdi:battery", min_value=0,
+        max_value=10000, step=100, unit="W", device_class=None,
+        entity_category=None, entry_id="synthetic", device_info=_device_info(),
+        read_only=read_only,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("feedback", [8000, float("nan"), float("inf"), None])
+async def test_unconfirmed_readable_limit_fails_the_service(feedback):
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=feedback)
+    e = entity(coord)
+    with pytest.raises(mod.ModbusClientError, match="Readback is unconfirmed"):
+        await e.async_set_native_value(2000)
+    coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
+    coord.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_confirmed_readable_limit_succeeds():
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=2000)
+    await entity(coord).async_set_native_value(2000)
+    coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
+    coord.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delayed_device_feedback_can_confirm_within_bounded_retry():
+    coord = _coord()
+    coord.client.read_register = AsyncMock(side_effect=[8000, 2000])
+    await entity(coord).async_set_native_value(2000)
+    assert coord.client.read_register.await_count == 2
+    coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
+    coord.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quality", ["retained", "reconnected"])
+async def test_matching_but_untrusted_feedback_cannot_confirm(quality):
+    coord = _coord()
+    coord.client.retained_quality_addresses = (
+        {mod.REG_BAT_MAX_CHARGE_LIMIT.address} if quality == "retained" else set()
+    )
+
+    async def read(_register):
+        if quality == "reconnected":
+            coord.client.connection_generation = 2
+        return 2000
+
+    coord.client.read_register = AsyncMock(side_effect=read)
+    with pytest.raises(mod.ModbusClientError, match="unconfirmed"):
+        await entity(coord).async_set_native_value(2000)
+    coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1, 10001])
+async def test_invalid_commands_raise_without_writing(value):
+    coord = _coord()
+    with pytest.raises(ServiceValidationError):
+        await entity(coord).async_set_native_value(value)
+    coord.async_write_register.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_read_only_command_is_not_reported_as_success():
+    coord = _coord()
+    with pytest.raises(ServiceValidationError, match="external Modbus"):
+        await entity(coord, read_only=True).async_set_native_value(2000)
+    coord.async_write_register.assert_not_awaited()

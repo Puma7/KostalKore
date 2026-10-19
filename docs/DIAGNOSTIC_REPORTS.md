@@ -89,3 +89,15 @@ Compare the next valid measurement during operation with the inverter's own
 diagnostics before classifying the retained assessment.
 Missing, invalid and quality-retained isolation responses also mark the live
 measurement unavailable while retaining its previous assessment.
+
+## Control acknowledgements
+
+From 3.0.11 a readable Modbus number requires matching, finite device feedback
+within three read attempts (0.2 seconds between attempts). Retained-quality
+values or a changed connection generation cannot confirm the command. An
+unconfirmed ordinary control refreshes observations and raises an error; G3
+cyclic controls retain their existing no-keepalive-on-failure protection.
+Register 533 is documented as write-only and has no readable confirmation.
+A Modbus transport acknowledgement / audit `ok` alone is not evidence that
+battery charging follows the requested power. Compare live telemetry as well.
+Read-only and invalid number commands raise validation errors without writing.

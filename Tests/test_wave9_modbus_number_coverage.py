@@ -208,14 +208,15 @@ async def test_modbus_number_entity_paths() -> None:
         device_info=_device_info(),
         read_only=True,
     )
-    await read_only.async_set_native_value(10)
+    with pytest.raises(mod.ServiceValidationError):
+        await read_only.async_set_native_value(10)
     coord.async_write_register.assert_not_awaited()
 
     coord.data = {mod.REG_G3_MAX_CHARGE.name: "1", mod.REG_G3_FALLBACK_TIME.name: "30"}
     coord.async_write_register.reset_mock()
-    await entity.async_set_native_value(float("nan"))
-    await entity.async_set_native_value(float("inf"))
-    await entity.async_set_native_value(5000)
+    for invalid in (float("nan"), float("inf"), 5000):
+        with pytest.raises(mod.ServiceValidationError):
+            await entity.async_set_native_value(invalid)
     coord.async_write_register.assert_not_awaited()
 
     coord.client.read_register = AsyncMock(return_value=300.0)
@@ -461,5 +462,6 @@ async def test_active_power_setpoint_write_delegates_to_coordinator() -> None:
     blocked_coord = _coord(data={})
     blocked = _curtail_entity(blocked_coord)
     blocked._read_only = True
-    await blocked.async_set_native_value(50)
+    with pytest.raises(mod.ServiceValidationError):
+        await blocked.async_set_native_value(50)
     blocked_coord.async_write_register.assert_not_awaited()
