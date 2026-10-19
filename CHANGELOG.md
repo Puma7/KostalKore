@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Export allowlisted cached inverter firmware, battery management mode and
+  finite numeric battery-control settings with per-field freshness. Exporting
+  does not change control settings or add polling demand.
+
 ### Fixed
 - Keep safety state/icon property reads side-effect free. One active alert no
   longer emits duplicate warnings every time HA renders the state; monitor

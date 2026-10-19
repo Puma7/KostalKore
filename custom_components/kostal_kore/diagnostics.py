@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import time
+from collections.abc import Mapping
 from dataclasses import asdict  # noqa: F401
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Final
@@ -28,6 +30,28 @@ from .helper import parse_modbus_exception
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
+
+DEVICE_CONTEXT_FIELDS: Final[tuple[str, ...]] = (
+    "sw_version", "product_name", "inverter_state", "inverter_max_power",
+    "battery_mgmt_mode", "num_pv_strings", "num_bidirectional",
+)
+CONTROL_SETTING_FIELDS: Final[tuple[str, ...]] = (
+    "Battery:MinSoc", "Battery:MinSocRel", "Battery:ManualCharge", "Battery:Strategy",
+    "Battery:SmartBatteryControl:Enable", "Battery:TimeControl:Enable", "EnergyMgmt:AcStorage",
+    "EnergyMgmt:BatCtrl:DisabelDischarge", "Battery:ExternControl:AcPowerAbs",
+    "Battery:ExternControl:MaxChargePowerAbs", "Battery:ExternControl:MaxDischargePowerAbs",
+    "Battery:ExternControl:MinSocRel", "Battery:ExternControl:MaxSocRel",
+    "Battery:Limit:Charge_P", "Battery:Limit:Discharge_P",
+)
+
+
+def _numeric_setting(value: Any) -> float | None:
+    """Export only finite numeric control settings, never arbitrary strings."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def communication_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
@@ -53,7 +77,14 @@ def runtime_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     modbus = entry_store.get("modbus_coordinator")
     if modbus is not None:
+        device_info = getattr(modbus, "device_info_data", {})
+        if not isinstance(device_info, Mapping):
+            device_info = {}
         result["modbus"] = {
+            "device_info_cached": {
+                key: device_info[key] for key in DEVICE_CONTEXT_FIELDS
+                if key in device_info and isinstance(device_info[key], (str, int, float, bool))
+            },
             "snapshot": dict(modbus.data or {}),
             "endianness": modbus.client.endianness,
             "last_update_success": modbus.last_update_success,
@@ -91,6 +122,11 @@ def runtime_snapshot(entry_store: dict[str, Any]) -> dict[str, Any]:
             "requested_fields": sorted(requested),
             "missing_fields": missing,
             "fresh_fields": sorted(fresh),
+            "control_settings": {
+                key: {"value": _numeric_setting(data[DEVICES_LOCAL_MODULE][key]),
+                      "fresh": (DEVICES_LOCAL_MODULE, key) in fresh}
+                for key in CONTROL_SETTING_FIELDS if key in data.get(DEVICES_LOCAL_MODULE, {})
+            },
         })
     result["rest_channels"] = channels
     return async_redact_data(result, TO_REDACT)
