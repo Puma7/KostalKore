@@ -105,3 +105,22 @@ Register 533 is documented as write-only and has no readable confirmation.
 A Modbus transport acknowledgement / audit `ok` alone is not evidence that
 battery charging follows the requested power. Compare live telemetry as well.
 Read-only and invalid number commands raise validation errors without writing.
+
+The final coordinator refresh must also retain the original connection
+generation and a healthy connected coordinator. A reconnect, disconnection or
+failed refresh invalidates the earlier confirmation and cannot start a G3
+keepalive lease. The refreshed register must still match the command and have
+current quality: a newer different, missing, non-finite or retained reading
+also invalidates confirmation. The next command may establish a new confirmation.
+For monitored controls the poll is awaited directly, bypassing request debounce;
+the per-register fresh observation is used rather than a merged slow-poll cache
+or failures of unrelated registers. Non-monitored readable controls still use
+their direct readback, and write-only register 533 retains its documented exception.
+
+## Safety event logging
+
+From 3.0.12 reading the PV System Safety state, icon or attributes does not
+create additional warning messages. The safety monitor still logs new and
+escalated alerts. Risk levels, unsafe state, thresholds and retained alerts
+are unchanged. A repeatedly rendered alert is not a series of new events;
+use its category, creation time and live measurements when investigating it.

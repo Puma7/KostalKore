@@ -32,6 +32,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .modbus_client import ModbusClientError  # noqa: F401
 from .modbus_coordinator import SLOW_GROUPS, ModbusDataUpdateCoordinator
 from .modbus_registers import (
+    CONTROL_READBACK_REGISTERS,
     REG_ACTIVE_POWER_SETPOINT,
     REG_BAT_CHARGE_DC_ABS_POWER,
     REG_BAT_MAX_CHARGE_LIMIT,
@@ -460,7 +461,32 @@ class ModbusNumberEntity(
                 await self.coordinator.async_request_refresh()
             raise ModbusClientError(f"Readback is unconfirmed for {self._register.name}")
 
-        await self.coordinator.async_request_refresh()
+        # A debounced request may return before the actual poll. Monitored
+        # controls need the completed poll and its per-register fresh cache.
+        await self.coordinator.async_refresh()
+
+        refresh_confirmed = True
+        if self._register in CONTROL_READBACK_REGISTERS:
+            try:
+                newest = float(self.coordinator.proxy_cache_data.get(self._register.name))
+                refresh_confirmed = math.isfinite(newest) and (
+                    newest == 0 if value == 0 else
+                    math.isclose(newest, value, rel_tol=1e-6, abs_tol=1e-6)
+                )
+            except (TypeError, ValueError):
+                refresh_confirmed = False
+            retained = getattr(self.coordinator.client, "retained_quality_addresses", set())
+            if self._register.address in retained:
+                refresh_confirmed = False
+
+        if (self.coordinator.client.connection_generation != write_generation
+                or not self.coordinator.client.connected
+                or not self.coordinator.last_update_success or not refresh_confirmed):
+            if self._register.name in G3_CYCLIC_REGISTERS:
+                notify_control_lease_lost(getattr(self, "hass", None),
+                                          getattr(self.coordinator, "_communication_entry_id", ""),
+                                          control=f"modbus_{self._register.name}")
+            raise ModbusClientError("Control confirmation was invalidated during refresh")
 
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)

@@ -1,5 +1,5 @@
 """A readable Modbus limit must not acknowledge an unconfirmed command."""
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.exceptions import ServiceValidationError
@@ -35,7 +35,7 @@ async def test_unconfirmed_readable_limit_fails_the_service(feedback):
 
 @pytest.mark.asyncio
 async def test_confirmed_readable_limit_succeeds():
-    coord = _coord()
+    coord = _coord(data={mod.REG_BAT_MAX_CHARGE_LIMIT.name: 2000})
     coord.client.read_register = AsyncMock(return_value=2000)
     await entity(coord).async_set_native_value(2000)
     coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
@@ -59,7 +59,7 @@ async def test_an_ignored_single_step_is_not_confirmation(register, requested, o
 
 @pytest.mark.asyncio
 async def test_float32_rounding_is_not_mistaken_for_a_refused_write():
-    coord = _coord()
+    coord = _coord(data={mod.REG_BAT_MAX_CHARGE_LIMIT.name: 2000.0999755859375})
     coord.client.read_register = AsyncMock(return_value=2000.0999755859375)
     await entity(coord).async_set_native_value(2000.1)
     coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000.1)
@@ -76,8 +76,52 @@ async def test_a_terminal_client_read_failure_is_not_retried_or_refreshed():
 
 
 @pytest.mark.asyncio
-async def test_delayed_device_feedback_can_confirm_within_bounded_retry():
+@pytest.mark.parametrize("failure", ["reconnect", "offline", "refresh_failed"])
+@pytest.mark.parametrize("cyclic", [False, True])
+async def test_refresh_cannot_reuse_confirmation_from_an_invalidated_connection(failure, cyclic):
     coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=2000)
+    e = entity(coord)
+    if cyclic:
+        e._register = mod.REG_G3_MAX_CHARGE
+    e._start_keepalive = MagicMock()
+
+    async def invalidate():
+        if failure == "reconnect":
+            coord.client.connection_generation += 1
+        elif failure == "offline":
+            coord.client.connected = False
+        else:
+            coord.last_update_success = False
+
+    coord.async_request_refresh = AsyncMock(side_effect=invalidate)
+    coord.async_refresh = coord.async_request_refresh
+    with pytest.raises(mod.ModbusClientError, match="invalidated during refresh"):
+        await e.async_set_native_value(2000)
+    coord.async_write_register.assert_awaited_once_with(e._register, 2000)
+    e._start_keepalive.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fresh_target_can_confirm_despite_unrelated_slow_poll_failures():
+    coord = _coord(data={mod.REG_BAT_MAX_CHARGE_LIMIT.name: 2000})
+    coord.slow_poll_stale = True
+    coord.client.read_register = AsyncMock(return_value=2000)
+    await entity(coord).async_set_native_value(2000)
+    coord.async_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_newer_near_zero_value_cannot_confirm_a_stop():
+    coord = _coord(data={mod.REG_BAT_MAX_CHARGE_LIMIT.name: 0.0000001})
+    coord.client.read_register = AsyncMock(return_value=0)
+    with pytest.raises(mod.ModbusClientError, match="invalidated during refresh"):
+        await entity(coord).async_set_native_value(0)
+
+
+@pytest.mark.asyncio
+async def test_delayed_device_feedback_can_confirm_within_bounded_retry():
+    coord = _coord(data={mod.REG_BAT_MAX_CHARGE_LIMIT.name: 2000})
     coord.client.read_register = AsyncMock(side_effect=[8000, 2000])
     await entity(coord).async_set_native_value(2000)
     assert coord.client.read_register.await_count == 2
@@ -119,3 +163,27 @@ async def test_read_only_command_is_not_reported_as_success():
     with pytest.raises(ServiceValidationError, match="external Modbus"):
         await entity(coord, read_only=True).async_set_native_value(2000)
     coord.async_write_register.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("feedback", [1900, None, float("nan"), "invalid", "retained", "stale"])
+@pytest.mark.parametrize("cyclic", [False, True])
+async def test_newer_refresh_must_still_confirm_the_requested_limit(feedback, cyclic):
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=2000)
+    e = entity(coord)
+    if cyclic:
+        e._register = mod.REG_G3_MAX_CHARGE
+    e._start_keepalive = MagicMock()
+
+    async def refresh():
+        coord.data = {e._register.name: 2000 if feedback == "retained" else None if feedback == "stale" else feedback}
+        coord.client.retained_quality_addresses = {e._register.address} if feedback == "retained" else set()
+        coord.slow_poll_stale = feedback == "stale"
+
+    coord.async_request_refresh = AsyncMock(side_effect=refresh)
+    coord.async_refresh = coord.async_request_refresh
+    with pytest.raises(mod.ModbusClientError, match="invalidated during refresh"):
+        await e.async_set_native_value(2000)
+    coord.async_write_register.assert_awaited_once_with(e._register, 2000)
+    e._start_keepalive.assert_not_called()

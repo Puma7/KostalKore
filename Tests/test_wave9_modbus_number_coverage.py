@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -27,6 +27,8 @@ def _coord(
     coord.last_update_success = True
     coord.async_write_register = AsyncMock()
     coord.async_request_refresh = AsyncMock()
+    coord.async_refresh = coord.async_request_refresh
+    type(coord).proxy_cache_data = PropertyMock(side_effect=lambda: coord.data or {})
     coord.hass = SimpleNamespace()
     coord.async_add_listener = MagicMock(return_value=lambda: None)
     coord.last_commanded = MagicMock(return_value=None)
@@ -227,6 +229,7 @@ async def test_modbus_number_entity_paths() -> None:
     assert entity._keepalive_value is None
     coord.async_write_register.reset_mock()
     coord.client.read_register = AsyncMock(return_value=100.0)
+    coord.data[mod.REG_G3_MAX_CHARGE.name] = 100.0
     await entity.async_set_native_value(100)
     coord.async_write_register.assert_awaited_once_with(mod.REG_G3_MAX_CHARGE, 100)
     coord.async_request_refresh.assert_awaited_once()
@@ -259,6 +262,7 @@ async def test_modbus_number_entity_paths() -> None:
     )
     non_cyclic.hass = entity.hass
     coord.client.read_register = AsyncMock(return_value=80.0)
+    coord.data[mod.REG_BAT_MAX_SOC.name] = 80.0
     coord.async_write_register.reset_mock()
     coord.async_request_refresh.reset_mock()
     await non_cyclic.async_set_native_value(80)
