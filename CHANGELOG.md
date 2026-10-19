@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Keep safety state/icon property reads side-effect free. One active alert no
+  longer emits duplicate warnings every time HA renders the state; monitor
+  event warnings, unsafe state, risk thresholds and alert retention remain.
 - Fail readable Modbus number commands when bounded readback verification cannot
   confirm the value, rather than acknowledging an ignored command. Preserve the
   write-only curtailment exception and cyclic keepalive confirmation. Read-only

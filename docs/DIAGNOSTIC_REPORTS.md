@@ -116,3 +116,11 @@ For monitored controls the poll is awaited directly, bypassing request debounce;
 the per-register fresh observation is used rather than a merged slow-poll cache
 or failures of unrelated registers. Non-monitored readable controls still use
 their direct readback, and write-only register 533 retains its documented exception.
+
+## Safety event logging
+
+From 3.0.12 reading the PV System Safety state, icon or attributes does not
+create additional warning messages. The safety monitor still logs new and
+escalated alerts. Risk levels, unsafe state, thresholds and retained alerts
+are unchanged. A repeatedly rendered alert is not a series of new events;
+use its category, creation time and live measurements when investigating it.
