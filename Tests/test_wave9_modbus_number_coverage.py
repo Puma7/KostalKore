@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -27,6 +27,8 @@ def _coord(
     coord.last_update_success = True
     coord.async_write_register = AsyncMock()
     coord.async_request_refresh = AsyncMock()
+    coord.async_refresh = coord.async_request_refresh
+    type(coord).proxy_cache_data = PropertyMock(side_effect=lambda: coord.data or {})
     coord.hass = SimpleNamespace()
     coord.async_add_listener = MagicMock(return_value=lambda: None)
     coord.last_commanded = MagicMock(return_value=None)
@@ -208,14 +210,15 @@ async def test_modbus_number_entity_paths() -> None:
         device_info=_device_info(),
         read_only=True,
     )
-    await read_only.async_set_native_value(10)
+    with pytest.raises(mod.ServiceValidationError):
+        await read_only.async_set_native_value(10)
     coord.async_write_register.assert_not_awaited()
 
     coord.data = {mod.REG_G3_MAX_CHARGE.name: "1", mod.REG_G3_FALLBACK_TIME.name: "30"}
     coord.async_write_register.reset_mock()
-    await entity.async_set_native_value(float("nan"))
-    await entity.async_set_native_value(float("inf"))
-    await entity.async_set_native_value(5000)
+    for invalid in (float("nan"), float("inf"), 5000):
+        with pytest.raises(mod.ServiceValidationError):
+            await entity.async_set_native_value(invalid)
     coord.async_write_register.assert_not_awaited()
 
     coord.client.read_register = AsyncMock(return_value=300.0)
@@ -226,6 +229,7 @@ async def test_modbus_number_entity_paths() -> None:
     assert entity._keepalive_value is None
     coord.async_write_register.reset_mock()
     coord.client.read_register = AsyncMock(return_value=100.0)
+    coord.data[mod.REG_G3_MAX_CHARGE.name] = 100.0
     await entity.async_set_native_value(100)
     coord.async_write_register.assert_awaited_once_with(mod.REG_G3_MAX_CHARGE, 100)
     coord.async_request_refresh.assert_awaited_once()
@@ -257,7 +261,8 @@ async def test_modbus_number_entity_paths() -> None:
         read_only=False,
     )
     non_cyclic.hass = entity.hass
-    coord.client.read_register = AsyncMock(return_value=80.5)
+    coord.client.read_register = AsyncMock(return_value=80.0)
+    coord.data[mod.REG_BAT_MAX_SOC.name] = 80.0
     coord.async_write_register.reset_mock()
     coord.async_request_refresh.reset_mock()
     await non_cyclic.async_set_native_value(80)
@@ -461,5 +466,6 @@ async def test_active_power_setpoint_write_delegates_to_coordinator() -> None:
     blocked_coord = _coord(data={})
     blocked = _curtail_entity(blocked_coord)
     blocked._read_only = True
-    await blocked.async_set_native_value(50)
+    with pytest.raises(mod.ServiceValidationError):
+        await blocked.async_set_native_value(50)
     blocked_coord.async_write_register.assert_not_awaited()

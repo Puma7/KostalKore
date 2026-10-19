@@ -89,3 +89,30 @@ Compare the next valid measurement during operation with the inverter's own
 diagnostics before classifying the retained assessment.
 Missing, invalid and quality-retained isolation responses also mark the live
 measurement unavailable while retaining its previous assessment.
+
+## Control acknowledgements
+
+From 3.0.11 a readable Modbus number requires matching, finite device feedback
+within three valid read attempts (0.2 seconds between differing numeric results).
+Client read errors are not retried or immediately refreshed again: the client
+already owns transport retry and register suppression. Floating-point precision
+(`rel_tol=1e-6`, `abs_tol=1e-6`) is accepted, while zero requires exact feedback.
+The UI input step is not used as a confirmation tolerance. Retained-quality
+values or a changed connection generation cannot confirm the command. An
+unconfirmed ordinary control refreshes observations and raises an error; G3
+cyclic controls retain their existing no-keepalive-on-failure protection.
+Register 533 is documented as write-only and has no readable confirmation.
+A Modbus transport acknowledgement / audit `ok` alone is not evidence that
+battery charging follows the requested power. Compare live telemetry as well.
+Read-only and invalid number commands raise validation errors without writing.
+
+The final coordinator refresh must also retain the original connection
+generation and a healthy connected coordinator. A reconnect, disconnection or
+failed refresh invalidates the earlier confirmation and cannot start a G3
+keepalive lease. The refreshed register must still match the command and have
+current quality: a newer different, missing, non-finite or retained reading
+also invalidates confirmation. The next command may establish a new confirmation.
+For monitored controls the poll is awaited directly, bypassing request debounce;
+the per-register fresh observation is used rather than a merged slow-poll cache
+or failures of unrelated registers. Non-monitored readable controls still use
+their direct readback, and write-only register 533 retains its documented exception.
