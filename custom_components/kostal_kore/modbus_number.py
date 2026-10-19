@@ -468,7 +468,8 @@ class ModbusNumberEntity(
         refresh_confirmed = True
         if self._register in CONTROL_READBACK_REGISTERS:
             try:
-                newest = float(self.coordinator.proxy_cache_data.get(self._register.name))
+                newest_value = self.coordinator.proxy_cache_data.get(self._register.name)
+                newest = float(newest_value) if newest_value is not None else math.nan
                 refresh_confirmed = math.isfinite(newest) and (
                     newest == 0 if value == 0 else
                     math.isclose(newest, value, rel_tol=1e-6, abs_tol=1e-6)
