@@ -1,5 +1,5 @@
 """A readable Modbus limit must not acknowledge an unconfirmed command."""
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.exceptions import ServiceValidationError
@@ -73,6 +73,32 @@ async def test_a_terminal_client_read_failure_is_not_retried_or_refreshed():
         await entity(coord).async_set_native_value(2000)
     coord.client.read_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT)
     coord.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["reconnect", "offline", "refresh_failed"])
+@pytest.mark.parametrize("cyclic", [False, True])
+async def test_refresh_cannot_reuse_confirmation_from_an_invalidated_connection(failure, cyclic):
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=2000)
+    e = entity(coord)
+    if cyclic:
+        e._register = mod.REG_G3_MAX_CHARGE
+    e._start_keepalive = MagicMock()
+
+    async def invalidate():
+        if failure == "reconnect":
+            coord.client.connection_generation += 1
+        elif failure == "offline":
+            coord.client.connected = False
+        else:
+            coord.last_update_success = False
+
+    coord.async_request_refresh = AsyncMock(side_effect=invalidate)
+    with pytest.raises(mod.ModbusClientError, match="invalidated during refresh"):
+        await e.async_set_native_value(2000)
+    coord.async_write_register.assert_awaited_once_with(e._register, 2000)
+    e._start_keepalive.assert_not_called()
 
 
 @pytest.mark.asyncio

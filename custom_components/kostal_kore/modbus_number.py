@@ -462,6 +462,15 @@ class ModbusNumberEntity(
 
         await self.coordinator.async_request_refresh()
 
+        if (self.coordinator.client.connection_generation != write_generation
+                or not self.coordinator.client.connected
+                or not self.coordinator.last_update_success):
+            if self._register.name in G3_CYCLIC_REGISTERS:
+                notify_control_lease_lost(getattr(self, "hass", None),
+                                          getattr(self.coordinator, "_communication_entry_id", ""),
+                                          control=f"modbus_{self._register.name}")
+            raise ModbusClientError("Control confirmation was invalidated during refresh")
+
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),

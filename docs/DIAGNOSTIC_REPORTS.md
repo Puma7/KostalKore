@@ -105,3 +105,8 @@ Register 533 is documented as write-only and has no readable confirmation.
 A Modbus transport acknowledgement / audit `ok` alone is not evidence that
 battery charging follows the requested power. Compare live telemetry as well.
 Read-only and invalid number commands raise validation errors without writing.
+
+The final coordinator refresh must also retain the original connection
+generation and a healthy connected coordinator. A reconnect, disconnection or
+failed refresh invalidates the earlier confirmation and cannot start a G3
+keepalive lease. The next command may establish a new confirmation.
