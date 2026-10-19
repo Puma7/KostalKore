@@ -6,8 +6,7 @@ binary sensors for HA automations (push notifications, sirens, etc.).
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Final
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -18,9 +17,6 @@ from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .fire_safety import FireRiskLevel, FireSafetyMonitor
-
-_LOGGER: Final = logging.getLogger(__name__)
-
 
 class FireRiskSensor(SensorEntity):
     """Current fire risk level."""
@@ -123,14 +119,6 @@ class FireSafetyOkBinarySensor(BinarySensorEntity):
             return None
         level = self._monitor.current_risk_level
         is_unsafe = level not in (FireRiskLevel.SAFE, FireRiskLevel.MONITOR)
-        if is_unsafe:
-            active = self._monitor.active_alerts
-            if active:
-                _LOGGER.warning(
-                    "PV System Safety is UNSAFE: risk=%s, alerts=%s",
-                    level,
-                    [(a.category, a.risk_level, a.title) for a in active[:3]],
-                )
         return is_unsafe
 
     @property
