@@ -27,7 +27,10 @@ async def test_unconfirmed_readable_limit_fails_the_service(feedback):
     with pytest.raises(mod.ModbusClientError, match="Readback is unconfirmed"):
         await e.async_set_native_value(2000)
     coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
-    coord.async_request_refresh.assert_awaited_once()
+    if feedback == 8000:
+        coord.async_request_refresh.assert_awaited_once()
+    else:
+        coord.async_request_refresh.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -37,6 +40,39 @@ async def test_confirmed_readable_limit_succeeds():
     await entity(coord).async_set_native_value(2000)
     coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000)
     coord.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("register", "requested", "observed"), [
+    (mod.REG_BAT_MAX_CHARGE_LIMIT, 2000, 1900),
+    (mod.REG_BAT_MIN_SOC, 80, 79),
+])
+async def test_an_ignored_single_step_is_not_confirmation(register, requested, observed):
+    coord = _coord()
+    e = entity(coord)
+    e._register = register
+    coord.client.read_register = AsyncMock(return_value=observed)
+    with pytest.raises(mod.ModbusClientError, match="unconfirmed"):
+        await e.async_set_native_value(requested)
+    coord.async_write_register.assert_awaited_once_with(register, requested)
+
+
+@pytest.mark.asyncio
+async def test_float32_rounding_is_not_mistaken_for_a_refused_write():
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=2000.0999755859375)
+    await entity(coord).async_set_native_value(2000.1)
+    coord.async_write_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT, 2000.1)
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_client_read_failure_is_not_retried_or_refreshed():
+    coord = _coord()
+    coord.client.read_register = AsyncMock(side_effect=mod.ModbusClientError("Illegal address"))
+    with pytest.raises(mod.ModbusClientError, match="unconfirmed"):
+        await entity(coord).async_set_native_value(2000)
+    coord.client.read_register.assert_awaited_once_with(mod.REG_BAT_MAX_CHARGE_LIMIT)
+    coord.async_request_refresh.assert_not_awaited()
 
 
 @pytest.mark.asyncio

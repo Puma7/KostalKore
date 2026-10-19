@@ -258,7 +258,7 @@ async def test_modbus_number_entity_paths() -> None:
         read_only=False,
     )
     non_cyclic.hass = entity.hass
-    coord.client.read_register = AsyncMock(return_value=80.5)
+    coord.client.read_register = AsyncMock(return_value=80.0)
     coord.async_write_register.reset_mock()
     coord.async_request_refresh.reset_mock()
     await non_cyclic.async_set_native_value(80)

@@ -93,7 +93,11 @@ measurement unavailable while retaining its previous assessment.
 ## Control acknowledgements
 
 From 3.0.11 a readable Modbus number requires matching, finite device feedback
-within three read attempts (0.2 seconds between attempts). Retained-quality
+within three valid read attempts (0.2 seconds between differing numeric results).
+Client read errors are not retried or immediately refreshed again: the client
+already owns transport retry and register suppression. Floating-point precision
+(`rel_tol=1e-6`, `abs_tol=1e-6`) is accepted, while zero requires exact feedback.
+The UI input step is not used as a confirmation tolerance. Retained-quality
 values or a changed connection generation cannot confirm the command. An
 unconfirmed ordinary control refreshes observations and raises an error; G3
 cyclic controls retain their existing no-keepalive-on-failure protection.

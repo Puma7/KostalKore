@@ -415,6 +415,7 @@ class ModbusNumberEntity(
         write_generation = self.coordinator.client.connection_generation
 
         verified = False
+        read_failed = False
         if self._register.name != CURTAILMENT_REGISTER_NAME:
             for attempt in range(READBACK_ATTEMPTS):
                 if attempt:
@@ -422,9 +423,15 @@ class ModbusNumberEntity(
                 try:
                     readback = await self.coordinator.client.read_register(self._register)
                     observed = float(readback)
-                    tolerance = self._attr_native_step if value != 0 else 0
                     retained: set[int] = getattr(self.coordinator.client, "retained_quality_addresses", set())
-                    verified = self.coordinator.client.connection_generation == write_generation and self._register.address not in retained and math.isfinite(observed) and abs(observed - value) <= tolerance
+                    if (self.coordinator.client.connection_generation != write_generation
+                            or self._register.address in retained or not math.isfinite(observed)):
+                        read_failed = True
+                        break
+                    # UI steps are input increments, not device precision. An
+                    # ignored one-step command must not count as confirmation.
+                    verified = (observed == 0 if value == 0 else
+                                math.isclose(observed, value, rel_tol=1e-6, abs_tol=1e-6))
                     if verified:
                         break
                     if attempt == READBACK_ATTEMPTS - 1:
@@ -434,6 +441,10 @@ class ModbusNumberEntity(
                         )
                 except Exception:
                     _LOGGER.debug("Read-back verification failed for %s", self._register.name)
+                    # The client already retries transient transport failures;
+                    # do not multiply terminal failures or suppression strikes.
+                    read_failed = True
+                    break
 
         if self._register.name in G3_CYCLIC_REGISTERS and not verified:
             notify_control_lease_lost(getattr(self, "hass", None),
@@ -445,7 +456,8 @@ class ModbusNumberEntity(
             # A transport acknowledgement does not establish that the inverter
             # accepted the limit. Publish a device refresh, then fail the call so
             # controllers cannot treat an ignored command as an applied limit.
-            await self.coordinator.async_request_refresh()
+            if not read_failed:
+                await self.coordinator.async_request_refresh()
             raise ModbusClientError(f"Readback is unconfirmed for {self._register.name}")
 
         await self.coordinator.async_request_refresh()
