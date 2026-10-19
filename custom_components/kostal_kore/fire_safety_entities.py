@@ -18,6 +18,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .fire_safety import FireRiskLevel, FireSafetyMonitor
 
+
 class FireRiskSensor(SensorEntity):
     """Current fire risk level."""
 
