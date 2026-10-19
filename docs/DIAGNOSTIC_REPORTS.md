@@ -124,3 +124,26 @@ create additional warning messages. The safety monitor still logs new and
 escalated alerts. Risk levels, unsafe state, thresholds and retained alerts
 are unchanged. A repeatedly rendered alert is not a series of new events;
 use its category, creation time and live measurements when investigating it.
+
+## Overnight control context (3.0.13)
+
+Both standard diagnostics and the debug bundle include
+`runtime.modbus.device_info_cached`: an allowlist of cached inverter firmware,
+product/state, rating and battery-management mode. This is discovery metadata,
+not a fresh live confirmation of control mode. It may be absent before discovery
+or retained through a connection outage; compare the connection/freshness markers
+and confirm the current mode in the inverter WebUI when investigating conflicts.
+
+Each REST channel exposes `control_settings` for selected numeric battery
+settings already present in its cache: minimum SoC, manual charging, strategy,
+smart/time control and external charge/discharge limits. Each entry has `value`
+and `fresh`; invalid/non-finite values are null, and a retained value is not
+current confirmation. Missing settings mean not collected, not disabled or zero.
+The exporter does not subscribe to inactive settings or issue control commands.
+Other settings and arbitrary string values are not added to this context.
+
+Download both integration diagnostics, full debug logs, the additional bundle
+and the HA history before restarting or reloading after the night. The bundle
+contains only the last 100 in-memory Modbus write events, not the full night.
+An audit `ok` records the transport write; the number-service readback result and
+actual AC/DC power remain separate evidence.

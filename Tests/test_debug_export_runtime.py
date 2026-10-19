@@ -38,6 +38,8 @@ def _store():
             communication=CommunicationState(), proxy_cache_data={},
             last_update_success=True, slow_poll_stale=True, slow_data_age_s=42,
             update_count=3, poll_phase=2, _fast_error_count=0,
+            device_info_data={"sw_version": "synthetic-firmware", "battery_mgmt_mode": 2,
+                              "serial_number": "synthetic-private-id", "private_field": "synthetic-secret"},
         ),
         "process_coordinator": channel, "write_audit": WriteAuditLog(),
     }
@@ -73,6 +75,10 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
     runtime = data["runtime"]
     assert runtime["modbus"]["retained_quality_addresses"] == [1038]
     assert runtime["modbus"]["endianness"] == "little"
+    assert runtime["modbus"]["device_info_cached"] == {
+        "sw_version": "synthetic-firmware", "battery_mgmt_mode": 2,
+    }
+    assert "synthetic-secret" not in files[0].read_text(encoding="utf-8")
     assert runtime["rest_channels"][0]["missing_fields"] == [
         ["devices:local", "Dc_P"], ["devices:local:battery", "SoC"],
     ]
@@ -120,6 +126,24 @@ def test_runtime_snapshot_empty_caches_and_settings_channel():
     assert snapshot["rest_channels"][0]["missing_fields"] == []
     assert snapshot["rest_channels"][0]["fresh_fields"] == []
     assert snapshot["rest_channels"][0]["communication_stale"] is None
+
+
+@pytest.mark.parametrize("value,expected", [("21.5", 21.5), ("nan", None), ("inf", None), (None, None), ("invalid", None)])
+@pytest.mark.parametrize("stale", [False, True])
+def test_control_context_exports_only_numeric_allowlisted_cached_settings(value, expected, stale):
+    store = _store()
+    channel = store["process_coordinator"]
+    channel.rest_communication_source = "settings:synthetic"
+    channel.data = {"devices:local": {"Battery:MinSoc": value, "Network:Password": "synthetic-secret"}}
+    channel._fetch = {"devices:local": ["Battery:MinSoc"]}
+    channel.async_contexts = lambda: iter([])
+    del channel.fresh_fields
+    channel.communication_stale = stale
+    context = runtime_snapshot(store)
+    assert context["rest_channels"][0]["control_settings"] == {
+        "Battery:MinSoc": {"value": expected, "fresh": not stale},
+    }
+    assert "synthetic-secret" not in json.dumps(context)
 
 
 @pytest.mark.parametrize("success,stale,expected", [
