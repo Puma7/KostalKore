@@ -86,3 +86,30 @@ async def test_config_flow_connects_on_fw_307(hass: HomeAssistant) -> None:
             hass, {CONF_HOST: "192.0.2.1", CONF_PASSWORD: "pw"}
         )
     assert result.hostname == "scb"
+
+
+async def test_missing_process_value_keyerror_is_transient(hass: HomeAssistant) -> None:
+    """A KeyError from pykoplenti's virtual PV sum uses the stale cache or fails cleanly."""
+    import logging
+    import time
+    from datetime import timedelta
+    from unittest.mock import MagicMock
+
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    from custom_components.kostal_kore.coordinator import ProcessDataUpdateCoordinator
+
+    plenticore = MagicMock()
+    plenticore.client.get_process_data_values = AsyncMock(side_effect=KeyError("P"))
+    coordinator = ProcessDataUpdateCoordinator(
+        hass, MagicMock(), logging.getLogger(__name__), "Process Data",
+        timedelta(seconds=10), plenticore,
+    )
+    coordinator._fetch = {"_virt_": {"pv_P"}}
+
+    with pytest.raises(UpdateFailed, match="'P'"):
+        await coordinator._async_fetch_process_data()
+
+    coordinator._last_result = {"_virt_": {"pv_P": "0.0"}}
+    coordinator._last_success_ts = time.monotonic()
+    assert await coordinator._async_fetch_process_data() == {"_virt_": {"pv_P": "0.0"}}

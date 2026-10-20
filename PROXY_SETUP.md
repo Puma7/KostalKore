@@ -112,10 +112,20 @@ evcc kann über den Proxy auch Batterie-Register schreiben. Die relevanten Regis
 
 | evcc-Modus | Register | Wert | Wirkung |
 |------------|----------|------|---------|
-| `normal` | 1034 | `0` | zurück zur Automatik |
+| `normal` | 1034 | bis evcc 0.315: `0`; ab **0.316** kein Write mehr (evcc PR #32396) | zurück zur Automatik |
 | `charge` | 1034 | `-maxchargepower` (W, **negativ = laden**) | Netzladen mit voller Leistung |
+| `discharge` (ab evcc 0.316) | 1034 | `+maxdischargepower` (W, **positiv = entladen**) | erzwungene Entladung/Einspeisung (evcc PR #32396) |
 | `hold` | 1040 | `0` | nur **Entladen** sperren, PV-Laden bleibt erlaubt (evcc PR #26169) |
 | `holdcharge` | 1038 | `0` | nur **Laden** sperren (evcc PR #30853) |
+
+> ⚠️ **evcc ≥ 0.316:** Weil `normal` Register 1034 nicht mehr zurücksetzt, kann ein zuvor
+> geschriebener Lade-/Entlade-Sollwert aktiv bleiben, bis ein neuer Write oder die Fallback-Logik
+> des Wechselrichters ihn ablöst.
+> Prüfe nach einem Moduswechsel den 1034-Wert, bevor ein KORE-Controller die Batterie übernimmt.
+>
+> **Einspeisebegrenzung (evcc 0.311.1, PR #31487):** evcc schreibt `WMaxLimPct` (SunSpec-Register
+> 40217, nur FC06). KOREs Entität „Active Power Setpoint (Modbus)" (Register 533) begrenzt dieselbe
+> AC-Ausgangsleistung. Nutze nur einen der beiden Wege, sonst gilt der zuletzt geschriebene Wert.
 
 **Hinweise für die evcc-Konfiguration:**
 - Im evcc-Template **`maxchargepower` (Watt)** setzen – **nicht** das veraltete `maxchargerate` (%).
