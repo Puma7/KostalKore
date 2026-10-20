@@ -119,9 +119,11 @@ export_debug_bundle:
   description: >
     Collects a full diagnostic snapshot (Modbus/REST data, write audit, health
     summary, scheduler stats, proxy state) and writes it to
-    www/kore_debug_<entry>_<timestamp>.json inside the Home Assistant configuration
-    directory. Returns download URLs and errors as optional action response data
-    and posts a persistent notification. Passwords, service codes, and named
+    kostal_kore_debug/kore_debug_<entry>_<timestamp>.json inside the Home Assistant
+    configuration directory (not www). Administrators only. Returns signed,
+    one-hour download URLs and errors as optional action response data and posts
+    a persistent notification with the file names. Files are deleted after 24
+    hours. Passwords, service codes, and named
     sensitive fields are redacted before writing the file. The normal integration
     diagnostic download also contains cached readings and REST polling details.
 

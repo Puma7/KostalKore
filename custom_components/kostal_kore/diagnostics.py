@@ -23,6 +23,7 @@ from homeassistant.const import ATTR_CONFIGURATION_URL, ATTR_IDENTIFIERS, ATTR_N
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv  # noqa: F401
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView
 from homeassistant.helpers.system_info import async_get_system_info
 from pykoplenti import ApiException
@@ -45,8 +46,10 @@ DEBUG_BUNDLE_DIR: Final[str] = "kostal_kore_debug"
 DEBUG_BUNDLE_URL: Final[str] = "/api/kostal_kore/debug_bundle"
 DEBUG_BUNDLE_LINK_TTL: Final[timedelta] = timedelta(hours=1)
 DEBUG_BUNDLE_RETENTION_S: Final[float] = 24 * 3600.0
+DEBUG_BUNDLE_PRUNE_INTERVAL: Final[timedelta] = timedelta(hours=1)
 _DEBUG_BUNDLE_NAME_RE: Final = re.compile(r"kore_debug_[A-Za-z0-9_-]{0,8}_\d{8}T\d{9}\.json")
 _DATA_DEBUG_BUNDLE_VIEW: Final[str] = f"{DOMAIN}_debug_bundle_view"
+_DATA_DEBUG_BUNDLE_PRUNE: Final[str] = f"{DOMAIN}_debug_bundle_prune"
 
 DEVICE_CONTEXT_FIELDS: Final[tuple[str, ...]] = (
     "sw_version", "product_name", "inverter_state", "inverter_max_power",
@@ -613,22 +616,40 @@ def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
             DOMAIN, "communication_diagnostics", communication_diagnostics,
             supports_response=SupportsResponse.ONLY,
         )
+    _async_register_debug_bundle_view(hass)
     if hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
         return
 
     async def _handler(call: ServiceCall) -> ServiceResponse:
         await async_require_admin(hass, call.context)
+        # HTTP may have finished setting up after this integration.
+        _async_register_debug_bundle_view(hass)
         return await _handle_export_debug_bundle(hass, call)
-
-    if getattr(hass, "http", None) is not None and not hass.data.get(_DATA_DEBUG_BUNDLE_VIEW):
-        # Views cannot be unregistered: register once per HA instance.
-        hass.http.register_view(DebugBundleView(hass, hass.config.path(DEBUG_BUNDLE_DIR)))
-        hass.data[_DATA_DEBUG_BUNDLE_VIEW] = True
 
     hass.services.async_register(
         DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, _handler,
         supports_response=SupportsResponse.OPTIONAL,
     )
+
+    # Enforce the retention window even when no further export follows.
+    directory = hass.config.path(DEBUG_BUNDLE_DIR)
+
+    async def _prune(_now: datetime) -> None:
+        await hass.async_add_executor_job(_prune_debug_bundles, directory, time.time())
+
+    hass.data[_DATA_DEBUG_BUNDLE_PRUNE] = async_track_time_interval(
+        hass, _prune, DEBUG_BUNDLE_PRUNE_INTERVAL,
+        name="kostal_kore debug bundle pruning", cancel_on_shutdown=True,
+    )
+
+
+def _async_register_debug_bundle_view(hass: HomeAssistant) -> None:
+    """Register the download view once HTTP is available."""
+    if getattr(hass, "http", None) is None or hass.data.get(_DATA_DEBUG_BUNDLE_VIEW):
+        return
+    # Views cannot be unregistered: register once per HA instance.
+    hass.http.register_view(DebugBundleView(hass, hass.config.path(DEBUG_BUNDLE_DIR)))
+    hass.data[_DATA_DEBUG_BUNDLE_VIEW] = True
 
 
 def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None:
@@ -638,3 +659,5 @@ def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None
         return
     hass.services.async_remove(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE)
     hass.services.async_remove(DOMAIN, "communication_diagnostics")
+    if (cancel_prune := hass.data.pop(_DATA_DEBUG_BUNDLE_PRUNE, None)) is not None:
+        cancel_prune()

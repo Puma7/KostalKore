@@ -14,7 +14,8 @@ from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import Unauthorized, UnknownUser
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.kostal_kore import button as button_platform
 from custom_components.kostal_kore import diagnostics as diagnostics_mod
@@ -28,11 +29,13 @@ from custom_components.kostal_kore.const import (
 )
 from custom_components.kostal_kore.diagnostics import (
     DEBUG_BUNDLE_DIR,
+    DEBUG_BUNDLE_PRUNE_INTERVAL,
     DEBUG_BUNDLE_RETENTION_S,
     DEBUG_BUNDLE_URL,
     SERVICE_EXPORT_DEBUG_BUNDLE,
     _prune_debug_bundles,
     async_register_debug_bundle_service,
+    async_unregister_debug_bundle_service_if_unused,
 )
 from custom_components.kostal_kore.helper import async_require_admin
 
@@ -231,3 +234,42 @@ async def test_debug_bundle_signed_link(
     # The service hands out signed links once an HTTP server exists.
     link = diagnostics_mod._debug_bundle_link(hass, BUNDLE)
     assert link.startswith(url) and "authSig=" in link
+
+
+async def test_debug_bundles_pruned_without_further_export(hass: HomeAssistant, tmp_path) -> None:
+    """Retention holds even when no later export runs, and stops on unregister."""
+    hass.config.config_dir = str(tmp_path)
+    directory = tmp_path / DEBUG_BUNDLE_DIR
+    directory.mkdir()
+    old = directory / BUNDLE
+    old.write_text("{}")
+    stale = time.time() - DEBUG_BUNDLE_RETENTION_S - 60
+    os.utime(old, (stale, stale))
+
+    async_register_debug_bundle_service(hass)
+    async_fire_time_changed(hass, dt_util.utcnow() + DEBUG_BUNDLE_PRUNE_INTERVAL)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert not old.exists()
+
+    async_unregister_debug_bundle_service_if_unused(hass)
+    assert diagnostics_mod._DATA_DEBUG_BUNDLE_PRUNE not in hass.data
+    async_unregister_debug_bundle_service_if_unused(hass)  # nothing left to cancel
+
+
+async def test_debug_bundle_view_registered_when_http_loads_later(
+    hass: HomeAssistant, hass_admin_user, tmp_path,
+) -> None:
+    hass.config.config_dir = str(tmp_path)
+    async_register_debug_bundle_service(hass)
+    assert not hass.data.get(diagnostics_mod._DATA_DEBUG_BUNDLE_VIEW)
+
+    assert await async_setup_component(hass, "http", {})
+    with patch(
+        "custom_components.kostal_kore.diagnostics._handle_export_debug_bundle",
+        new=AsyncMock(return_value={}),
+    ):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, {}, blocking=True,
+            context=Context(user_id=hass_admin_user.id), return_response=True,
+        )
+    assert hass.data[diagnostics_mod._DATA_DEBUG_BUNDLE_VIEW] is True
