@@ -390,13 +390,14 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
 
     links = [_debug_bundle_link(hass, os.path.basename(path)) for path in bundles]
     if bundles:
-        urls = "\n".join(
-            f"[Download {os.path.basename(p)}]({link})" for p, link in zip(bundles, links)
-        )
+        # Persistent notifications are visible to every HA user, so the signed
+        # links (usable without a login) go only to the caller's response.
+        names = "\n".join(f"- `{os.path.basename(p)}`" for p in bundles)
         msg = (
-            f"Debug bundle(s) written:\n{urls}\n\n"
-            f"Links are valid for {int(DEBUG_BUNDLE_LINK_TTL.total_seconds() // 60)} minutes; "
-            f"files are deleted after {int(DEBUG_BUNDLE_RETENTION_S // 3600)} hours."
+            f"Debug bundle(s) written:\n{names}\n\n"
+            "Download links are in the action response (Developer Tools → Actions). "
+            f"They are valid for {int(DEBUG_BUNDLE_LINK_TTL.total_seconds() // 60)} "
+            f"minutes; files are deleted after {int(DEBUG_BUNDLE_RETENTION_S // 3600)} hours."
         )
     else:
         msg = "No debug bundle written."

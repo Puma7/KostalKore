@@ -21,8 +21,10 @@ data: {}
 ```
 
 The action is restricted to administrators. It supports optional response data
-and returns `bundles` (download URLs) and `errors`, and posts a persistent
-notification with clickable links. Files are written to `kostal_kore_debug` inside
+and returns `bundles` (download URLs) and `errors`. The persistent notification
+lists only the file names: notifications are visible to every HA user, and the
+signed links work without a login, so they are only part of the action response
+(Developer Tools → Actions, *Response*). Files are written to `kostal_kore_debug` inside
 the **actual HA configuration directory** (which need not be `/config`) — not to
 `www`, because `/local` serves files without authentication. Downloads go through
 `/api/kostal_kore/debug_bundle/…` and require an administrator; the returned links

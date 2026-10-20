@@ -86,7 +86,8 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
         ["devices:local", "Dc_P"], ["devices:local:battery", "SoC"],
     ]
     assert runtime["rest_channels"][0]["fresh_fields"] == [["devices:local", "Grid_P"]]
-    assert "[Download " in notifications["kore_debug_bundle"]["message"]
+    message = notifications["kore_debug_bundle"]["message"]
+    assert files[0].name in message and "/api/kostal_kore" not in message
     communication = await hass.services.async_call(
         "kostal_kore", "communication_diagnostics", {}, blocking=True, return_response=True,
     )

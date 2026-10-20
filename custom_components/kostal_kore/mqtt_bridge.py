@@ -703,6 +703,17 @@ class KostalMqttBridge:
 
         return get_reg_1038_owner_manager(self._hass, self._entry_id).current is not None
 
+    def _reject_if_reg_1038_owned(self, reg: ModbusRegister, value: Any, source: str) -> bool:
+        """Log and return True if an integration feature holds REG 1038."""
+        if reg.name != REG_BAT_MAX_CHARGE_LIMIT.name or not self._reg_1038_locked_by_integration():
+            return False
+        _LOGGER.warning(
+            "MQTT command rejected: %s is held by an integration feature (source: %s)",
+            reg.name, source,
+        )
+        self._log_audit_rejection(reg.name, value, "rejected_reg_1038_owner", source)
+        return True
+
     async def _execute_write(self, reg: ModbusRegister, payload: str, source: str) -> None:
         """Validate, rate-limit, arbitrate, and execute a register write."""
         # --- Validate BEFORE consuming the rate-limit slot ---
@@ -727,14 +738,7 @@ class KostalMqttBridge:
                 self._log_audit_rejection(reg.name, None, "rejected_soc_active", source)
                 return
 
-        if (reg.name == REG_BAT_MAX_CHARGE_LIMIT.name
-                and self._reg_1038_locked_by_integration()):
-            _LOGGER.warning(
-                "MQTT command rejected: %s is held by an integration feature "
-                "(source: %s)",
-                reg.name, source,
-            )
-            self._log_audit_rejection(reg.name, None, "rejected_reg_1038_owner", source)
+        if self._reject_if_reg_1038_owned(reg, None, source):
             return
 
         try:
@@ -782,6 +786,11 @@ class KostalMqttBridge:
                 return
 
             async with self._write_lock:
+                # Re-checked after the last await before the write: a feature
+                # that acquired REG 1038 while this command waited is seen here,
+                # and one acquiring during the write queues its write behind it.
+                if self._reject_if_reg_1038_owned(reg, value, source):
+                    return
                 await self._coordinator.async_write_register(
                     reg, value, audit_source="mqtt"
                 )

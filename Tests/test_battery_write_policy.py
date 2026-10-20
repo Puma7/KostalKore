@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import struct
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -134,6 +135,25 @@ async def test_mqtt_rejects_reg_1038_while_owned(hass: HomeAssistant) -> None:
     manager.release(OWNER_CHARGE_BLOCK)
     await bridge._execute_write(REG_BAT_MAX_CHARGE_LIMIT, "2000", source="test")
     coordinator.async_write_register.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mqtt_reg_1038_owner_checked_after_waiting_for_write_lock(
+    hass: HomeAssistant,
+) -> None:
+    """A feature acquiring REG 1038 while the command waits for the lock wins."""
+    hass.data[DOMAIN] = {ENTRY_ID: {}}
+    bridge, coordinator = _bridge(hass, installer_access=True)
+    await bridge._write_lock.acquire()
+    task = hass.async_create_task(
+        bridge._execute_write(REG_BAT_MAX_CHARGE_LIMIT, "2000", source="test")
+    )
+    for _ in range(5):
+        await asyncio.sleep(0)
+    get_reg_1038_owner_manager(hass, ENTRY_ID).try_acquire(OWNER_CHARGE_BLOCK)
+    bridge._write_lock.release()
+    await task
+    coordinator.async_write_register.assert_not_called()
 
 
 @pytest.mark.asyncio

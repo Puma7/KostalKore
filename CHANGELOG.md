@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admin services. A confirmation code proves intent, not authority.
 - Write debug bundles to the private `kostal_kore_debug` config directory and
   serve them through an authenticated, admin-only download with one-hour
-  signed links; bundles are deleted after 24 hours. Previously they were placed
+  signed links that are returned only in the action response (the persistent
+  notification, visible to all users, lists file names only); bundles are
+  deleted after 24 hours. Previously they were placed
   in `www`, which `/local` serves without authentication. Delete any old
   `www/kore_debug_*.json` exports.
 - Apply the installer gate and SoC-controller arbitration of the Modbus proxy

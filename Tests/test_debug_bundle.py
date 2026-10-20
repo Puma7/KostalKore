@@ -367,7 +367,9 @@ async def test_handle_export_debug_bundle_happy_path():
 
     hass.services.async_call.assert_called_once()
     msg_arg = hass.services.async_call.call_args[0][2]["message"]
-    assert "/api/kostal_kore/debug_bundle/kore_debug_abc.json" in msg_arg
+    assert "kore_debug_abc.json" in msg_arg
+    # Signed links stay out of the notification every HA user can read.
+    assert "/api/kostal_kore/debug_bundle" not in msg_arg
 
 
 @pytest.mark.asyncio
