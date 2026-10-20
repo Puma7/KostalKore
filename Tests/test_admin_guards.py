@@ -176,15 +176,15 @@ def test_prune_debug_bundles(tmp_path) -> None:
     os.utime(old, (stale, stale))
     os.utime(foreign, (stale, stale))
 
-    _prune_debug_bundles(str(tmp_path), time.time())
+    assert _prune_debug_bundles(str(tmp_path), time.time()) == 1
     assert not old.exists()
     assert fresh.exists() and foreign.exists() and nested.exists()
 
     # Missing directory and failing deletes are tolerated.
-    _prune_debug_bundles(str(tmp_path / "missing"), time.time())
+    assert _prune_debug_bundles(str(tmp_path / "missing"), time.time()) == 0
     os.utime(fresh, (stale, stale))
     with patch.object(diagnostics_mod.os, "remove", side_effect=OSError("busy")):
-        _prune_debug_bundles(str(tmp_path), time.time())
+        assert _prune_debug_bundles(str(tmp_path), time.time()) == 1
     assert fresh.exists()
 
 
@@ -246,14 +246,34 @@ async def test_debug_bundles_pruned_without_further_export(hass: HomeAssistant, 
     stale = time.time() - DEBUG_BUNDLE_RETENTION_S - 60
     os.utime(old, (stale, stale))
 
-    async_register_debug_bundle_service(hass)
-    async_fire_time_changed(hass, dt_util.utcnow() + DEBUG_BUNDLE_PRUNE_INTERVAL)
-    await hass.async_block_till_done(wait_background_tasks=True)
-    assert not old.exists()
+    fresh = directory / "kore_debug_x_20261020T120000123.json"
+    fresh.write_text("{}")
+    now = dt_util.utcnow()
 
+    async_register_debug_bundle_service(hass)
+    async_fire_time_changed(hass, now + DEBUG_BUNDLE_PRUNE_INTERVAL)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert not old.exists() and fresh.exists()
+
+    # The last entry goes away while a bundle remains: pruning continues.
     async_unregister_debug_bundle_service_if_unused(hass)
+    async_fire_time_changed(hass, now + 2 * DEBUG_BUNDLE_PRUNE_INTERVAL)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert diagnostics_mod._DATA_DEBUG_BUNDLE_PRUNE in hass.data
+
+    # Re-registering while the timer runs does not add a second one.
+    async_register_debug_bundle_service(hass)
+    cancel = hass.data[diagnostics_mod._DATA_DEBUG_BUNDLE_PRUNE]
+    async_register_debug_bundle_service(hass)
+    assert hass.data[diagnostics_mod._DATA_DEBUG_BUNDLE_PRUNE] is cancel
+    async_unregister_debug_bundle_service_if_unused(hass)
+
+    # Once the last bundle has expired, the timer stops itself.
+    os.utime(fresh, (stale, stale))
+    async_fire_time_changed(hass, now + 3 * DEBUG_BUNDLE_PRUNE_INTERVAL)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert not fresh.exists()
     assert diagnostics_mod._DATA_DEBUG_BUNDLE_PRUNE not in hass.data
-    async_unregister_debug_bundle_service_if_unused(hass)  # nothing left to cancel
 
 
 async def test_debug_bundle_view_registered_when_http_loads_later(

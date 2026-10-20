@@ -391,7 +391,13 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             _LOGGER.error("export_debug_bundle failed for entry %s: %s", entry_id, err)
             errors.append(f"{entry_id}: {err}")
 
-    links = [_debug_bundle_link(hass, os.path.basename(path)) for path in bundles]
+    # Without a user (automation, script) a signed link would belong to HA's
+    # read-only content user, which the admin-only view rejects.
+    has_user = bool(getattr(getattr(call, "context", None), "user_id", None))
+    links = [
+        _debug_bundle_link(hass, os.path.basename(path)) if has_user else None
+        for path in bundles
+    ]
     if bundles:
         # Persistent notifications are visible to every HA user, so the signed
         # links (usable without a login) go only to the caller's response.
@@ -402,6 +408,12 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             f"They are valid for {int(DEBUG_BUNDLE_LINK_TTL.total_seconds() // 60)} "
             f"minutes; files are deleted after {int(DEBUG_BUNDLE_RETENTION_S // 3600)} hours."
         )
+        if not has_user:
+            msg += (
+                "\n\nStarted without a user (e.g. by an automation), so no download "
+                f"link was created. Copy the files from `{hass.config.path(DEBUG_BUNDLE_DIR)}` "
+                "or run the action from Developer Tools → Actions."
+            )
     else:
         msg = "No debug bundle written."
     if errors:
@@ -418,7 +430,10 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
         blocking=True,
     )
     return {
-        "bundles": [{"url": link} for link in links],
+        "bundles": [
+            {"file": os.path.basename(path), "url": link}
+            for path, link in zip(bundles, links)
+        ],
         "errors": [error for error in errors],
     }
 
@@ -464,13 +479,14 @@ def _private_opener(path: str, flags: int) -> int:
     return os.open(path, flags, 0o600)
 
 
-def _prune_debug_bundles(directory: str, now: float) -> None:
-    """Delete exported bundles older than the retention window."""
+def _prune_debug_bundles(directory: str, now: float) -> int:
+    """Delete exported bundles older than the retention window; return how many remain."""
     try:
         names = os.listdir(directory)
     except OSError as err:
         _LOGGER.debug("Cannot list debug bundle directory %s: %s", directory, err)
-        return
+        return 0
+    remaining = 0
     for name in names:
         path = os.path.join(directory, name)
         if not _DEBUG_BUNDLE_NAME_RE.fullmatch(name) or not os.path.isfile(path):
@@ -478,8 +494,11 @@ def _prune_debug_bundles(directory: str, now: float) -> None:
         try:
             if now - os.path.getmtime(path) > DEBUG_BUNDLE_RETENTION_S:
                 os.remove(path)
+                continue
         except OSError as err:
             _LOGGER.debug("Cannot prune debug bundle %s: %s", path, err)
+        remaining += 1
+    return remaining
 
 
 async def _export_bundle_for_entry(
@@ -631,11 +650,18 @@ def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.OPTIONAL,
     )
 
-    # Enforce the retention window even when no further export follows.
+    # Enforce the retention window even when no further export follows. The
+    # timer outlives the last entry until every bundle has expired.
+    if _DATA_DEBUG_BUNDLE_PRUNE in hass.data:
+        return
     directory = hass.config.path(DEBUG_BUNDLE_DIR)
 
     async def _prune(_now: datetime) -> None:
-        await hass.async_add_executor_job(_prune_debug_bundles, directory, time.time())
+        remaining = await hass.async_add_executor_job(
+            _prune_debug_bundles, directory, time.time()
+        )
+        if not remaining and not hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
+            hass.data.pop(_DATA_DEBUG_BUNDLE_PRUNE)()
 
     hass.data[_DATA_DEBUG_BUNDLE_PRUNE] = async_track_time_interval(
         hass, _prune, DEBUG_BUNDLE_PRUNE_INTERVAL,
@@ -659,5 +685,3 @@ def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None
         return
     hass.services.async_remove(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE)
     hass.services.async_remove(DOMAIN, "communication_diagnostics")
-    if (cancel_prune := hass.data.pop(_DATA_DEBUG_BUNDLE_PRUNE, None)) is not None:
-        cancel_prune()

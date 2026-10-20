@@ -70,8 +70,8 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
     files = list((tmp_path / "kostal_kore_debug").glob("kore_debug_*.json"))
     assert len(files) == 1
     assert files[0].stat().st_mode & 0o077 == 0
-    # No HTTP server in this hass: the link is the plain authenticated path.
-    assert result["bundles"][0]["url"] == f"/api/kostal_kore/debug_bundle/{files[0].name}"
+    # Called without a user: no (unusable) signed link, the file name instead.
+    assert result["bundles"][0] == {"file": files[0].name, "url": None}
     data = json.loads(files[0].read_text(encoding="utf-8"))
     assert data["modbus_snapshot"]["bat_max_charge_limit"] == 4500
     assert "synthetic-private-id" not in files[0].read_text(encoding="utf-8")
@@ -88,6 +88,7 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
     assert runtime["rest_channels"][0]["fresh_fields"] == [["devices:local", "Grid_P"]]
     message = notifications["kore_debug_bundle"]["message"]
     assert files[0].name in message and "/api/kostal_kore" not in message
+    assert "no download link" in message
     communication = await hass.services.async_call(
         "kostal_kore", "communication_diagnostics", {}, blocking=True, return_response=True,
     )
