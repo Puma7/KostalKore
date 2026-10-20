@@ -728,6 +728,9 @@ copy-pasted into other operational scripts.
 - Default to `getpass.getpass()` for credential entry, falling back
   to positional args only for backwards compatibility.
 - Document the trade-off in the script's docstring.
+- Follow-up: the positional fallback was removed entirely — a documented
+  "less safe" path is still a path. Credentials are only read via
+  `getpass`; extra arguments abort with a hint.
 - Use `--installer` as a mode flag instead of relying on argument
   count alone, so the master-mode is explicit.
 

@@ -29,7 +29,7 @@ from .const import (
     SERVICE_ADOPT_LEGACY_ENTITY_IDS,
     SERVICE_COPY_LEGACY_HISTORY,
 )
-from .helper import generate_confirmation_code, integration_entry_store
+from .helper import async_require_admin, generate_confirmation_code, integration_entry_store
 from .legacy_migration import (
     LegacyEntityPair,
     adopt_legacy_entity_ids,
@@ -681,10 +681,13 @@ async def _handle_copy_history_service(hass: HomeAssistant, call: ServiceCall) -
 
 def async_register_migration_services(hass: HomeAssistant) -> None:
     """Register migration services once per Home Assistant instance."""
+    # Both services rewrite registry ownership / recorder history: admin only.
     async def _adopt_service_wrapper(call: ServiceCall) -> None:
+        await async_require_admin(hass, call.context)
         await _handle_adopt_service(hass, call)
 
     async def _copy_service_wrapper(call: ServiceCall) -> None:
+        await async_require_admin(hass, call.context)
         await _handle_copy_history_service(hass, call)
 
     if not hass.services.has_service(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS):

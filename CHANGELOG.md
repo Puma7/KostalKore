@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Restrict the history/registry-rewriting actions `adopt_legacy_entity_ids`,
+  `copy_legacy_history` and `apply_orphan_history_mapping`, the
+  `export_debug_bundle` action and the *Import Legacy Plenticore Data* /
+  *Finalize Legacy Cleanup* buttons to Home Assistant administrators. Calls
+  without a user (automations, scripts) are still accepted, as for HA's own
+  admin services. A confirmation code proves intent, not authority.
+- Write debug bundles to the private `kostal_kore_debug` config directory and
+  serve them through an authenticated, admin-only download with one-hour
+  signed links; bundles are deleted after 24 hours. Previously they were placed
+  in `www`, which `/local` serves without authentication. Delete any old
+  `www/kore_debug_*.json` exports.
+- Apply the installer gate and SoC-controller arbitration of the Modbus proxy
+  and MQTT bridge to every writable battery-management (1026–1044) and G3
+  limit/fallback (1280–1288) register, derived from the register map, and to
+  every word of those registers. The two paths previously used different,
+  incomplete hand-written lists (e.g. 1026–1036 via the proxy, the G3 fallback
+  registers via MQTT were unprotected).
+- Reject MQTT writes to the charge limit (REG 1038) while an integration
+  feature (Grid Feed-In Optimizer, Block Battery Charging, battery test) owns
+  it, matching the proxy. The proxy check now also covers the register's
+  second word.
+- Redact the inverter host from the device block of config-entry diagnostics
+  (`configuration_url`, and the device name when it falls back to the host).
+- `check_inverter_api.py` no longer accepts credentials as command-line
+  arguments and escapes control characters in printed inverter responses.
+
 ### Added
 - Export allowlisted cached inverter firmware, battery management mode and
   finite numeric battery-control settings with per-field freshness. Exporting

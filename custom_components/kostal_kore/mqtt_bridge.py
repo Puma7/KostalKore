@@ -56,8 +56,10 @@ from .helper import (
 )
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
+    BATTERY_CONTROL_NAMES,
     INVERTER_STATES,
     REG_BAT_CHARGE_DC_ABS_POWER,
+    REG_BAT_MAX_CHARGE_LIMIT,
     REG_BAT_MAX_SOC,
     REG_BAT_MIN_SOC,
     REGISTER_BY_NAME,
@@ -117,8 +119,10 @@ class KostalMqttBridge:
         device_id: str,
         soc_controller: Any = None,
         installer_access: bool = False,
+        entry_id: str = "",
     ) -> None:
         self._hass = hass
+        self._entry_id = entry_id
         self._coordinator = coordinator
         self._soc_controller = soc_controller
         self._installer_access = installer_access
@@ -688,12 +692,16 @@ class KostalMqttBridge:
 
         await self._execute_write(reg, payload, source=f"proxy/{proxy_name}")
 
-    # Battery control register names for SoC controller arbitration
-    _BATTERY_REG_NAMES: Final = frozenset({
-        "bat_charge_dc_abs_power", "bat_max_charge_limit", "bat_max_discharge_limit",
-        "bat_min_soc", "bat_max_soc", "bat_charge_ac_abs",
-        "g3_max_charge", "g3_max_discharge",
-    })
+    # Battery control register names for the installer gate and SoC
+    # controller arbitration (shared with the Modbus proxy).
+    _BATTERY_REG_NAMES: Final = BATTERY_CONTROL_NAMES
+
+    def _reg_1038_locked_by_integration(self) -> bool:
+        if not self._entry_id:
+            return False
+        from .battery_reg_1038_owner import get_reg_1038_owner_manager
+
+        return get_reg_1038_owner_manager(self._hass, self._entry_id).current is not None
 
     async def _execute_write(self, reg: ModbusRegister, payload: str, source: str) -> None:
         """Validate, rate-limit, arbitrate, and execute a register write."""
@@ -718,6 +726,16 @@ class KostalMqttBridge:
                 )
                 self._log_audit_rejection(reg.name, None, "rejected_soc_active", source)
                 return
+
+        if (reg.name == REG_BAT_MAX_CHARGE_LIMIT.name
+                and self._reg_1038_locked_by_integration()):
+            _LOGGER.warning(
+                "MQTT command rejected: %s is held by an integration feature "
+                "(source: %s)",
+                reg.name, source,
+            )
+            self._log_audit_rejection(reg.name, None, "rejected_reg_1038_owner", source)
+            return
 
         try:
             value: Any

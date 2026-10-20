@@ -336,6 +336,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
                 hass, modbus_coordinator, str(device_id),
                 soc_controller=soc_controller,
                 installer_access=installer_access,
+                entry_id=entry.entry_id,
             )
 
         if modbus_coordinator and entry.options.get(  # pragma: no cover

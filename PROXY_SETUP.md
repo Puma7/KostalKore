@@ -241,7 +241,7 @@ kostal_kore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 | **Command serialization** | Async lock prevents concurrent Modbus writes |
 | **Source tracking** | Every command logged with origin (proxy/evcc, mqtt/command) |
 | **Admin protection** | `modbus_enable`, `unit_id`, `byte_order` read-only via MQTT |
-| **Installer protection** | Batterie-Schreibregister nur mit Service-Code |
+| **Installer protection** | Batterie-Schreibregister (1026–1044, 1280–1288) nur mit Service-Code |
 | **NaN/Infinity guard** | Rejected at MQTT, coordinator, and client layers |
 | **Value validation** | Type check + numeric conversion before write |
 | **Write-Arbitration** | Batterie-Register blockiert wenn SoC-Controller aktiv |

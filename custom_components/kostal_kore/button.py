@@ -20,7 +20,7 @@ from .const import (
     AddConfigEntryEntitiesCallback,
 )
 from .coordinator import PlenticoreConfigEntry
-from .helper import generate_confirmation_code, integration_entry_store
+from .helper import async_require_admin, generate_confirmation_code, integration_entry_store
 from .legacy_migration import finalize_legacy_cleanup, migrate_legacy_plenticore_entry
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -55,6 +55,8 @@ class LegacyMigrationButton(ButtonEntity):
         First press: arm confirmation window.
         Second press within TTL: execute migration.
         """
+        # Overwrites entry data/options and rebinds registry entries: admin only.
+        await async_require_admin(self.hass, self._context)
         store = integration_entry_store(self.hass, self._entry_id)
         guard = store.get(DATA_KEY_LEGACY_IMPORT_GUARD, {})
         armed_at = float(guard.get("armed_at", 0.0))
@@ -250,6 +252,8 @@ class LegacyCleanupButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Delete remaining legacy artifacts (reentrancy-safe)."""
+        # Removes registry entries and the legacy config entry: admin only.
+        await async_require_admin(self.hass, self._context)
         if self._press_lock.locked():
             _LOGGER.debug("Cleanup button press ignored (already in progress)")
             return

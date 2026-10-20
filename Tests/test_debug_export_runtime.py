@@ -66,9 +66,12 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
     unsubscribe()
     assert result is not None and result["errors"] == []
     assert len(result["bundles"]) == 1
-    files = list((tmp_path / "www").glob("kore_debug_*.json"))
+    assert not (tmp_path / "www").exists()
+    files = list((tmp_path / "kostal_kore_debug").glob("kore_debug_*.json"))
     assert len(files) == 1
-    assert result["bundles"][0]["url"] == f"/local/{files[0].name}"
+    assert files[0].stat().st_mode & 0o077 == 0
+    # No HTTP server in this hass: the link is the plain authenticated path.
+    assert result["bundles"][0]["url"] == f"/api/kostal_kore/debug_bundle/{files[0].name}"
     data = json.loads(files[0].read_text(encoding="utf-8"))
     assert data["modbus_snapshot"]["bat_max_charge_limit"] == 4500
     assert "synthetic-private-id" not in files[0].read_text(encoding="utf-8")

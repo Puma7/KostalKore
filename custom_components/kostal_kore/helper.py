@@ -12,7 +12,8 @@ from collections.abc import Callable
 from typing import Any, Final, cast
 
 from aiohttp.client_exceptions import ClientError
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import Unauthorized, UnknownUser
 from pykoplenti import ApiClient, ApiException
 
 from .const import CONF_INSTALLER_ACCESS, DOMAIN
@@ -807,6 +808,23 @@ def validate_cross_field_write_rules(
         # If value cannot be parsed as float, let lower-level validation handle it.
         return None
     return None
+
+
+async def async_require_admin(hass: HomeAssistant, context: Context | None) -> None:
+    """Raise unless ``context`` belongs to an administrator or to no user.
+
+    Mirrors Home Assistant's admin-service guard: calls without a user
+    (automations, scripts, internal callers) pass, a non-admin user raises
+    ``Unauthorized``. A confirmation code proves intent, not authority.
+    """
+    user_id = context.user_id if context is not None else None
+    if not user_id:
+        return
+    user = await hass.auth.async_get_user(user_id)
+    if user is None:
+        raise UnknownUser(context=context, user_id=user_id)
+    if not user.is_admin:
+        raise Unauthorized(context=context)
 
 
 def ensure_installer_access(

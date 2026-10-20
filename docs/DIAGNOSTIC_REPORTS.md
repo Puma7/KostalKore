@@ -20,13 +20,18 @@ action: kostal_kore.export_debug_bundle
 data: {}
 ```
 
-The action supports optional response data and returns `bundles` (download URLs)
-and `errors`. It also posts a persistent notification with clickable links. Files
-are written to `www` inside the **actual HA configuration directory**, which need
-not be `/config`. If `www` was created for the first time after frontend startup,
-Home Assistant needs a restart to serve `/local` links. The standard integration
-diagnostic download works independently of this directory and does not require
-that restart. Files in `www` are static files: remove exported reports after use.
+The action is restricted to administrators. It supports optional response data
+and returns `bundles` (download URLs) and `errors`, and posts a persistent
+notification with clickable links. Files are written to `kostal_kore_debug` inside
+the **actual HA configuration directory** (which need not be `/config`) — not to
+`www`, because `/local` serves files without authentication. Downloads go through
+`/api/kostal_kore/debug_bundle/…` and require an administrator; the returned links
+are signed for the calling user and expire after one hour. Exported files are
+deleted after 24 hours. Links from an action started by an automation are signed
+for Home Assistant's internal content user and are therefore rejected; run the
+action from Developer Tools → Actions, or copy the file from the directory above.
+Bundles exported to `www` by earlier versions stay publicly reachable until
+you delete `www/kore_debug_*.json`.
 
 ## Interpreting the battery limits
 
