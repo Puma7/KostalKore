@@ -8,11 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components import websocket_api
 from homeassistant.components.diagnostics import REDACTED
 from homeassistant.components.http.auth import async_sign_path
+from homeassistant.components.http.const import KEY_HASS_REFRESH_TOKEN_ID
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import Unauthorized, UnknownUser
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.http import current_request
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
@@ -231,9 +234,26 @@ async def test_debug_bundle_signed_link(
     )
     assert (await client.get(signed)).status == 200
 
-    # The service hands out signed links once an HTTP server exists.
-    link = diagnostics_mod._debug_bundle_link(hass, BUNDLE)
-    assert link.startswith(url) and "authSig=" in link
+    # Links are signed with the caller's WebSocket or HTTP refresh token ...
+    for var, value in (
+        (websocket_api.current_connection, SimpleNamespace(refresh_token_id=refresh_token.id)),
+        (current_request, {KEY_HASS_REFRESH_TOKEN_ID: refresh_token.id}),
+    ):
+        reset = var.set(value)
+        try:
+            link = diagnostics_mod._debug_bundle_link(hass, BUNDLE)
+        finally:
+            var.reset(reset)
+        assert link is not None and link.startswith(url) and "authSig=" in link
+        assert (await client.get(link)).status == 200
+
+    # ... and not at all without one (it would be the read-only content user).
+    assert diagnostics_mod._debug_bundle_link(hass, BUNDLE) is None
+    reset = current_request.set({})
+    try:
+        assert diagnostics_mod._debug_bundle_link(hass, BUNDLE) is None
+    finally:
+        current_request.reset(reset)
 
 
 async def test_debug_bundles_pruned_without_further_export(hass: HomeAssistant, tmp_path) -> None:
@@ -293,3 +313,19 @@ async def test_debug_bundle_view_registered_when_http_loads_later(
             context=Context(user_id=hass_admin_user.id), return_response=True,
         )
     assert hass.data[diagnostics_mod._DATA_DEBUG_BUNDLE_VIEW] is True
+
+
+async def test_export_response_carries_signed_links() -> None:
+    """A caller with a transport token gets links, and no 'no link' hint."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"e1": {}}}
+    hass.services.async_call = AsyncMock()
+    with (
+        patch.object(diagnostics_mod, "_export_bundle_for_entry",
+                     new=AsyncMock(return_value=f"/cfg/{DEBUG_BUNDLE_DIR}/{BUNDLE}")),
+        patch.object(diagnostics_mod, "_debug_bundle_link", return_value="/signed"),
+    ):
+        result = await diagnostics_mod._handle_export_debug_bundle(hass, MagicMock())
+    assert result == {"bundles": [{"file": BUNDLE, "url": "/signed"}], "errors": []}
+    message = hass.services.async_call.await_args.args[2]["message"]
+    assert BUNDLE in message and "no download link" not in message and "/signed" not in message

@@ -29,9 +29,10 @@ the **actual HA configuration directory** (which need not be `/config`) — not 
 `www`, because `/local` serves files without authentication. Downloads go through
 `/api/kostal_kore/debug_bundle/…` and require an administrator; the returned links
 are signed for the calling user and expire after one hour. Exported files are
-deleted after 24 hours, also after the last KORE entry was removed. An action
-started without a user (e.g. by an automation) returns no link, only the file
-name (`url: null`): copy the file from the directory above, or run the action
+deleted after 24 hours, also after the last KORE entry was removed. Links are signed
+with the refresh token of the caller's WebSocket or HTTP session. An action started
+outside the UI/API (e.g. by an automation) has none and returns no link, only the
+file name (`url: null`): copy the file from the directory above, or run the action
 from Developer Tools → Actions.
 Bundles exported to `www` by earlier versions stay publicly reachable until
 you delete `www/kore_debug_*.json`.

@@ -18,13 +18,14 @@ from typing import Any, Awaitable, Callable, Final
 from aiohttp import web
 from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.components.http.auth import async_sign_path
-from homeassistant.components.http.const import KEY_HASS_USER
+from homeassistant.components.http.const import KEY_HASS_REFRESH_TOKEN_ID, KEY_HASS_USER
+from homeassistant.components.websocket_api.connection import current_connection
 from homeassistant.const import ATTR_CONFIGURATION_URL, ATTR_IDENTIFIERS, ATTR_NAME, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv  # noqa: F401
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.http import HomeAssistantView
+from homeassistant.helpers.http import HomeAssistantView, current_request
 from homeassistant.helpers.system_info import async_get_system_info
 from pykoplenti import ApiException
 
@@ -391,13 +392,7 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             _LOGGER.error("export_debug_bundle failed for entry %s: %s", entry_id, err)
             errors.append(f"{entry_id}: {err}")
 
-    # Without a user (automation, script) a signed link would belong to HA's
-    # read-only content user, which the admin-only view rejects.
-    has_user = bool(getattr(getattr(call, "context", None), "user_id", None))
-    links = [
-        _debug_bundle_link(hass, os.path.basename(path)) if has_user else None
-        for path in bundles
-    ]
+    links = [_debug_bundle_link(hass, os.path.basename(path)) for path in bundles]
     if bundles:
         # Persistent notifications are visible to every HA user, so the signed
         # links (usable without a login) go only to the caller's response.
@@ -408,9 +403,9 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             f"They are valid for {int(DEBUG_BUNDLE_LINK_TTL.total_seconds() // 60)} "
             f"minutes; files are deleted after {int(DEBUG_BUNDLE_RETENTION_S // 3600)} hours."
         )
-        if not has_user:
+        if None in links:
             msg += (
-                "\n\nStarted without a user (e.g. by an automation), so no download "
+                "\n\nStarted outside the UI/API (e.g. by an automation), so no download "
                 f"link was created. Copy the files from `{hass.config.path(DEBUG_BUNDLE_DIR)}` "
                 "or run the action from Developer Tools → Actions."
             )
@@ -438,13 +433,26 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
     }
 
 
-def _debug_bundle_link(hass: HomeAssistant, filename: str) -> str:
-    """Return a short-lived signed download path for ``filename``."""
-    path = f"{DEBUG_BUNDLE_URL}/{filename}"
+def _debug_bundle_link(hass: HomeAssistant, filename: str) -> str | None:
+    """Return a short-lived download path signed for the caller, if possible.
+
+    Signs with the refresh token of the caller's WebSocket connection or HTTP
+    request. Without one (automation, script) async_sign_path would fall back
+    to HA's read-only content user, whose links the admin-only view rejects.
+    """
     if getattr(hass, "http", None) is None:
-        # No HTTP server (headless instance): nothing could serve the link.
-        return path
-    return async_sign_path(hass, path, DEBUG_BUNDLE_LINK_TTL)
+        return None
+    refresh_token_id: str | None = None
+    if (connection := current_connection.get()) is not None:
+        refresh_token_id = connection.refresh_token_id
+    elif (request := current_request.get()) is not None:
+        refresh_token_id = request.get(KEY_HASS_REFRESH_TOKEN_ID)
+    if refresh_token_id is None:
+        return None
+    return async_sign_path(
+        hass, f"{DEBUG_BUNDLE_URL}/{filename}", DEBUG_BUNDLE_LINK_TTL,
+        refresh_token_id=refresh_token_id,
+    )
 
 
 class DebugBundleView(HomeAssistantView):
