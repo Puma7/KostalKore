@@ -213,6 +213,7 @@ async def test_debug_bundle_view_admin_only(
     assert response.status == 200
     assert await response.json() == {"ok": True}
     assert "attachment" in response.headers["Content-Disposition"]
+    assert response.headers["Cache-Control"] == "no-store"
 
     assert (await admin.get(f"{DEBUG_BUNDLE_URL}/secrets.yaml")).status == 404
     assert (await admin.get(f"{DEBUG_BUNDLE_URL}/kore_debug_x_20200101T000000000.json")).status == 404

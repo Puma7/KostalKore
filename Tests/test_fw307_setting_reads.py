@@ -1,7 +1,8 @@
 """Plenticore G3 FW 3.07.03.27419: single-setting GET reads return 404.
 
 Only the {module: [ids]} form (POST /settings) still works, and the hostname
-arrives JSON-quoted. See home-assistant/core#186638, #187116 and #187002.
+arrives as JSON ('{"Hostname":"scb-5b162a"}'). See home-assistant/core#186638,
+#187116 and #187002.
 """
 
 from __future__ import annotations
@@ -41,6 +42,11 @@ def test_all_setting_reads_use_the_dict_form() -> None:
 
 @pytest.mark.parametrize(("raw", "expected"), [
     ("scb", "scb"),
+    ('{"Hostname":"scb-5b162a"}', "scb-5b162a"),  # reported in core#187116
+    ('{"hostname": " scb "}', "scb"),
+    ('{"Other": "x"}', '{"Other": "x"}'),
+    ('{"Hostname": 5}', '{"Hostname": 5}'),
+    ('{broken', "{broken"),
     ('"scb"', "scb"),
     ('  " scb-g3 "  ', "scb-g3"),
     ('"broken"json"', '"broken"json"'),
@@ -72,7 +78,10 @@ class _Fw307Client:
         if isinstance(module_id, str) and isinstance(setting_id, str):
             raise ModuleNotFoundException(404, "Module or setting not found")
         assert isinstance(module_id, dict) and setting_id is None
-        return {module: {sid: '"scb"' for sid in ids} for module, ids in module_id.items()}
+        return {
+            module: {sid: '{"Hostname":"scb"}' for sid in ids}
+            for module, ids in module_id.items()
+        }
 
     async def get_me(self):
         return SimpleNamespace(role="USER")

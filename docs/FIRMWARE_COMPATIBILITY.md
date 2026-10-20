@@ -14,8 +14,8 @@ Field reports against the official integration show that this firmware answers
 **single-setting** REST reads (`GET /settings/{module}/{id}`, pykoplenti's
 `get_setting_values("module", "id")`) with `404 Module or setting not found`, while
 the bulk form (`POST /settings`, `get_setting_values({"module": [ids]})`) keeps
-working. The hostname setting is also returned as a JSON string literal
-(`"scb"` including the quotes). Sources: home-assistant/core
+working. The hostname setting is also returned as JSON
+(`{"Hostname":"scb-5b162a"}` in #187116) instead of the plain name. Sources: home-assistant/core
 [#186638](https://github.com/home-assistant/core/issues/186638),
 [#187116](https://github.com/home-assistant/core/issues/187116) and
 [#187002](https://github.com/home-assistant/core/issues/187002). Kostal has not
@@ -23,7 +23,7 @@ documented this change, so it was not verified on KORE hardware.
 
 KORE therefore uses only the `{module: [ids]}` form for every setting read (setup
 connection test, string-count discovery, shadow management, diagnostics,
-on-demand reads) and unquotes a JSON-quoted hostname. A test rejects any
+on-demand reads) and decodes a JSON-encoded hostname. A test rejects any
 reintroduced single-setting call. Process data already used the bulk form.
 
 ## Current KORE and ICN behavior

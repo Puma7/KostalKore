@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   404 (field reports: home-assistant/core#186638, #187116, #187002). That broke the
   setup connection test, DC string-count discovery and the shadow-management
   switches. Every setting read now uses the bulk `{module: [ids]}` form, which
-  that firmware still serves. A JSON-quoted hostname (`"scb"`) is unquoted
-  before it becomes the device name or entry title.
+  that firmware still serves. The hostname, which that firmware returns as JSON
+  (`{"Hostname":"scb-…"}`), is decoded before it becomes the device name or
+  entry title.
 - A process value the inverter briefly omits (e.g. PV `P` for a few seconds
   around 03:10, home-assistant/core#183701) raised an uncaught `KeyError` in
   pykoplenti's virtual PV sum and failed the whole REST poll. It is now handled

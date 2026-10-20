@@ -558,18 +558,24 @@ class PlenticoreDataFormatter:
 
 
 def normalize_hostname(value: Any, fallback: str) -> str:
-    """Return the inverter hostname without JSON string quoting.
+    """Return the plain inverter hostname from a possibly JSON-encoded value.
 
-    Plenticore G3 FW 3.07.03.27419 returns the hostname setting as a JSON
-    string literal (``'"scb"'``); unquote it so it does not leak into device
-    names, entry titles and entity IDs. Empty values fall back to ``fallback``.
+    Plenticore G3 FW 3.07.03.27419 returns the hostname setting as JSON
+    (``'{"Hostname":"scb-5b162a"}'``, home-assistant/core#187116); extract the
+    name so the JSON does not leak into device names, entry titles and entity
+    IDs. A JSON string literal is unquoted as well. Empty values fall back to
+    ``fallback``.
     """
     text = str(value).strip() if value is not None else ""
-    if len(text) >= 2 and text[0] == text[-1] == '"':
+    if text[:1] in ('{', '"'):
         try:
             decoded = json.loads(text)
         except ValueError:
             decoded = None
+        if isinstance(decoded, dict):
+            decoded = next(
+                (v for k, v in decoded.items() if str(k).lower() == "hostname"), None
+            )
         if isinstance(decoded, str):
             text = decoded.strip()
     return text or fallback

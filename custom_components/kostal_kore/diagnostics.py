@@ -478,7 +478,12 @@ class DebugBundleView(HomeAssistantView):
             return web.Response(status=HTTPStatus.NOT_FOUND)
         return web.FileResponse(
             path,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                # Never let a browser or proxy cache serve the bundle again
+                # without the admin check.
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
         )
 
 
