@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import logging
 import math
 import re
@@ -554,6 +555,24 @@ class PlenticoreDataFormatter:
             return fuse_states.get(value, f"Unknown fuse state: {state}")
         except (TypeError, ValueError):
             return state
+
+
+def normalize_hostname(value: Any, fallback: str) -> str:
+    """Return the inverter hostname without JSON string quoting.
+
+    Plenticore G3 FW 3.07.03.27419 returns the hostname setting as a JSON
+    string literal (``'"scb"'``); unquote it so it does not leak into device
+    names, entry titles and entity IDs. Empty values fall back to ``fallback``.
+    """
+    text = str(value).strip() if value is not None else ""
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        try:
+            decoded = json.loads(text)
+        except ValueError:
+            decoded = None
+        if isinstance(decoded, str):
+            text = decoded.strip()
+    return text or fallback
 
 
 async def get_hostname_id(client: ApiClient) -> str:

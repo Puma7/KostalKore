@@ -46,6 +46,7 @@ from .helper import (
     get_hostname_id,
     is_allowed_write_target,
     is_rest_write_supported_target,
+    normalize_hostname,
     parse_firmware_version,
     parse_modbus_exception,
     requires_advanced_write_arm,
@@ -468,7 +469,7 @@ class Plenticore:
             )
 
         network_settings = settings.get("scb:network", {})
-        hostname = network_settings.get(hostname_id, self.host)
+        hostname = normalize_hostname(network_settings.get(hostname_id), self.host)
 
         self.device_info = DeviceInfo(
             configuration_url=f"http://{self.host}",
@@ -531,7 +532,7 @@ class DataUpdateCoordinatorMixin:
             return None
 
         try:
-            data = await client.get_setting_values(module_id, data_id)
+            data = await client.get_setting_values({module_id: [data_id]})
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear transient inverter_busy issue on successful recovery.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:

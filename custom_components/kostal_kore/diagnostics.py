@@ -303,7 +303,7 @@ async def async_get_config_entry_diagnostics(
     string_count_setting = await _get_diagnostics_data_safe(
         plenticore,
         "string count",
-        lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, STRING_COUNT_SETTING)
+        lambda: plenticore.client.get_setting_values({DEVICES_LOCAL_MODULE: [STRING_COUNT_SETTING]})
     )
 
     string_count = 0
@@ -327,7 +327,7 @@ async def async_get_config_entry_diagnostics(
     if feature_ids:
         try:
             configuration_settings = await asyncio.wait_for(
-                plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, feature_ids),
+                plenticore.client.get_setting_values({DEVICES_LOCAL_MODULE: feature_ids}),
                 timeout=DIAGNOSTICS_TIMEOUT_SECONDS,
             )
         except Exception as err:

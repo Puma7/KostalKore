@@ -8,6 +8,24 @@
 The release notes name a corrected release, not an exhaustive affected-version
 range. Do not infer that every older generation/build has the same defect.
 
+## REST setting reads on G3 3.07.03.27419
+
+Field reports against the official integration show that this firmware answers
+**single-setting** REST reads (`GET /settings/{module}/{id}`, pykoplenti's
+`get_setting_values("module", "id")`) with `404 Module or setting not found`, while
+the bulk form (`POST /settings`, `get_setting_values({"module": [ids]})`) keeps
+working. The hostname setting is also returned as a JSON string literal
+(`"scb"` including the quotes). Sources: home-assistant/core
+[#186638](https://github.com/home-assistant/core/issues/186638),
+[#187116](https://github.com/home-assistant/core/issues/187116) and
+[#187002](https://github.com/home-assistant/core/issues/187002). Kostal has not
+documented this change, so it was not verified on KORE hardware.
+
+KORE therefore uses only the `{module: [ids]}` form for every setting read (setup
+connection test, string-count discovery, shadow management, diagnostics,
+on-demand reads) and unquotes a JSON-quoted hostname. A test rejects any
+reintroduced single-setting call. Process data already used the bulk form.
+
 ## Current KORE and ICN behavior
 
 Neither KORE's battery controller nor ICN currently uses 1024 for charging.
@@ -25,7 +43,7 @@ A limit such as 1038 is not the same operation as a directional power command.
 | Firmware situation | Current integration policy |
 |---|---|
 | Older G3 firmware | Retain existing supported control paths; do not introduce a 1024 dependency. |
-| G3 3.07.03.27419 | The documented 1024 fix is known; no automatic control-path change occurs. |
+| G3 3.07.03.27419 | The documented 1024 fix is known; no automatic control-path change occurs. REST setting reads use only the bulk form (see above). |
 | Unknown firmware or another generation | Keep existing paths and observed-feedback checks; do not assume the G3 fix applies. |
 
 An inverter firmware update is therefore not a prerequisite for the Wh-counter

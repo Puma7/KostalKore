@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Plenticore G3 firmware 3.07.03.27419 answers single-setting REST reads with
+  404 (field reports: home-assistant/core#186638, #187116, #187002). That broke the
+  setup connection test, DC string-count discovery and the shadow-management
+  switches. Every setting read now uses the bulk `{module: [ids]}` form, which
+  that firmware still serves. A JSON-quoted hostname (`"scb"`) is unquoted
+  before it becomes the device name or entry title.
+
 ### Security
 - Restrict the history/registry-rewriting actions `adopt_legacy_entity_ids`,
   `copy_legacy_history` and `apply_orphan_history_mapping`, the
