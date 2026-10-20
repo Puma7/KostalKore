@@ -743,9 +743,17 @@ class ModbusTcpProxyServer:
             if client is None or not getattr(client, "connected", False):
                 return self._error_response(FC_WRITE_MULTIPLE, 0x0B)
             try:
-                await self._coordinator.async_write_register(
-                    reg, decoded, audit_source="proxy_fc16"
-                )
+                if reg.address in REG_1038_ADDRESSES:
+                    # A client retry must not overwrite a feature that took over
+                    # REG 1038 while the first attempt failed.
+                    await self._coordinator.async_write_register(
+                        reg, decoded, audit_source="proxy_fc16",
+                        precondition=lambda: not self._reg_1038_locked_by_integration(),
+                    )
+                else:
+                    await self._coordinator.async_write_register(
+                        reg, decoded, audit_source="proxy_fc16"
+                    )
                 _LOGGER.info(
                     "Proxy: write-multiple reg %d = %s (external)", start_addr, decoded,
                 )

@@ -791,9 +791,17 @@ class KostalMqttBridge:
                 # and one acquiring during the write queues its write behind it.
                 if self._reject_if_reg_1038_owned(reg, value, source):
                     return
-                await self._coordinator.async_write_register(
-                    reg, value, audit_source="mqtt"
-                )
+                if reg.name == REG_BAT_MAX_CHARGE_LIMIT.name:
+                    # A client retry must not overwrite a feature that took over
+                    # REG 1038 while the first attempt failed.
+                    await self._coordinator.async_write_register(
+                        reg, value, audit_source="mqtt",
+                        precondition=lambda: not self._reg_1038_locked_by_integration(),
+                    )
+                else:
+                    await self._coordinator.async_write_register(
+                        reg, value, audit_source="mqtt"
+                    )
 
             self._command_count += 1
             _LOGGER.info(

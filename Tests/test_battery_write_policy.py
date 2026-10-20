@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import struct
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -161,3 +161,90 @@ async def test_mqtt_without_entry_id_skips_owner_lookup(hass: HomeAssistant) -> 
     bridge, coordinator = _bridge(hass, installer_access=True, entry_id="")
     await bridge._execute_write(REG_BAT_MAX_CHARGE_LIMIT, "2000", source="test")
     coordinator.async_write_register.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_client_retry_abandoned_when_owner_takes_reg_1038(hass: HomeAssistant) -> None:
+    """Interleaving: transient failure, feature acquires 1038, external retry must not land."""
+    from custom_components.kostal_kore.modbus_client import (
+        KostalModbusClient,
+        ModbusTransientError,
+        ModbusWriteError,
+    )
+
+    hass.data[DOMAIN] = {ENTRY_ID: {}}
+    manager = get_reg_1038_owner_manager(hass, ENTRY_ID)
+    client = KostalModbusClient("127.0.0.1")
+
+    def _fail_then_owner_acquires(*_args):
+        manager.try_acquire(OWNER_CHARGE_BLOCK)
+        raise ModbusTransientError("busy")
+
+    raw_write = AsyncMock(side_effect=_fail_then_owner_acquires)
+    with (
+        patch.object(client, "_raw_write", raw_write),
+        patch("custom_components.kostal_kore.modbus_client.asyncio.sleep", AsyncMock()),
+        pytest.raises(ModbusWriteError, match="precondition"),
+    ):
+        await client.write_register(
+            REG_BAT_MAX_CHARGE_LIMIT, 3000.0,
+            precondition=lambda: manager.current is None,
+        )
+    raw_write.assert_awaited_once()
+
+    # Without an ownership change the retry proceeds as before.
+    manager.release(OWNER_CHARGE_BLOCK)
+    raw_write = AsyncMock(side_effect=[ModbusTransientError("busy"), None])
+    with (
+        patch.object(client, "_raw_write", raw_write),
+        patch("custom_components.kostal_kore.modbus_client.asyncio.sleep", AsyncMock()),
+    ):
+        await client.write_register(
+            REG_BAT_MAX_CHARGE_LIMIT, 3000.0,
+            precondition=lambda: manager.current is None,
+        )
+    assert raw_write.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_coordinator_forwards_precondition_only_when_given() -> None:
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+
+    coordinator = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coordinator._client = MagicMock(write_register=AsyncMock())
+    coordinator._proxy_observations = {}
+    coordinator._write_audit = None
+    coordinator._record_commanded = MagicMock()
+
+    def guard() -> bool:
+        return True
+
+    await coordinator.async_write_register(REG_BAT_MAX_CHARGE_LIMIT, 1.0, precondition=guard)
+    coordinator._client.write_register.assert_awaited_with(
+        REG_BAT_MAX_CHARGE_LIMIT, 1.0, precondition=guard,
+    )
+    await coordinator.async_write_register(REG_ACTIVE_POWER_SETPOINT, 50)
+    coordinator._client.write_register.assert_awaited_with(REG_ACTIVE_POWER_SETPOINT, 50)
+
+
+@pytest.mark.asyncio
+async def test_mqtt_and_proxy_pass_reg_1038_precondition(hass: HomeAssistant) -> None:
+    hass.data[DOMAIN] = {ENTRY_ID: {}}
+    manager = get_reg_1038_owner_manager(hass, ENTRY_ID)
+
+    bridge, coordinator = _bridge(hass, installer_access=True)
+    await bridge._execute_write(REG_BAT_MAX_CHARGE_LIMIT, "2000", source="test")
+    guard = coordinator.async_write_register.await_args.kwargs["precondition"]
+    assert guard() is True
+    manager.try_acquire(OWNER_CHARGE_BLOCK)
+    assert guard() is False
+    manager.release(OWNER_CHARGE_BLOCK)
+
+    proxy = _proxy(installer_access=True, hass=hass)
+    proxy._coordinator.client = SimpleNamespace(connected=True)
+    pdu = struct.pack(">BHHBf", FC_WRITE_MULTIPLE, REG_BAT_MAX_CHARGE_LIMIT.address, 2, 4, 1000.0)
+    await proxy._handle_write_multiple(pdu)
+    guard = proxy._coordinator.async_write_register.await_args.kwargs["precondition"]
+    assert guard() is True
+    manager.try_acquire(OWNER_CHARGE_BLOCK)
+    assert guard() is False

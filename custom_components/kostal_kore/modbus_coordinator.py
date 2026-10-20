@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import time
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any, Final
 
@@ -561,11 +562,13 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         value: Any,
         *,
         audit_source: str = "modbus_coord",
+        precondition: Callable[[], bool] | None = None,
     ) -> None:
         """Write a value to a control register with safety validation.
 
         audit_source lets callers (MQTT bridge, proxy) tag the event so the
-        write-audit log distinguishes origin paths.
+        write-audit log distinguishes origin paths. precondition is checked
+        before every client retry (see KostalModbusClient.write_register).
         """
         if register.access != Access.RW:
             raise ValueError(f"Register {register.name} is read-only")
@@ -577,7 +580,10 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             self._proxy_observations.pop(register.name, None)
-            await self._client.write_register(register, value)
+            if precondition is None:
+                await self._client.write_register(register, value)
+            else:
+                await self._client.write_register(register, value, precondition=precondition)
             if register in CONTROL_READBACK_REGISTERS:
                 # The next refresh must read the device, not retain the old limit.
                 self._slow_tick = 5
