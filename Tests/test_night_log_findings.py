@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -63,6 +64,11 @@ def test_readback_tolerance_is_capped_below_half_a_step() -> None:
     assert not entity._readback_matches(20011.0, 20000)
     entity._attr_native_step = 0
     assert entity._readback_matches(20090.0, 20000)
+    # Exactly half a step off never confirms (isclose is inclusive).
+    entity._attr_native_step = 100
+    assert not entity._readback_matches(9950.0, 10000)
+    assert entity._readback_matches(9951.0, 10000)
+    entity._attr_native_step = 0
     # A zero read-back cannot confirm a small nonzero limit inside the 5 W floor.
     assert not entity._readback_matches(0.0, 5)
     assert entity._readback_matches(0.0, 0)
@@ -175,3 +181,64 @@ async def test_device_failure_during_device_info_read_still_drops_zeros(hass) ->
     client.read_register.assert_awaited()
     assert "grid_frequency" not in data
     assert "grid_frequency" not in coordinator.proxy_cache_data
+
+
+@pytest.mark.asyncio
+async def test_persisting_zero_with_device_failures_is_passed_on(hass) -> None:
+    """A real outage can coincide with 0x04 answers: drop at most two polls."""
+    client = _modbus_client()
+    client.device_failure_count = 0
+    client.retained_quality_addresses = set()
+    client.observation_generations = {}
+    sample = {"grid_frequency": 0.0}
+    failing = {"on": True}
+
+    async def _batch(registers):
+        if failing["on"]:
+            client.device_failure_count += 1
+        names = {r.name for r in registers}
+        return {k: v for k, v in sample.items() if k in names}
+
+    client.read_registers_batch = AsyncMock(side_effect=_batch)
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+    seen = [("grid_frequency" in await coordinator._async_poll_data()) for _ in range(4)]
+    assert seen == [False, False, True, True]
+    assert coordinator.proxy_cache_data["grid_frequency"] == 0.0
+    # A plausible reading resets the streak; the next glitch is dropped again.
+    sample["grid_frequency"] = 50.0
+    assert (await coordinator._async_poll_data())["grid_frequency"] == 50.0
+    sample["grid_frequency"] = 0.0
+    assert "grid_frequency" not in await coordinator._async_poll_data()
+    # Without a device-failure answer a zero passes and resets the streak too.
+    failing["on"] = False
+    assert (await coordinator._async_poll_data())["grid_frequency"] == 0.0
+    assert "grid_frequency" not in coordinator._zero_drop_streak
+
+
+@pytest.mark.asyncio
+async def test_only_suspect_zeros_are_held_back_from_the_proxy(hass) -> None:
+    """Other registers are published at once; a suspect zero keeps the previous
+    observation until the filter ran, so the proxy does not forward a raw read."""
+    client = _modbus_client()
+    client.device_failure_count = 0
+    client.retained_quality_addresses = set()
+    client.observation_generations = {}
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+    coordinator._proxy_observations["grid_frequency"] = (50.0, time.monotonic(), 0)
+    coordinator._slow_tick = 5
+    seen: list[dict] = []
+    calls = {"n": 0}
+
+    async def _batch(registers):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"grid_frequency": 0.0, "phase2_voltage": 231.0}
+        seen.append(coordinator.proxy_cache_data)
+        return {}
+
+    client.read_registers_batch = AsyncMock(side_effect=_batch)
+    data = await coordinator._async_poll_data()
+    assert seen[0]["phase2_voltage"] == 231.0 and seen[0]["grid_frequency"] == 50.0
+    # No device failure in this poll: the zero is real and now published.
+    assert data["grid_frequency"] == 0.0
+    assert coordinator.proxy_cache_data["grid_frequency"] == 0.0

@@ -12,12 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unconfirmed" although the inverter applied them: a G3 reads 1000 W back as
   997.9-999.9 W (current x battery voltage) and the check required an exact
   match. Power registers (W) now accept 0.5 % / at least 5 W, capped below half
-  an input step, so an ignored one-step command or a clamped limit (e.g. 51 W
+  an input step (exclusive), so an ignored one-step command or a clamped limit (e.g. 51 W
   instead of 1000 W) still fails. SoC and other registers stay exact.
 - The nightly G3 "Server device failure" (0x04) episode around 03:10 no longer
   publishes 0 Hz grid frequency, 0 V phase voltage or 0 % Modbus battery SoC:
   zero readings from a poll in which the inverter reported that error are
-  dropped for that poll (logged once at INFO). Grid-frequency and phase-voltage
+  dropped for that poll (logged once at INFO), for at most two polls in a row
+  per value, so a real outage that coincides with such answers is still seen. Grid-frequency and phase-voltage
   fire-safety alerts now need two consecutive extreme samples, so a single read
   fault no longer raises FIRE SAFETY [HIGH] (Puma7/KostalKore#85). Those zero
   readings are also never served to proxy clients (e.g. evcc), not even while

@@ -509,6 +509,9 @@ class ModbusNumberEntity(
             abs_tol = max(READBACK_POWER_MIN_ABS_TOL_W, abs(value) * READBACK_POWER_REL_TOL)
             step = float(getattr(self, "_attr_native_step", 0) or 0)
             if step > 0:
+                # A half-step miss never confirms; isclose() alone is inclusive.
+                if abs(observed - value) >= step / 2:
+                    return False
                 abs_tol = min(abs_tol, step / 2)
         return math.isclose(observed, value, rel_tol=1e-6, abs_tol=abs_tol)
 
