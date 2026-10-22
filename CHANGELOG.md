@@ -19,7 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zero readings from a poll in which the inverter reported that error are
   dropped for that poll (logged once at INFO). Grid-frequency and phase-voltage
   fire-safety alerts now need two consecutive extreme samples, so a single read
-  fault no longer raises FIRE SAFETY [HIGH] (Puma7/KostalKore#85).
+  fault no longer raises FIRE SAFETY [HIGH] (Puma7/KostalKore#85). Those zero
+  readings are also never served to proxy clients (e.g. evcc), not even while
+  the rest of the poll is still running.
+- Fire-safety alerts raised while the inverter is in standby (e.g. at night)
+  were returned without deduplication and storage, so a persisting battery
+  thermal or grid alert notified again on every check while the risk level
+  stayed "safe". Standby now only skips the PV-dependent checks.
 - "Unexpected negative home power" no longer floods the log (2202 warnings in
   one night): values down to -50 W are measurement noise and are clamped to 0
   silently; larger negatives warn at most once per register every 10 minutes.

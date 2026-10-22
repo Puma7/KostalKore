@@ -63,6 +63,9 @@ def test_readback_tolerance_is_capped_below_half_a_step() -> None:
     assert not entity._readback_matches(20011.0, 20000)
     entity._attr_native_step = 0
     assert entity._readback_matches(20090.0, 20000)
+    # A zero read-back cannot confirm a small nonzero limit inside the 5 W floor.
+    assert not entity._readback_matches(0.0, 5)
+    assert entity._readback_matches(0.0, 0)
     # Non-power registers (SoC %) stay exact; 0 must read back as 0.
     entity._register = mod.REG_BAT_MIN_SOC
     assert not entity._readback_matches(21.9, 22)
@@ -120,3 +123,34 @@ async def test_zero_readings_in_a_device_failure_poll_are_dropped(hass, device_f
     else:
         # Without the inverter's own error report a 0 is passed on as read.
         assert data["grid_frequency"] == 0.0 and data["battery_soc"] == 0
+
+
+@pytest.mark.asyncio
+async def test_proxy_never_serves_a_zero_rejected_later_in_the_poll(hass) -> None:
+    """Fast batch reads 0 Hz, the slow batch then answers 0x04: the proxy must
+    not publish the zero while the slow batch is still in flight."""
+    client = _modbus_client()
+    client.device_failure_count = 0
+    client.retained_quality_addresses = set()
+    client.observation_generations = {}
+    seen_by_proxy: list[dict] = []
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+    coordinator._slow_tick = 5  # this poll also runs the slow batch
+    calls = {"n": 0}
+
+    async def _batch(registers):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"grid_frequency": 0.0, "phase2_voltage": 231.0}
+        seen_by_proxy.append(coordinator.proxy_cache_data)
+        client.device_failure_count += 1
+        return {}
+
+    client.read_registers_batch = AsyncMock(side_effect=_batch)
+    data = await coordinator._async_poll_data()
+    assert calls["n"] == 2
+    assert "grid_frequency" not in data and data["phase2_voltage"] == 231.0
+    assert "grid_frequency" not in seen_by_proxy[0]
+    assert coordinator.proxy_cache_data == {"phase2_voltage": 231.0}
+    assert "grid_frequency" not in coordinator._proxy_observations
+    assert coordinator._proxy_observations["phase2_voltage"][0] == 231.0

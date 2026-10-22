@@ -198,18 +198,18 @@ class FireSafetyMonitor:
         new_alerts.extend(self._check_controller_thermal(data, now))
         new_alerts.extend(self._confirm_grid_alerts(self._check_grid_emergency(data, now)))
 
-        # Skip remaining checks when inverter is off/standby
+        # Skip the PV-dependent checks when inverter is off/standby; the
+        # always-run alerts above still go through deduplication below.
+        standby = False
         inverter_state = data.get("inverter_state")
         if inverter_state is not None:
             try:
-                state_int = int(inverter_state)
-                if state_int in (0, 1, 10, 15):
-                    return new_alerts
+                standby = int(inverter_state) in (0, 1, 10, 15)
             except (TypeError, ValueError):
                 pass
 
         # Isolation + DC checks ONLY when PV is active (need DC voltage for measurement)
-        if pv_active:
+        if pv_active and not standby:
             new_alerts.extend(self._check_isolation(data, now))
             new_alerts.extend(self._check_dc_string_anomaly(data, now))
 

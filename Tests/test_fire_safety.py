@@ -166,6 +166,16 @@ class TestFireSafetyMonitor:
         assert m.analyze(glitch) == []
         assert {a.category for a in m.analyze(glitch)} == {"grid_emergency", "voltage_extreme"}
 
+    def test_standby_alerts_are_deduplicated_and_stored(self) -> None:
+        """A persisting grid fault at night (state 10) notifies once, not every check."""
+        m = FireSafetyMonitor()
+        m._check_interval = 0
+        fault = {"grid_frequency": 47.0, "inverter_state": 10, "total_dc_power": 0.0}
+        assert m.analyze(fault) == []
+        assert [a.category for a in m.analyze(fault)] == ["grid_emergency"]
+        assert m.analyze(fault) == []
+        assert m.alert_count == 1 and m.current_risk_level != "safe"
+
     def test_grid_frequency_60hz_profile_no_emergency(self) -> None:
         m = FireSafetyMonitor()
         alerts = m.analyze({"grid_frequency": 60.2, "inverter_state": 6})

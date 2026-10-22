@@ -348,6 +348,9 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._update_count += 1
         device_failures_before = self._device_failure_count()
+        # Proxy observations are published only after the device-failure
+        # filter below, so proxy readers never see a zero this poll rejects.
+        staged: list[tuple[list[ModbusRegister], dict[str, Any]]] = []
         data: dict[str, Any] = {}
         fast_total = 0
         fast_errors = 0
@@ -365,7 +368,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._proxy_observations.clear()
             rejected = {r.name for r in fast_regs if r.address in getattr(self._client, "retained_quality_addresses", set())}
             batch_result = {name: value for name, value in batch_result.items() if name not in rejected}
-            self._observe_for_proxy(fast_regs, batch_result)
+            staged.append((fast_regs, batch_result))
             data.update(batch_result)
             # QA-3: take a single snapshot of the suppressed-address set via the
             # public `unavailable_registers` property (returns a frozenset and has
@@ -390,6 +393,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._fast_error_count += fast_errors
 
         if fast_total > 0 and fast_errors >= fast_total:
+            self._publish_proxy_observations(staged, set())
             raise UpdateFailed(
                 f"All {fast_total} fast-poll registers failed – inverter may be unreachable"
             )
@@ -412,11 +416,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 slow_result = await self._client.read_registers_batch(slow_regs)
                 if self._client.connection_generation != generation_before:
                     self._proxy_observations.clear()
+                    staged.clear()
                     for register in slow_regs:
                         data.pop(register.name, None)
                 rejected = {r.name for r in slow_regs if r.address in getattr(self._client, "retained_quality_addresses", set())}
                 slow_result = {name: value for name, value in slow_result.items() if name not in rejected}
-                self._observe_for_proxy(slow_regs, slow_result)
+                staged.append((slow_regs, slow_result))
                 self._last_slow_data = slow_result
                 self._last_slow_ts = time.monotonic()
                 suppressed = self._client.unavailable_registers
@@ -424,12 +429,17 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data.update(slow_result)
             except ModbusConnectionError as err:
                 self._slow_poll_stale = True
-                self._observe_for_proxy(slow_regs, {})
+                staged.append((slow_regs, {}))
                 _LOGGER.debug("Slow-poll connection lost: %s", err)
             except ModbusClientError as err:
                 self._slow_poll_stale = True
-                self._observe_for_proxy(slow_regs, {})
+                staged.append((slow_regs, {}))
                 _LOGGER.debug("Slow-poll batch failed: %s", err)
+
+        dropped: set[str] = set()
+        if self._device_failure_count() > device_failures_before:
+            dropped = self._drop_implausible_zeros(data)
+        self._publish_proxy_observations(staged, dropped)
 
         self._device_info_tick += 1
         if self._device_info_tick >= 60:
@@ -437,16 +447,24 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._read_device_info()
 
         await self._save_register_capability_state_if_changed()
-        if self._device_failure_count() > device_failures_before:
-            self._drop_implausible_zeros(data)
         return data
+
+    def _publish_proxy_observations(
+        self,
+        staged: list[tuple[list[ModbusRegister], dict[str, Any]]],
+        dropped: set[str],
+    ) -> None:
+        for registers, values in staged:
+            self._observe_for_proxy(
+                registers, {name: v for name, v in values.items() if name not in dropped},
+            )
 
     def _device_failure_count(self) -> int:
         """Server-device-failure answers the client has seen so far."""
         count = getattr(self._client, "device_failure_count", 0)
         return count if isinstance(count, int) else 0
 
-    def _drop_implausible_zeros(self, data: dict[str, Any]) -> None:
+    def _drop_implausible_zeros(self, data: dict[str, Any]) -> set[str]:
         """Drop 0 readings taken while the inverter reported an internal error.
 
         During the G3 "Server device failure" (0x04) episode around 03:10 some
@@ -461,13 +479,13 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
         for name in dropped:
             data.pop(name)
-            self._proxy_observations.pop(name, None)
         if dropped:
             _LOGGER.info(
                 "Inverter reported an internal error (Server device failure) during "
                 "this poll; dropped implausible zero readings: %s",
                 ", ".join(dropped),
             )
+        return set(dropped)
 
     def _capability_signature(self) -> str:
         sw_version = str(self._device_info.get("sw_version", "unknown"))

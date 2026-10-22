@@ -501,8 +501,9 @@ class ModbusNumberEntity(
 
     def _readback_matches(self, observed: float, value: float) -> bool:
         """Return True if a read-back confirms the commanded value."""
-        if value == 0:
-            return observed == 0
+        # A zero read-back never confirms a nonzero limit, whatever the tolerance.
+        if value == 0 or observed == 0:
+            return observed == value
         abs_tol = 1e-6
         if self._register.unit == "W":
             abs_tol = max(READBACK_POWER_MIN_ABS_TOL_W, abs(value) * READBACK_POWER_REL_TOL)
