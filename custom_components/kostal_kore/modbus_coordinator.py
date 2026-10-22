@@ -436,15 +436,16 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 staged.append((slow_regs, {}))
                 _LOGGER.debug("Slow-poll batch failed: %s", err)
 
-        dropped: set[str] = set()
-        if self._device_failure_count() > device_failures_before:
-            dropped = self._drop_implausible_zeros(data)
-        self._publish_proxy_observations(staged, dropped)
-
         self._device_info_tick += 1
         if self._device_info_tick >= 60:
             self._device_info_tick = 0
             await self._read_device_info()
+
+        # Checked after every Modbus read of this poll, device info included.
+        dropped: set[str] = set()
+        if self._device_failure_count() > device_failures_before:
+            dropped = self._drop_implausible_zeros(data)
+        self._publish_proxy_observations(staged, dropped)
 
         await self._save_register_capability_state_if_changed()
         return data

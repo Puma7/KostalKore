@@ -154,3 +154,24 @@ async def test_proxy_never_serves_a_zero_rejected_later_in_the_poll(hass) -> Non
     assert coordinator.proxy_cache_data == {"phase2_voltage": 231.0}
     assert "grid_frequency" not in coordinator._proxy_observations
     assert coordinator._proxy_observations["phase2_voltage"][0] == 231.0
+
+
+@pytest.mark.asyncio
+async def test_device_failure_during_device_info_read_still_drops_zeros(hass) -> None:
+    client = _modbus_client()
+    client.device_failure_count = 0
+    client.retained_quality_addresses = set()
+    client.observation_generations = {}
+    client.read_registers_batch = AsyncMock(return_value={"grid_frequency": 0.0})
+
+    async def _info(_register):
+        client.device_failure_count += 1  # the scheduled device-info read hits 0x04
+        return 0
+
+    client.read_register = AsyncMock(side_effect=_info)
+    coordinator = ModbusDataUpdateCoordinator(hass, client)
+    coordinator._device_info_tick = 59
+    data = await coordinator._async_poll_data()
+    client.read_register.assert_awaited()
+    assert "grid_frequency" not in data
+    assert "grid_frequency" not in coordinator.proxy_cache_data
