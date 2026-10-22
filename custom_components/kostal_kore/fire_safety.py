@@ -52,6 +52,11 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 RATE_WINDOW_SECONDS: Final[float] = 300.0
 MIN_SAMPLES_FOR_RATE: Final[int] = 3
+# Grid frequency / phase voltage extremes must persist across this many
+# consecutive checks. A single 0 Hz / 0 V sample while the inverter keeps
+# running is a read fault (G3 "Server device failure" around 03:10), not a
+# grid emergency.
+GRID_ALERT_CONFIRM_POLLS: Final[int] = 2
 
 
 class FireRiskLevel:
@@ -104,6 +109,7 @@ class FireSafetyMonitor:
         self._num_bidirectional: int = num_bidirectional
         self._dc_ratio_history: deque[tuple[float, float]] = deque(maxlen=200)
         self._consecutive_empty_polls: int = 0
+        self._grid_alert_streak: dict[str, int] = {}
 
     @property
     def alerts(self) -> list[SafetyAlert]:
@@ -190,20 +196,20 @@ class FireSafetyMonitor:
         # and grid faults can occur regardless of inverter operational state.
         new_alerts.extend(self._check_battery_thermal(data, now))
         new_alerts.extend(self._check_controller_thermal(data, now))
-        new_alerts.extend(self._check_grid_emergency(data, now))
+        new_alerts.extend(self._confirm_grid_alerts(self._check_grid_emergency(data, now)))
 
-        # Skip remaining checks when inverter is off/standby
+        # Skip the PV-dependent checks when inverter is off/standby; the
+        # always-run alerts above still go through deduplication below.
+        standby = False
         inverter_state = data.get("inverter_state")
         if inverter_state is not None:
             try:
-                state_int = int(inverter_state)
-                if state_int in (0, 1, 10, 15):
-                    return new_alerts
+                standby = int(inverter_state) in (0, 1, 10, 15)
             except (TypeError, ValueError):
                 pass
 
         # Isolation + DC checks ONLY when PV is active (need DC voltage for measurement)
-        if pv_active:
+        if pv_active and not standby:
             new_alerts.extend(self._check_isolation(data, now))
             new_alerts.extend(self._check_dc_string_anomaly(data, now))
 
@@ -507,6 +513,15 @@ class FireSafetyMonitor:
     # ------------------------------------------------------------------
     # Check 5: Grid emergency
     # ------------------------------------------------------------------
+
+    def _confirm_grid_alerts(self, candidates: list[SafetyAlert]) -> list[SafetyAlert]:
+        """Return grid alerts whose condition held for GRID_ALERT_CONFIRM_POLLS checks."""
+        streak = {
+            f"{a.category}:{a.title}": self._grid_alert_streak.get(f"{a.category}:{a.title}", 0) + 1
+            for a in candidates
+        }
+        self._grid_alert_streak = streak
+        return [a for a in candidates if streak[f"{a.category}:{a.title}"] >= GRID_ALERT_CONFIRM_POLLS]
 
     def _check_grid_emergency(self, data: dict[str, Any], now: float) -> list[SafetyAlert]:
         alerts: list[SafetyAlert] = []

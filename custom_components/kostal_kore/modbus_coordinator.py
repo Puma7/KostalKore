@@ -72,6 +72,15 @@ SLOW_GROUPS: Final[frozenset[RegisterGroup]] = frozenset({
     RegisterGroup.IO_BOARD,
 })
 
+# Readings that cannot be 0 while a grid-tied inverter keeps answering. A 0 in
+# a poll that also saw "Server device failure" is a read fault, not a value.
+IMPLAUSIBLE_ZERO_ON_DEVICE_FAILURE: Final[tuple[str, ...]] = (
+    "grid_frequency", "phase1_voltage", "phase2_voltage", "phase3_voltage", "battery_soc",
+)
+# A 0 that persists across more device-failure polls than this is passed on:
+# a real grid outage can coincide with 0x04 answers and must still be seen.
+MAX_CONSECUTIVE_ZERO_DROPS: Final[int] = 2
+
 # Data types the Modbus client encodes via int() (truncation). A commanded
 # value is normalized the same way before caching so the reported value can
 # never differ from what the inverter actually received.
@@ -141,6 +150,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Observations are separate from optimistic command/entity state. A
         # retained slow value or successful write never refreshes this cache.
         self._proxy_observations: dict[str, tuple[Any, float, int]] = {}
+        self._zero_drop_streak: dict[str, int] = {}
         self.communication = CommunicationState()
         self._communication_entry_id = entry_id
         self._communication_store = (Store[dict[str, Any]](
@@ -341,6 +351,10 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
         self._update_count += 1
+        device_failures_before = self._device_failure_count()
+        # Suspect zeros reach the proxy only after the device-failure filter
+        # below, so proxy readers never see a zero this poll rejects.
+        staged: list[tuple[list[ModbusRegister], dict[str, Any]]] = []
         data: dict[str, Any] = {}
         fast_total = 0
         fast_errors = 0
@@ -358,7 +372,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._proxy_observations.clear()
             rejected = {r.name for r in fast_regs if r.address in getattr(self._client, "retained_quality_addresses", set())}
             batch_result = {name: value for name, value in batch_result.items() if name not in rejected}
-            self._observe_for_proxy(fast_regs, batch_result)
+            self._observe_or_stage(fast_regs, batch_result, staged)
             data.update(batch_result)
             # QA-3: take a single snapshot of the suppressed-address set via the
             # public `unavailable_registers` property (returns a frozenset and has
@@ -383,6 +397,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._fast_error_count += fast_errors
 
         if fast_total > 0 and fast_errors >= fast_total:
+            self._publish_proxy_observations(staged, set())
             raise UpdateFailed(
                 f"All {fast_total} fast-poll registers failed – inverter may be unreachable"
             )
@@ -405,11 +420,12 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 slow_result = await self._client.read_registers_batch(slow_regs)
                 if self._client.connection_generation != generation_before:
                     self._proxy_observations.clear()
+                    staged.clear()
                     for register in slow_regs:
                         data.pop(register.name, None)
                 rejected = {r.name for r in slow_regs if r.address in getattr(self._client, "retained_quality_addresses", set())}
                 slow_result = {name: value for name, value in slow_result.items() if name not in rejected}
-                self._observe_for_proxy(slow_regs, slow_result)
+                self._observe_or_stage(slow_regs, slow_result, staged)
                 self._last_slow_data = slow_result
                 self._last_slow_ts = time.monotonic()
                 suppressed = self._client.unavailable_registers
@@ -429,8 +445,87 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._device_info_tick = 0
             await self._read_device_info()
 
+        # Checked after every Modbus read of this poll, device info included.
+        dropped = self._drop_implausible_zeros(
+            data, device_failure=self._device_failure_count() > device_failures_before,
+        )
+        self._publish_proxy_observations(staged, dropped)
+
         await self._save_register_capability_state_if_changed()
         return data
+
+    def _observe_or_stage(
+        self,
+        registers: list[ModbusRegister],
+        values: dict[str, Any],
+        staged: list[tuple[list[ModbusRegister], dict[str, Any]]],
+    ) -> None:
+        """Publish a batch to the proxy now, except zeros the filter may reject.
+
+        A suspect register keeps its previous observation until the filter has
+        run, so the proxy neither serves the zero nor forwards a raw read.
+        """
+        suspect = [
+            r for r in registers
+            if r.name in IMPLAUSIBLE_ZERO_ON_DEVICE_FAILURE and values.get(r.name) == 0
+        ]
+        self._observe_for_proxy([r for r in registers if r not in suspect], values)
+        if suspect:
+            staged.append((suspect, {r.name: values[r.name] for r in suspect}))
+
+    def _publish_proxy_observations(
+        self,
+        staged: list[tuple[list[ModbusRegister], dict[str, Any]]],
+        dropped: set[str],
+    ) -> None:
+        for registers, values in staged:
+            self._observe_for_proxy(
+                registers, {name: v for name, v in values.items() if name not in dropped},
+            )
+
+    def _device_failure_count(self) -> int:
+        """Server-device-failure answers the client has seen so far."""
+        count = getattr(self._client, "device_failure_count", 0)
+        return count if isinstance(count, int) else 0
+
+    def _drop_implausible_zeros(
+        self, data: dict[str, Any], *, device_failure: bool = True,
+    ) -> set[str]:
+        """Drop 0 readings taken while the inverter reported an internal error.
+
+        During the G3 "Server device failure" (0x04) episode around 03:10 some
+        reads fail and others return a well-formed 0. A grid-tied inverter
+        cannot see 0 Hz or 0 V on a phase while it keeps answering, so those
+        samples are read faults: leave the entity without a value for this
+        poll instead of publishing 0 (and feeding it to fire safety/proxy).
+        A zero that outlasts MAX_CONSECUTIVE_ZERO_DROPS such polls is passed on,
+        so a real outage that coincides with 0x04 answers is not hidden.
+        """
+        dropped: list[str] = []
+        for name in IMPLAUSIBLE_ZERO_ON_DEVICE_FAILURE:
+            if name not in data:
+                continue
+            if not device_failure or data[name] != 0:
+                self._zero_drop_streak.pop(name, None)
+                continue
+            streak = self._zero_drop_streak.get(name, 0) + 1
+            self._zero_drop_streak[name] = streak
+            if streak <= MAX_CONSECUTIVE_ZERO_DROPS:
+                dropped.append(name)
+                data.pop(name)
+            elif streak == MAX_CONSECUTIVE_ZERO_DROPS + 1:
+                _LOGGER.warning(
+                    "%s stayed 0 across %d polls with Server device failure "
+                    "answers; passing it on as a real reading",
+                    name, streak,
+                )
+        if dropped:
+            _LOGGER.info(
+                "Inverter reported an internal error (Server device failure) during "
+                "this poll; dropped implausible zero readings: %s",
+                ", ".join(dropped),
+            )
+        return set(dropped)
 
     def _capability_signature(self) -> str:
         sw_version = str(self._device_info.get("sw_version", "unknown"))

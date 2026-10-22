@@ -203,6 +203,9 @@ class KostalModbusClient:
         self._unavailable_strikes: dict[int, int] = {}
         self._unavailable_suppressed: dict[int, float] = {}
         self._last_exc_code: int | None = None
+        # Counts "Server device failure" (0x04) answers; the coordinator uses it
+        # to recognise a poll taken while the inverter reported an internal error.
+        self.device_failure_count: int = 0
         self._last_good_values: dict[int, Any] = {}
         self.observation_generations: dict[int, int] = {}
         self._outlier_policy = outlier_policy
@@ -733,6 +736,8 @@ class KostalModbusClient:
                 if resp.isError():
                     exc_code = getattr(resp, "exception_code", None)
                     self._last_exc_code = exc_code
+                    if exc_code == ModbusExceptionCode.SERVER_DEVICE_FAILURE:
+                        self.device_failure_count += 1
                     raise _classify_exception_response(resp)
                 if len(resp.registers) != count:
                     raise ModbusReadError(

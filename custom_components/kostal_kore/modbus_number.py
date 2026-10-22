@@ -57,6 +57,12 @@ G3_KEEPALIVE_MAX_SECONDS: Final[int] = 300
 G3_DEFAULT_FALLBACK_SECONDS: Final[int] = 60
 READBACK_ATTEMPTS: Final[int] = 3
 READBACK_RETRY_SECONDS: Final[float] = 0.2
+# Power limits (W) read back slightly off the written value: the inverter keeps
+# them as a battery current and reports current x present voltage (1000 W reads
+# 997.9-999.9 W on a G3 and drifts with the battery voltage). Accept that drift,
+# but stay below half an input step so an ignored one-step command still fails.
+READBACK_POWER_REL_TOL: Final[float] = 0.005
+READBACK_POWER_MIN_ABS_TOL_W: Final[float] = 5.0
 
 G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_G3_MAX_CHARGE.name,
@@ -431,8 +437,7 @@ class ModbusNumberEntity(
                         break
                     # UI steps are input increments, not device precision. An
                     # ignored one-step command must not count as confirmation.
-                    verified = (observed == 0 if value == 0 else
-                                math.isclose(observed, value, rel_tol=1e-6, abs_tol=1e-6))
+                    verified = self._readback_matches(observed, value)
                     if verified:
                         break
                     if attempt == READBACK_ATTEMPTS - 1:
@@ -470,9 +475,8 @@ class ModbusNumberEntity(
             try:
                 newest_value = self.coordinator.proxy_cache_data.get(self._register.name)
                 newest = float(newest_value) if newest_value is not None else math.nan
-                refresh_confirmed = math.isfinite(newest) and (
-                    newest == 0 if value == 0 else
-                    math.isclose(newest, value, rel_tol=1e-6, abs_tol=1e-6)
+                refresh_confirmed = math.isfinite(newest) and self._readback_matches(
+                    newest, value
                 )
             except (TypeError, ValueError):
                 refresh_confirmed = False
@@ -494,6 +498,22 @@ class ModbusNumberEntity(
             clear_control_lease_notice(getattr(self, "hass", None),
                                        getattr(self.coordinator, "_communication_entry_id", ""),
                                        control=f"modbus_{self._register.name}")
+
+    def _readback_matches(self, observed: float, value: float) -> bool:
+        """Return True if a read-back confirms the commanded value."""
+        # A zero read-back never confirms a nonzero limit, whatever the tolerance.
+        if value == 0 or observed == 0:
+            return observed == value
+        abs_tol = 1e-6
+        if self._register.unit == "W":
+            abs_tol = max(READBACK_POWER_MIN_ABS_TOL_W, abs(value) * READBACK_POWER_REL_TOL)
+            step = float(getattr(self, "_attr_native_step", 0) or 0)
+            if step > 0:
+                # A half-step miss never confirms; isclose() alone is inclusive.
+                if abs(observed - value) >= step / 2:
+                    return False
+                abs_tol = min(abs_tol, step / 2)
+        return math.isclose(observed, value, rel_tol=1e-6, abs_tol=abs_tol)
 
     def _start_keepalive(self, value: float) -> None:
         """Start or update the keepalive task for G3 cyclic registers."""

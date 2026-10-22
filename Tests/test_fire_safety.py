@@ -146,8 +146,35 @@ class TestFireSafetyMonitor:
 
     def test_grid_frequency_emergency(self) -> None:
         m = FireSafetyMonitor()
+        m._check_interval = 0
+        # A single extreme sample is a read fault, not yet an emergency ...
+        assert not m.analyze({"grid_frequency": 47.0, "inverter_state": 6})
+        # ... a persisting one is.
         alerts = m.analyze({"grid_frequency": 47.0, "inverter_state": 6})
         assert any(a.category == "grid_emergency" for a in alerts)
+
+    def test_single_zero_sample_raises_no_grid_alert(self) -> None:
+        """G3 nightly 'Server device failure' yields one 0 Hz / 0 V sample."""
+        m = FireSafetyMonitor()
+        m._check_interval = 0
+        glitch = {"grid_frequency": 0.0, "phase1_voltage": 0.0, "inverter_state": 6}
+        normal = {"grid_frequency": 50.0, "phase1_voltage": 231.0, "inverter_state": 6}
+        assert m.analyze(normal) == []
+        assert m.analyze(glitch) == []
+        assert m.analyze(normal) == []
+        # The streak was reset by the normal sample in between.
+        assert m.analyze(glitch) == []
+        assert {a.category for a in m.analyze(glitch)} == {"grid_emergency", "voltage_extreme"}
+
+    def test_standby_alerts_are_deduplicated_and_stored(self) -> None:
+        """A persisting grid fault at night (state 10) notifies once, not every check."""
+        m = FireSafetyMonitor()
+        m._check_interval = 0
+        fault = {"grid_frequency": 47.0, "inverter_state": 10, "total_dc_power": 0.0}
+        assert m.analyze(fault) == []
+        assert [a.category for a in m.analyze(fault)] == ["grid_emergency"]
+        assert m.analyze(fault) == []
+        assert m.alert_count == 1 and m.current_risk_level != "safe"
 
     def test_grid_frequency_60hz_profile_no_emergency(self) -> None:
         m = FireSafetyMonitor()
@@ -156,6 +183,8 @@ class TestFireSafetyMonitor:
 
     def test_phase_voltage_extreme(self) -> None:
         m = FireSafetyMonitor()
+        m._check_interval = 0
+        assert not m.analyze({"phase1_voltage": 280.0, "inverter_state": 6})
         alerts = m.analyze({"phase1_voltage": 280.0, "inverter_state": 6})
         assert any(a.category == "voltage_extreme" for a in alerts)
 

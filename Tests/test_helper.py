@@ -401,9 +401,25 @@ def test_sum_home_consumption_power_w_all_or_nothing() -> None:
 
 
 def test_safe_home_power_w_rejects_negative(caplog: pytest.LogCaptureFixture) -> None:
+    import custom_components.kostal_kore.helper as helper_mod
+
+    helper_mod._negative_home_power_warned_at.clear()
     with caplog.at_level("WARNING"):
-        assert safe_home_power_w(-5.0, register="home_from_pv") == 0.0
-    assert "home_from_pv" in caplog.text
+        # Noise around zero (2202 warnings in one night on a G3) is silent.
+        for _ in range(100):
+            assert safe_home_power_w(-6.0, register="home_from_grid") == 0.0
+        assert caplog.text == ""
+        # A real negative warns once per register and interval ...
+        for _ in range(3):
+            assert safe_home_power_w(-500.0, register="home_from_pv") == 0.0
+    assert caplog.text.count("home_from_pv") == 1
+    # ... and again once the interval has passed.
+    helper_mod._negative_home_power_warned_at["home_from_pv"] -= (
+        helper_mod.NEGATIVE_HOME_POWER_WARN_INTERVAL_S
+    )
+    with caplog.at_level("WARNING"):
+        safe_home_power_w(-500.0, register="home_from_pv")
+    assert caplog.text.count("home_from_pv") == 2
 
 
 def test_dc_pv_power_to_ac_estimate_w() -> None:
