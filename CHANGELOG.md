@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Modbus power-limit commands (e.g. REG 1038) failed as "Readback is
+  unconfirmed" although the inverter applied them: a G3 reads 1000 W back as
+  997.9-999.9 W (current x battery voltage) and the check required an exact
+  match. Power registers (W) now accept 0.5 % / at least 5 W, capped below half
+  an input step, so an ignored one-step command or a clamped limit (e.g. 51 W
+  instead of 1000 W) still fails. SoC and other registers stay exact.
+- The nightly G3 "Server device failure" (0x04) episode around 03:10 no longer
+  publishes 0 Hz grid frequency, 0 V phase voltage or 0 % Modbus battery SoC:
+  zero readings from a poll in which the inverter reported that error are
+  dropped for that poll (logged once at INFO). Grid-frequency and phase-voltage
+  fire-safety alerts now need two consecutive extreme samples, so a single read
+  fault no longer raises FIRE SAFETY [HIGH] (Puma7/KostalKore#85).
+- "Unexpected negative home power" no longer floods the log (2202 warnings in
+  one night): values down to -50 W are measurement noise and are clamped to 0
+  silently; larger negatives warn at most once per register every 10 minutes.
 - Plenticore G3 firmware 3.07.03.27419 answers single-setting REST reads with
   404 (field reports: home-assistant/core#186638, #187116, #187002). That broke the
   setup connection test, DC string-count discovery and the shadow-management

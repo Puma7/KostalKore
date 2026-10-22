@@ -72,6 +72,12 @@ SLOW_GROUPS: Final[frozenset[RegisterGroup]] = frozenset({
     RegisterGroup.IO_BOARD,
 })
 
+# Readings that cannot be 0 while a grid-tied inverter keeps answering. A 0 in
+# a poll that also saw "Server device failure" is a read fault, not a value.
+IMPLAUSIBLE_ZERO_ON_DEVICE_FAILURE: Final[tuple[str, ...]] = (
+    "grid_frequency", "phase1_voltage", "phase2_voltage", "phase3_voltage", "battery_soc",
+)
+
 # Data types the Modbus client encodes via int() (truncation). A commanded
 # value is normalized the same way before caching so the reported value can
 # never differ from what the inverter actually received.
@@ -341,6 +347,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed(f"Modbus connection lost: {err}") from err
 
         self._update_count += 1
+        device_failures_before = self._device_failure_count()
         data: dict[str, Any] = {}
         fast_total = 0
         fast_errors = 0
@@ -430,7 +437,37 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._read_device_info()
 
         await self._save_register_capability_state_if_changed()
+        if self._device_failure_count() > device_failures_before:
+            self._drop_implausible_zeros(data)
         return data
+
+    def _device_failure_count(self) -> int:
+        """Server-device-failure answers the client has seen so far."""
+        count = getattr(self._client, "device_failure_count", 0)
+        return count if isinstance(count, int) else 0
+
+    def _drop_implausible_zeros(self, data: dict[str, Any]) -> None:
+        """Drop 0 readings taken while the inverter reported an internal error.
+
+        During the G3 "Server device failure" (0x04) episode around 03:10 some
+        reads fail and others return a well-formed 0. A grid-tied inverter
+        cannot see 0 Hz or 0 V on a phase while it keeps answering, so those
+        samples are read faults: leave the entity without a value for this
+        poll instead of publishing 0 (and feeding it to fire safety/proxy).
+        """
+        dropped = [
+            name for name in IMPLAUSIBLE_ZERO_ON_DEVICE_FAILURE
+            if name in data and data[name] == 0
+        ]
+        for name in dropped:
+            data.pop(name)
+            self._proxy_observations.pop(name, None)
+        if dropped:
+            _LOGGER.info(
+                "Inverter reported an internal error (Server device failure) during "
+                "this poll; dropped implausible zero readings: %s",
+                ", ".join(dropped),
+            )
 
     def _capability_signature(self) -> str:
         sw_version = str(self._device_info.get("sw_version", "unknown"))

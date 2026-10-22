@@ -9,6 +9,7 @@ import logging
 import math
 import re
 import secrets
+import time
 from collections.abc import Callable
 from typing import Any, Final, cast
 
@@ -120,16 +121,32 @@ def optional_float(val: Any) -> float | None:
     return f
 
 
+# The home_from_* registers jitter a few watts below zero whenever the battery
+# or PV supplies the house (-0.07 to -12.75 W seen on a G3). That is measurement
+# noise, not a fault; only values beyond this band are worth a warning.
+HOME_POWER_NOISE_BAND_W: Final[float] = 50.0
+NEGATIVE_HOME_POWER_WARN_INTERVAL_S: Final[float] = 600.0
+_negative_home_power_warned_at: dict[str, float] = {}
+
+
 def safe_home_power_w(value: float | None, *, register: str) -> float:
-    """Return non-negative home power [W]; log unexpected negatives."""
+    """Return non-negative home power [W]; warn (rate-limited) on real negatives."""
     if value is None:
         return 0.0
     if value < 0:
-        _LOGGER.warning(
-            "Unexpected negative home power on %s: %s W — treating as 0",
-            register,
-            value,
-        )
+        if value >= -HOME_POWER_NOISE_BAND_W:
+            return 0.0
+        # Several consumers sum the same poll; one warning per register and
+        # interval is enough.
+        now = time.monotonic()
+        last = _negative_home_power_warned_at.get(register)
+        if last is None or now - last >= NEGATIVE_HOME_POWER_WARN_INTERVAL_S:
+            _negative_home_power_warned_at[register] = now
+            _LOGGER.warning(
+                "Unexpected negative home power on %s: %s W — treating as 0",
+                register,
+                value,
+            )
         return 0.0
     return value
 
