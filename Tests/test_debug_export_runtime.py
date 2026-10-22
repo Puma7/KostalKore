@@ -66,9 +66,12 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
     unsubscribe()
     assert result is not None and result["errors"] == []
     assert len(result["bundles"]) == 1
-    files = list((tmp_path / "www").glob("kore_debug_*.json"))
+    assert not (tmp_path / "www").exists()
+    files = list((tmp_path / "kostal_kore_debug").glob("kore_debug_*.json"))
     assert len(files) == 1
-    assert result["bundles"][0]["url"] == f"/local/{files[0].name}"
+    assert files[0].stat().st_mode & 0o077 == 0
+    # Called without a user: no (unusable) signed link, the file name instead.
+    assert result["bundles"][0] == {"file": files[0].name, "url": None}
     data = json.loads(files[0].read_text(encoding="utf-8"))
     assert data["modbus_snapshot"]["bat_max_charge_limit"] == 4500
     assert "synthetic-private-id" not in files[0].read_text(encoding="utf-8")
@@ -83,7 +86,9 @@ async def test_public_export_returns_result_and_writes_real_config(hass: HomeAss
         ["devices:local", "Dc_P"], ["devices:local:battery", "SoC"],
     ]
     assert runtime["rest_channels"][0]["fresh_fields"] == [["devices:local", "Grid_P"]]
-    assert "[Download " in notifications["kore_debug_bundle"]["message"]
+    message = notifications["kore_debug_bundle"]["message"]
+    assert files[0].name in message and "/api/kostal_kore" not in message
+    assert "no download link" in message
     communication = await hass.services.async_call(
         "kostal_kore", "communication_diagnostics", {}, blocking=True, return_response=True,
     )

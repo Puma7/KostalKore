@@ -36,7 +36,9 @@ from homeassistant.util import dt as dt_util
 from .communication import CommunicationState
 from .modbus_registers import (
     ALL_REGISTERS,
+    BATTERY_CONTROL_ADDRESSES,
     DEFAULT_UNIT_ID,
+    REG_BAT_MAX_CHARGE_LIMIT,
     REGISTER_BY_ADDRESS,
     Access,
     DataType,
@@ -180,10 +182,14 @@ def _build_register_image(
     return bytes(image)
 
 
-BATTERY_CONTROL_REGISTERS: Final[frozenset[int]] = frozenset({
-    1034, 1038, 1040, 1042, 1044,  # Section 3.4 battery management
-    1280, 1282, 1284, 1286, 1288,  # Section 3.5 G3 battery limits
-})
+# Every word of the writable section 3.4 battery-management (1026..1045) and
+# section 3.5 G3 limit (1280..1289) registers, derived from the register map.
+BATTERY_CONTROL_REGISTERS: Final[frozenset[int]] = BATTERY_CONTROL_ADDRESSES
+# Both words of the FLOAT32 charge-limit register 1038.
+REG_1038_ADDRESSES: Final[frozenset[int]] = frozenset(
+    range(REG_BAT_MAX_CHARGE_LIMIT.address,
+          REG_BAT_MAX_CHARGE_LIMIT.address + REG_BAT_MAX_CHARGE_LIMIT.count)
+)
 
 
 class ModbusTcpProxyServer:
@@ -599,7 +605,7 @@ class ModbusTcpProxyServer:
                 self._log_audit(f"addr:{address}", value, "rejected_soc_active", "FC06")
                 return self._error_response(FC_WRITE_SINGLE, 0x06)
 
-        if address == 1038 and self._reg_1038_locked_by_integration():
+        if address in REG_1038_ADDRESSES and self._reg_1038_locked_by_integration():
             _LOGGER.warning(
                 "Proxy: REJECTED write to reg 1038 = %d (held by integration feature).",
                 value,
@@ -705,7 +711,8 @@ class ModbusTcpProxyServer:
                 self._log_audit(f"addr:{start_addr}", None, "rejected_soc_active", "FC16")
                 return self._error_response(FC_WRITE_MULTIPLE, 0x06)
 
-        if 1038 in write_range and self._reg_1038_locked_by_integration():
+        if (not REG_1038_ADDRESSES.isdisjoint(write_range)
+                and self._reg_1038_locked_by_integration()):
             _LOGGER.warning(
                 "Proxy: REJECTED write-multiple touching reg 1038 (held by integration).",
             )
@@ -736,9 +743,17 @@ class ModbusTcpProxyServer:
             if client is None or not getattr(client, "connected", False):
                 return self._error_response(FC_WRITE_MULTIPLE, 0x0B)
             try:
-                await self._coordinator.async_write_register(
-                    reg, decoded, audit_source="proxy_fc16"
-                )
+                if reg.address in REG_1038_ADDRESSES:
+                    # A client retry must not overwrite a feature that took over
+                    # REG 1038 while the first attempt failed.
+                    await self._coordinator.async_write_register(
+                        reg, decoded, audit_source="proxy_fc16",
+                        precondition=lambda: not self._reg_1038_locked_by_integration(),
+                    )
+                else:
+                    await self._coordinator.async_write_register(
+                        reg, decoded, audit_source="proxy_fc16"
+                    )
                 _LOGGER.info(
                     "Proxy: write-multiple reg %d = %s (external)", start_addr, decoded,
                 )

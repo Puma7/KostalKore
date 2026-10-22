@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Plenticore G3 firmware 3.07.03.27419 answers single-setting REST reads with
+  404 (field reports: home-assistant/core#186638, #187116, #187002). That broke the
+  setup connection test, DC string-count discovery and the shadow-management
+  switches. Every setting read now uses the bulk `{module: [ids]}` form, which
+  that firmware still serves. The hostname, which that firmware returns as JSON
+  (`{"Hostname":"scb-…"}`), is decoded before it becomes the device name or
+  entry title.
+- A process value the inverter briefly omits (e.g. PV `P` for a few seconds
+  around 03:10, home-assistant/core#183701) raised an uncaught `KeyError` in
+  pykoplenti's virtual PV sum and failed the whole REST poll. It is now handled
+  like other transient REST errors: last known values within the stale window,
+  otherwise a regular update failure with communication health reporting.
+
+### Security
+- Restrict the history/registry-rewriting actions `adopt_legacy_entity_ids`,
+  `copy_legacy_history` and `apply_orphan_history_mapping`, the
+  `export_debug_bundle` action and the *Import Legacy Plenticore Data* /
+  *Finalize Legacy Cleanup* buttons to Home Assistant administrators. Calls
+  without a user (automations, scripts) are still accepted, as for HA's own
+  admin services. A confirmation code proves intent, not authority.
+- Write debug bundles to the private `kostal_kore_debug` config directory and
+  serve them through an authenticated, admin-only download with one-hour
+  signed links that are returned only in the action response (the persistent
+  notification, visible to all users, lists file names only); bundles are
+  deleted after 24 hours. Previously they were placed
+  in `www`, which `/local` serves without authentication. Delete any old
+  `www/kore_debug_*.json` exports.
+- Apply the installer gate and SoC-controller arbitration of the Modbus proxy
+  and MQTT bridge to every writable battery-management (1026–1044) and G3
+  limit/fallback (1280–1288) register, derived from the register map, and to
+  every word of those registers. The two paths previously used different,
+  incomplete hand-written lists (e.g. 1026–1036 via the proxy, the G3 fallback
+  registers via MQTT were unprotected).
+- Reject MQTT writes to the charge limit (REG 1038) while an integration
+  feature (Grid Feed-In Optimizer, Block Battery Charging, battery test) owns
+  it, matching the proxy. The proxy check now also covers the register's
+  second word.
+- Redact the inverter host from the device block of config-entry diagnostics
+  (`configuration_url`, and the device name when it falls back to the host).
+- `check_inverter_api.py` no longer accepts credentials as command-line
+  arguments and escapes control characters in printed inverter responses.
+
 ### Added
 - Export allowlisted cached inverter firmware, battery management mode and
   finite numeric battery-control settings with per-field freshness. Exporting

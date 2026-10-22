@@ -1485,7 +1485,7 @@ async def async_setup_entry(
     if dc_string_count < 1:
         try:
             string_count_setting = await asyncio.wait_for(
-                plenticore.client.get_setting_values("devices:local", "Properties:StringCnt"),
+                plenticore.client.get_setting_values({"devices:local": ["Properties:StringCnt"]}),
                 timeout=DC_STRING_COUNT_TIMEOUT,
             )
             dc_string_count = int(

@@ -19,6 +19,7 @@ import asyncio
 import logging
 import math
 import struct
+from collections.abc import Callable
 from enum import IntEnum
 from typing import Any, Final
 
@@ -523,13 +524,28 @@ class KostalModbusClient:
 
         return value
 
-    async def write_register(self, register: ModbusRegister, value: Any) -> None:
-        """Encode and write a value with retry on transient errors."""
+    async def write_register(
+        self,
+        register: ModbusRegister,
+        value: Any,
+        *,
+        precondition: Callable[[], bool] | None = None,
+    ) -> None:
+        """Encode and write a value with retry on transient errors.
+
+        ``precondition`` is re-evaluated before every retry: retries run after
+        an awaited delay outside the scheduler lock, so a write that was valid
+        when issued may no longer be (e.g. a feature took over REG 1038).
+        """
         if register.access != Access.RW:
             raise ModbusWriteError(f"Register {register.name} is read-only")
         encoded = self._encode(value, register)
 
         for attempt in range(1 + MAX_RETRIES):
+            if attempt and precondition is not None and not precondition():
+                raise ModbusWriteError(
+                    f"Retry of {register.name} abandoned: write precondition no longer holds"
+                )
             try:
                 await self._raw_write(register.address, encoded, register.count)
                 return

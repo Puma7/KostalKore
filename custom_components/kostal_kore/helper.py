@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import logging
 import math
 import re
@@ -12,7 +13,8 @@ from collections.abc import Callable
 from typing import Any, Final, cast
 
 from aiohttp.client_exceptions import ClientError
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import Unauthorized, UnknownUser
 from pykoplenti import ApiClient, ApiException
 
 from .const import CONF_INSTALLER_ACCESS, DOMAIN
@@ -555,6 +557,30 @@ class PlenticoreDataFormatter:
             return state
 
 
+def normalize_hostname(value: Any, fallback: str) -> str:
+    """Return the plain inverter hostname from a possibly JSON-encoded value.
+
+    Plenticore G3 FW 3.07.03.27419 returns the hostname setting as JSON
+    (``'{"Hostname":"scb-5b162a"}'``, home-assistant/core#187116); extract the
+    name so the JSON does not leak into device names, entry titles and entity
+    IDs. A JSON string literal is unquoted as well. Empty values fall back to
+    ``fallback``.
+    """
+    text = str(value).strip() if value is not None else ""
+    if text[:1] in ('{', '"'):
+        try:
+            decoded = json.loads(text)
+        except ValueError:
+            decoded = None
+        if isinstance(decoded, dict):
+            decoded = next(
+                (v for k, v in decoded.items() if str(k).lower() == "hostname"), None
+            )
+        if isinstance(decoded, str):
+            text = decoded.strip()
+    return text or fallback
+
+
 async def get_hostname_id(client: ApiClient) -> str:
     """Check for known existing hostname ids with timeout protection."""
     try:
@@ -807,6 +833,23 @@ def validate_cross_field_write_rules(
         # If value cannot be parsed as float, let lower-level validation handle it.
         return None
     return None
+
+
+async def async_require_admin(hass: HomeAssistant, context: Context | None) -> None:
+    """Raise unless ``context`` belongs to an administrator or to no user.
+
+    Mirrors Home Assistant's admin-service guard: calls without a user
+    (automations, scripts, internal callers) pass, a non-admin user raises
+    ``Unauthorized``. A confirmation code proves intent, not authority.
+    """
+    user_id = context.user_id if context is not None else None
+    if not user_id:
+        return
+    user = await hass.auth.async_get_user(user_id)
+    if user is None:
+        raise UnknownUser(context=context, user_id=user_id)
+    if not user.is_admin:
+        raise Unauthorized(context=context)
 
 
 def ensure_installer_access(

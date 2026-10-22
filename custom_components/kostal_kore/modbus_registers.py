@@ -350,6 +350,24 @@ WRITABLE_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
     r for r in ALL_REGISTERS if r.access == Access.RW
 )
 
+# Writable battery-management (section 3.4) and G3 battery-limit (section 3.5)
+# registers. Single source for the installer gate and SoC-controller
+# arbitration on the external write paths (Modbus proxy, MQTT bridge).
+BATTERY_CONTROL_REGISTERS: Final[tuple[ModbusRegister, ...]] = tuple(
+    r for r in WRITABLE_REGISTERS
+    if r.group in (RegisterGroup.BATTERY_MGMT, RegisterGroup.BATTERY_LIMIT_G3)
+)
+BATTERY_CONTROL_NAMES: Final[frozenset[str]] = frozenset(
+    r.name for r in BATTERY_CONTROL_REGISTERS
+)
+# Every 16-bit word of those registers, so a raw write that starts at or only
+# covers the second word of a FLOAT32/UINT32 is protected as well.
+BATTERY_CONTROL_ADDRESSES: Final[frozenset[int]] = frozenset(
+    address
+    for r in BATTERY_CONTROL_REGISTERS
+    for address in range(r.address, r.address + r.count)
+)
+
 # Inverter state lookup
 INVERTER_STATES: Final[dict[int, str]] = {
     0: "Off", 1: "Init", 2: "IsoMeas", 3: "GridCheck",

@@ -878,7 +878,7 @@
         },
         "export_debug_bundle": {
             "name": "Export debug bundle",
-            "description": "Write a redacted diagnostic JSON snapshot to /config/www/ and notify with download URLs."
+            "description": "Administrators only: write a redacted diagnostic JSON snapshot to the private kostal_kore_debug folder of the configuration directory and return signed download URLs (valid for one hour; files are deleted after 24 hours)."
         }
     }
 }

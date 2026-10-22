@@ -14,6 +14,18 @@ from pykoplenti import SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
+def _split_request(request):
+    """Map a {module: [ids]} settings request to the old (module, id) call shape.
+
+    The integration only uses the list/dict form now (FW 3.07.03 rejects the
+    single-setting GET form); the fakes below were written for the old shape.
+    """
+    ((module_id, ids),) = request.items()
+    if isinstance(ids, list) and len(ids) == 1:
+        ids = ids[0]
+    return module_id, ids
+
+
 def _mock_mqtt_module() -> MagicMock:
     mock = MagicMock(spec=ModuleType)
     mock.async_publish = AsyncMock()
@@ -370,7 +382,8 @@ async def test_switch_setup_uses_individual_shadow_queries_after_batch_500(hass)
     feature1 = string_feature_id(1)
     feature2 = string_feature_id(2)
 
-    async def _get_setting_values(module_id: str, data_id):
+    async def _get_setting_values(request):
+        module_id, data_id = _split_request(request)
         if data_id == SettingId.STRING_COUNT:
             return {ModuleId.DEVICES_LOCAL: {SettingId.STRING_COUNT: "3"}}
         if data_id == (feature0, feature1, feature2):

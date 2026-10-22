@@ -766,7 +766,7 @@ async def async_setup_entry(
         try:
             string_count_setting = await asyncio.wait_for(
                 plenticore.client.get_setting_values(
-                    ModuleId.DEVICES_LOCAL, SettingId.STRING_COUNT
+                    {ModuleId.DEVICES_LOCAL: [SettingId.STRING_COUNT]}
                 ),
                 timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
             )
@@ -833,8 +833,7 @@ async def async_setup_entry(
                     dict[str, dict[str, str]],
                     await asyncio.wait_for(
                         plenticore.client.get_setting_values(
-                            PlenticoreShadowMgmtSwitch.MODULE_ID,
-                            dc_string_feature_ids,
+                            {PlenticoreShadowMgmtSwitch.MODULE_ID: dc_string_feature_ids}
                         ),
                         timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
                     ),
@@ -875,8 +874,7 @@ async def async_setup_entry(
                             )
                             single_feature = await asyncio.wait_for(
                                 plenticore.client.get_setting_values(
-                                    PlenticoreShadowMgmtSwitch.MODULE_ID,
-                                    (feature_id,),
+                                    {PlenticoreShadowMgmtSwitch.MODULE_ID: (feature_id,)}
                                 ),
                                 timeout=SWITCH_SETTINGS_FETCH_TIMEOUT_SECONDS,
                             )

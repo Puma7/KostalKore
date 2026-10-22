@@ -20,6 +20,18 @@ from custom_components.kostal_kore import config_flow, diagnostics, helper, repa
 from custom_components.kostal_kore.const import CONF_HOST, CONF_PASSWORD, DOMAIN
 
 
+def _split_request(request):
+    """Map a {module: [ids]} settings request to the old (module, id) call shape.
+
+    The integration only uses the list/dict form now (FW 3.07.03 rejects the
+    single-setting GET form); the fakes below were written for the old shape.
+    """
+    ((module_id, ids),) = request.items()
+    if isinstance(ids, list) and len(ids) == 1:
+        ids = ids[0]
+    return module_id, ids
+
+
 @pytest.mark.parametrize(
     "err",
     [
@@ -324,7 +336,8 @@ async def test_test_connection_safe_success(hass: HomeAssistant) -> None:
         async def login(self, _password, service_code=None):
             return None
 
-        async def get_setting_values(self, module_id, data_id):
+        async def get_setting_values(self, request):
+            module_id, data_id = _split_request(request)
             return {module_id: {data_id: "scb"}}
 
         async def get_me(self):
@@ -539,7 +552,8 @@ async def test_get_diagnostics_data_safe_success() -> None:
 
 @pytest.mark.asyncio
 async def test_async_get_config_entry_diagnostics(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
-    async def _get_setting_values(module_id, data_id):
+    async def _get_setting_values(request):
+        module_id, data_id = _split_request(request)
         if data_id == diagnostics.STRING_COUNT_SETTING:
             return {module_id: {diagnostics.STRING_COUNT_SETTING: "2"}}
         return {module_id: {data_id[0]: "A", data_id[1]: "B"}}
@@ -567,7 +581,8 @@ async def test_async_get_config_entry_diagnostics(hass: HomeAssistant, mock_conf
 async def test_async_get_config_entry_diagnostics_string_count_parse_error(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry
 ) -> None:
-    async def _get_setting_values(module_id, data_id):
+    async def _get_setting_values(request):
+        module_id, data_id = _split_request(request)
         return {module_id: {diagnostics.STRING_COUNT_SETTING: "bad"}}
 
     plenticore = SimpleNamespace(
@@ -991,7 +1006,8 @@ async def test_diagnostics_string_count_clamped(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry
 ) -> None:
     """Test StringCnt out of sane range is clamped (covers diagnostics.py:170)."""
-    async def _get_setting_values(module_id, data_id):
+    async def _get_setting_values(request):
+        module_id, data_id = _split_request(request)
         if data_id == diagnostics.STRING_COUNT_SETTING:
             return {module_id: {diagnostics.STRING_COUNT_SETTING: "99"}}
         return {module_id: {data_id[0]: "A"}}
@@ -1022,7 +1038,8 @@ async def test_diagnostics_config_fetch_error(
     """Test config settings fetch error is captured (covers diagnostics.py:186-189,196)."""
     call_count = 0
 
-    async def _get_setting_values(module_id, data_id):
+    async def _get_setting_values(request):
+        module_id, data_id = _split_request(request)
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -1279,7 +1296,8 @@ async def test_diagnostics_configuration_settings_none_fallback(
     """Test configuration_settings or {} when get_setting_values returns None (covers diagnostics.py:193)."""
     call_count = 0
 
-    async def _get_setting_values(module_id, data_id):
+    async def _get_setting_values(request):
+        module_id, data_id = _split_request(request)
         nonlocal call_count
         call_count += 1
         if call_count == 1:

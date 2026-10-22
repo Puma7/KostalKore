@@ -55,6 +55,10 @@ async def test_entry_diagnostics(
 
     assert diagnostics["device"]["model"] == "PLENTICORE plus 10"
     assert diagnostics["device"]["sw_version"] == "IOC: 01.45 MC: 01.46"
+    # The host is redacted from the device block too, not only from entry data.
+    assert diagnostics["device"]["configuration_url"] == REDACTED
+    assert diagnostics["device"]["name"] == "scb"
+    assert "192.168.1.2" not in str(diagnostics["device"])
 
 
 async def test_entry_diagnostics_invalid_string_count(

@@ -19,6 +19,18 @@ from pykoplenti import ApiException, ProcessData, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
+def _split_request(request):
+    """Map a {module: [ids]} settings request to the old (module, id) call shape.
+
+    The integration only uses the list/dict form now (FW 3.07.03 rejects the
+    single-setting GET form); the fakes below were written for the old shape.
+    """
+    ((module_id, ids),) = request.items()
+    if isinstance(ids, list) and len(ids) == 1:
+        ids = ids[0]
+    return module_id, ids
+
+
 def _mock_entry() -> MockConfigEntry:
     return MockConfigEntry(
         entry_id="cov-entry",
@@ -698,7 +710,8 @@ async def test_additional_hard_branches_switch_number_coordinator(hass: HomeAssi
 
     p.client.get_settings = AsyncMock(return_value={"devices:local": []})
 
-    async def _switch_values(module_id, data_ids):
+    async def _switch_values(request):
+        module_id, data_ids = _split_request(request)
         if module_id == "devices:local" and data_ids == "Properties:StringCnt":
             return {"devices:local": {"Properties:StringCnt": "1"}}
         # batch query -> force fallback path
@@ -1115,7 +1128,8 @@ async def test_final_gap_branches_switch_number_sensor_coordinator(hass: HomeAss
     pl.client.get_settings = AsyncMock(return_value={"devices:local": []})
 
     # 767-772 ApiException non-500 in batch query
-    async def _batch_api(module_id, data_ids):
+    async def _batch_api(request):
+        module_id, data_ids = _split_request(request)
         if data_ids == "Properties:StringCnt":
             return {"devices:local": {"Properties:StringCnt": "1"}}
         raise ApiException("illegal function")
@@ -1124,7 +1138,8 @@ async def test_final_gap_branches_switch_number_sensor_coordinator(hass: HomeAss
     await switch_mod.async_setup_entry(hass, e2, lambda _ents: None)
 
     # 774-775 non-ApiException in batch query
-    async def _batch_client(module_id, data_ids):
+    async def _batch_client(request):
+        module_id, data_ids = _split_request(request)
         if data_ids == "Properties:StringCnt":
             return {"devices:local": {"Properties:StringCnt": "1"}}
         raise ClientError("client boom")
@@ -1133,7 +1148,8 @@ async def test_final_gap_branches_switch_number_sensor_coordinator(hass: HomeAss
     await switch_mod.async_setup_entry(hass, e2, lambda _ents: None)
 
     # 794-795 invalid integer conversion for feature value
-    async def _feature_invalid(module_id, data_ids):
+    async def _feature_invalid(request):
+        module_id, data_ids = _split_request(request)
         if data_ids == "Properties:StringCnt":
             return {"devices:local": {"Properties:StringCnt": "1"}}
         if isinstance(data_ids, tuple) and len(data_ids) == 1:

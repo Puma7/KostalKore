@@ -7,16 +7,25 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import asdict  # noqa: F401
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
 from typing import Any, Awaitable, Callable, Final
 
+from aiohttp import web
 from homeassistant.components.diagnostics import REDACTED, async_redact_data
-from homeassistant.const import ATTR_IDENTIFIERS, CONF_PASSWORD
+from homeassistant.components.http.auth import async_sign_path
+from homeassistant.components.http.const import KEY_HASS_REFRESH_TOKEN_ID, KEY_HASS_USER
+from homeassistant.components.websocket_api.connection import current_connection
+from homeassistant.const import ATTR_CONFIGURATION_URL, ATTR_IDENTIFIERS, ATTR_NAME, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv  # noqa: F401
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.http import HomeAssistantView, current_request
 from homeassistant.helpers.system_info import async_get_system_info
 from pykoplenti import ApiException
 
@@ -25,11 +34,23 @@ from .const_ids import STRING_FEATURE_TEMPLATE, ModuleId, SettingId, string_feat
 from .coordinator import PlenticoreConfigEntry
 
 # Import MODBUS exception handling from coordinator
-from .helper import parse_modbus_exception
+from .helper import async_require_admin, parse_modbus_exception
 
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_EXPORT_DEBUG_BUNDLE = "export_debug_bundle"
+
+# Debug bundles hold household telemetry and the write audit. They live in a
+# private directory of the HA config dir (never ``www``, which /local serves
+# without authentication) and are downloaded through an authenticated view.
+DEBUG_BUNDLE_DIR: Final[str] = "kostal_kore_debug"
+DEBUG_BUNDLE_URL: Final[str] = "/api/kostal_kore/debug_bundle"
+DEBUG_BUNDLE_LINK_TTL: Final[timedelta] = timedelta(hours=1)
+DEBUG_BUNDLE_RETENTION_S: Final[float] = 24 * 3600.0
+DEBUG_BUNDLE_PRUNE_INTERVAL: Final[timedelta] = timedelta(hours=1)
+_DEBUG_BUNDLE_NAME_RE: Final = re.compile(r"kore_debug_[A-Za-z0-9_-]{0,8}_\d{8}T\d{9}\.json")
+_DATA_DEBUG_BUNDLE_VIEW: Final[str] = f"{DOMAIN}_debug_bundle_view"
+_DATA_DEBUG_BUNDLE_PRUNE: Final[str] = f"{DOMAIN}_debug_bundle_prune"
 
 DEVICE_CONTEXT_FIELDS: Final[tuple[str, ...]] = (
     "sw_version", "product_name", "inverter_state", "inverter_max_power",
@@ -283,7 +304,7 @@ async def async_get_config_entry_diagnostics(
     string_count_setting = await _get_diagnostics_data_safe(
         plenticore,
         "string count",
-        lambda: plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, STRING_COUNT_SETTING)
+        lambda: plenticore.client.get_setting_values({DEVICES_LOCAL_MODULE: [STRING_COUNT_SETTING]})
     )
 
     string_count = 0
@@ -307,7 +328,7 @@ async def async_get_config_entry_diagnostics(
     if feature_ids:
         try:
             configuration_settings = await asyncio.wait_for(
-                plenticore.client.get_setting_values(DEVICES_LOCAL_MODULE, feature_ids),
+                plenticore.client.get_setting_values({DEVICES_LOCAL_MODULE: feature_ids}),
                 timeout=DIAGNOSTICS_TIMEOUT_SECONDS,
             )
         except Exception as err:
@@ -325,6 +346,11 @@ async def async_get_config_entry_diagnostics(
 
     device_info = {**plenticore.device_info}
     device_info[ATTR_IDENTIFIERS] = REDACTED  # contains serial number
+    # configuration_url embeds the configured host, and the device name falls
+    # back to the host when the inverter reports no hostname.
+    device_info[ATTR_CONFIGURATION_URL] = REDACTED
+    if device_info.get(ATTR_NAME) == config_entry.data.get(CONF_HOST):
+        device_info[ATTR_NAME] = REDACTED
     data["device"] = device_info
 
     # Event intelligence diagnostics (bounded history + latest snapshot).
@@ -366,9 +392,23 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
             _LOGGER.error("export_debug_bundle failed for entry %s: %s", entry_id, err)
             errors.append(f"{entry_id}: {err}")
 
+    links = [_debug_bundle_link(hass, os.path.basename(path)) for path in bundles]
     if bundles:
-        urls = "\n".join(f"[Download {os.path.basename(p)}](/local/{os.path.basename(p)})" for p in bundles)
-        msg = f"Debug bundle(s) written:\n{urls}"
+        # Persistent notifications are visible to every HA user, so the signed
+        # links (usable without a login) go only to the caller's response.
+        names = "\n".join(f"- `{os.path.basename(p)}`" for p in bundles)
+        msg = (
+            f"Debug bundle(s) written:\n{names}\n\n"
+            "Download links are in the action response (Developer Tools → Actions). "
+            f"They are valid for {int(DEBUG_BUNDLE_LINK_TTL.total_seconds() // 60)} "
+            f"minutes; files are deleted after {int(DEBUG_BUNDLE_RETENTION_S // 3600)} hours."
+        )
+        if None in links:
+            msg += (
+                "\n\nStarted outside the UI/API (e.g. by an automation), so no download "
+                f"link was created. Copy the files from `{hass.config.path(DEBUG_BUNDLE_DIR)}` "
+                "or run the action from Developer Tools → Actions."
+            )
     else:
         msg = "No debug bundle written."
     if errors:
@@ -385,9 +425,93 @@ async def _handle_export_debug_bundle(hass: HomeAssistant, call: ServiceCall) ->
         blocking=True,
     )
     return {
-        "bundles": [{"url": f"/local/{os.path.basename(path)}"} for path in bundles],
+        "bundles": [
+            {"file": os.path.basename(path), "url": link}
+            for path, link in zip(bundles, links)
+        ],
         "errors": [error for error in errors],
     }
+
+
+def _debug_bundle_link(hass: HomeAssistant, filename: str) -> str | None:
+    """Return a short-lived download path signed for the caller, if possible.
+
+    Signs with the refresh token of the caller's WebSocket connection or HTTP
+    request. Without one (automation, script) async_sign_path would fall back
+    to HA's read-only content user, whose links the admin-only view rejects.
+    """
+    if getattr(hass, "http", None) is None:
+        return None
+    refresh_token_id: str | None = None
+    if (connection := current_connection.get()) is not None:
+        refresh_token_id = connection.refresh_token_id
+    elif (request := current_request.get()) is not None:
+        refresh_token_id = request.get(KEY_HASS_REFRESH_TOKEN_ID)
+    if refresh_token_id is None:
+        return None
+    return async_sign_path(
+        hass, f"{DEBUG_BUNDLE_URL}/{filename}", DEBUG_BUNDLE_LINK_TTL,
+        refresh_token_id=refresh_token_id,
+    )
+
+
+class DebugBundleView(HomeAssistantView):
+    """Serve exported debug bundles to authenticated administrators."""
+
+    url = DEBUG_BUNDLE_URL + "/{filename}"
+    name = "api:kostal_kore:debug_bundle"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant, directory: str) -> None:
+        self._hass = hass
+        self._directory = directory
+
+    async def get(self, request: web.Request, filename: str) -> web.StreamResponse:
+        """Return one bundle file as a download."""
+        user = request.get(KEY_HASS_USER)
+        if user is None or not user.is_admin:
+            raise Unauthorized
+        if not _DEBUG_BUNDLE_NAME_RE.fullmatch(filename):
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        path = os.path.join(self._directory, filename)
+        if not await self._hass.async_add_executor_job(os.path.isfile, path):
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        return web.FileResponse(
+            path,
+            headers={
+                # Never let a browser or proxy cache serve the bundle again
+                # without the admin check.
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+
+def _private_opener(path: str, flags: int) -> int:
+    """Create bundle files readable by the HA user only."""
+    return os.open(path, flags, 0o600)
+
+
+def _prune_debug_bundles(directory: str, now: float) -> int:
+    """Delete exported bundles older than the retention window; return how many remain."""
+    try:
+        names = os.listdir(directory)
+    except OSError as err:
+        _LOGGER.debug("Cannot list debug bundle directory %s: %s", directory, err)
+        return 0
+    remaining = 0
+    for name in names:
+        path = os.path.join(directory, name)
+        if not _DEBUG_BUNDLE_NAME_RE.fullmatch(name) or not os.path.isfile(path):
+            continue
+        try:
+            if now - os.path.getmtime(path) > DEBUG_BUNDLE_RETENTION_S:
+                os.remove(path)
+                continue
+        except OSError as err:
+            _LOGGER.debug("Cannot prune debug bundle %s: %s", path, err)
+        remaining += 1
+    return remaining
 
 
 async def _export_bundle_for_entry(
@@ -494,11 +618,13 @@ async def _export_bundle_for_entry(
     _now = datetime.now(tz=timezone.utc)
     ts_str = _now.strftime("%Y%m%dT%H%M%S") + f"{_now.microsecond // 1000:03d}"
     filename = f"kore_debug_{entry_id[:8]}_{ts_str}.json"
-    path = hass.config.path("www", filename)
+    path = hass.config.path(DEBUG_BUNDLE_DIR, filename)
 
     def _write(p: str, data: dict[str, Any]) -> None:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w", encoding="utf-8") as fh:
+        directory = os.path.dirname(p)
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        _prune_debug_bundles(directory, time.time())
+        with open(p, "w", encoding="utf-8", opener=_private_opener) as fh:
             json.dump(data, fh, indent=2, default=str)
 
     try:
@@ -522,16 +648,47 @@ def async_register_debug_bundle_service(hass: HomeAssistant) -> None:
             DOMAIN, "communication_diagnostics", communication_diagnostics,
             supports_response=SupportsResponse.ONLY,
         )
+    _async_register_debug_bundle_view(hass)
     if hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
         return
 
     async def _handler(call: ServiceCall) -> ServiceResponse:
+        await async_require_admin(hass, call.context)
+        # HTTP may have finished setting up after this integration.
+        _async_register_debug_bundle_view(hass)
         return await _handle_export_debug_bundle(hass, call)
 
     hass.services.async_register(
         DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE, _handler,
         supports_response=SupportsResponse.OPTIONAL,
     )
+
+    # Enforce the retention window even when no further export follows. The
+    # timer outlives the last entry until every bundle has expired.
+    if _DATA_DEBUG_BUNDLE_PRUNE in hass.data:
+        return
+    directory = hass.config.path(DEBUG_BUNDLE_DIR)
+
+    async def _prune(_now: datetime) -> None:
+        remaining = await hass.async_add_executor_job(
+            _prune_debug_bundles, directory, time.time()
+        )
+        if not remaining and not hass.services.has_service(DOMAIN, SERVICE_EXPORT_DEBUG_BUNDLE):
+            hass.data.pop(_DATA_DEBUG_BUNDLE_PRUNE)()
+
+    hass.data[_DATA_DEBUG_BUNDLE_PRUNE] = async_track_time_interval(
+        hass, _prune, DEBUG_BUNDLE_PRUNE_INTERVAL,
+        name="kostal_kore debug bundle pruning", cancel_on_shutdown=True,
+    )
+
+
+def _async_register_debug_bundle_view(hass: HomeAssistant) -> None:
+    """Register the download view once HTTP is available."""
+    if getattr(hass, "http", None) is None or hass.data.get(_DATA_DEBUG_BUNDLE_VIEW):
+        return
+    # Views cannot be unregistered: register once per HA instance.
+    hass.http.register_view(DebugBundleView(hass, hass.config.path(DEBUG_BUNDLE_DIR)))
+    hass.data[_DATA_DEBUG_BUNDLE_VIEW] = True
 
 
 def async_unregister_debug_bundle_service_if_unused(hass: HomeAssistant) -> None:

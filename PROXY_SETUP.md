@@ -112,10 +112,20 @@ evcc kann über den Proxy auch Batterie-Register schreiben. Die relevanten Regis
 
 | evcc-Modus | Register | Wert | Wirkung |
 |------------|----------|------|---------|
-| `normal` | 1034 | `0` | zurück zur Automatik |
+| `normal` | 1034 | bis evcc 0.315: `0`; ab **0.316** kein Write mehr (evcc PR #32396) | zurück zur Automatik |
 | `charge` | 1034 | `-maxchargepower` (W, **negativ = laden**) | Netzladen mit voller Leistung |
+| `discharge` (ab evcc 0.316) | 1034 | `+maxdischargepower` (W, **positiv = entladen**) | erzwungene Entladung/Einspeisung (evcc PR #32396) |
 | `hold` | 1040 | `0` | nur **Entladen** sperren, PV-Laden bleibt erlaubt (evcc PR #26169) |
 | `holdcharge` | 1038 | `0` | nur **Laden** sperren (evcc PR #30853) |
+
+> ⚠️ **evcc ≥ 0.316:** Weil `normal` Register 1034 nicht mehr zurücksetzt, kann ein zuvor
+> geschriebener Lade-/Entlade-Sollwert aktiv bleiben, bis ein neuer Write oder die Fallback-Logik
+> des Wechselrichters ihn ablöst.
+> Prüfe nach einem Moduswechsel den 1034-Wert, bevor ein KORE-Controller die Batterie übernimmt.
+>
+> **Einspeisebegrenzung (evcc 0.311.1, PR #31487):** evcc schreibt `WMaxLimPct` (SunSpec-Register
+> 40217, nur FC06). KOREs Entität „Active Power Setpoint (Modbus)" (Register 533) begrenzt dieselbe
+> AC-Ausgangsleistung. Nutze nur einen der beiden Wege, sonst gilt der zuletzt geschriebene Wert.
 
 **Hinweise für die evcc-Konfiguration:**
 - Im evcc-Template **`maxchargepower` (Watt)** setzen – **nicht** das veraltete `maxchargerate` (%).
@@ -241,7 +251,7 @@ kostal_kore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 | **Command serialization** | Async lock prevents concurrent Modbus writes |
 | **Source tracking** | Every command logged with origin (proxy/evcc, mqtt/command) |
 | **Admin protection** | `modbus_enable`, `unit_id`, `byte_order` read-only via MQTT |
-| **Installer protection** | Batterie-Schreibregister nur mit Service-Code |
+| **Installer protection** | Batterie-Schreibregister (Wörter 1026–1045, 1280–1289) nur mit Service-Code |
 | **NaN/Infinity guard** | Rejected at MQTT, coordinator, and client layers |
 | **Value validation** | Type check + numeric conversion before write |
 | **Write-Arbitration** | Batterie-Register blockiert wenn SoC-Controller aktiv |
@@ -263,7 +273,7 @@ evcc schreibt REG 1034 ──► Proxy
                       NEIN → Write durchgeleitet ✅
 ```
 
-**Betroffene Register:** 1034, 1038, 1040, 1042, 1044, 1280, 1282, 1284, 1286, 1288
+**Betroffene Register:** 1026, 1028, 1030, 1032, 1034, 1036, 1038, 1040, 1042, 1044, 1280, 1282, 1284, 1286, 1288 (jeweils beide Wörter, also 1026–1045 und 1280–1289)
 
 **Lösung bei Konflikten:**
 1. SoC-Controller auf 0 setzen (Automatik) → externe Writes wieder möglich

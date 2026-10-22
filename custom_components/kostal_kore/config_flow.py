@@ -40,7 +40,7 @@ from .const import (
     DEFAULT_MODBUS_UNIT_ID,
     DOMAIN,
 )
-from .helper import get_hostname_id, validate_bind_address
+from .helper import get_hostname_id, normalize_hostname, validate_bind_address
 
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.config_entries import ConfigFlowResult
@@ -389,9 +389,11 @@ async def test_connection_safe(
         await client.login(password, service_code=service_code)
 
         hostname_id = await get_hostname_id(client)
-        values = await client.get_setting_values(NETWORK_MODULE, hostname_id)
+        # Always use the {module: [ids]} form (POST /settings): Plenticore G3
+        # FW 3.07.03 answers the single-setting GET form with 404.
+        values = await client.get_setting_values({NETWORK_MODULE: [hostname_id]})
         network_settings = values.get(NETWORK_MODULE, {})
-        hostname = str(network_settings.get(hostname_id, host))
+        hostname = normalize_hostname(network_settings.get(hostname_id), host)
 
         access_role = "UNKNOWN"
         try:

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch  # noqa: F401
 
 import pytest
+from homeassistant.core import Context
 
 from custom_components.kostal_kore.const import DOMAIN
 from custom_components.kostal_kore.diagnostics import (
@@ -25,6 +26,7 @@ from custom_components.kostal_kore.write_audit import WriteAuditLog, WriteEvent
 def _mock_hass():
     hass = MagicMock()
     hass.config.path.side_effect = lambda *parts: os.path.join("/config", *parts)
+    hass.http = None
     return hass
 
 
@@ -365,7 +367,9 @@ async def test_handle_export_debug_bundle_happy_path():
 
     hass.services.async_call.assert_called_once()
     msg_arg = hass.services.async_call.call_args[0][2]["message"]
-    assert "/local/kore_debug_abc.json" in msg_arg
+    assert "kore_debug_abc.json" in msg_arg
+    # Signed links stay out of the notification every HA user can read.
+    assert "/api/kostal_kore/debug_bundle" not in msg_arg
 
 
 @pytest.mark.asyncio
@@ -439,7 +443,7 @@ async def test_register_debug_bundle_service_handler_delegates():
         "custom_components.kostal_kore.diagnostics._handle_export_debug_bundle",
         new=AsyncMock(),
     ) as mock_handle:
-        await handler(MagicMock())
+        await handler(MagicMock(context=Context()))
 
     mock_handle.assert_called_once()
 

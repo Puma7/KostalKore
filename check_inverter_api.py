@@ -2,17 +2,15 @@
 """
 Diagnoseskript für Bug #1 (Battery-Einheit) und Bug #11 (PV-Energiestatistik).
 
-Aufruf (Credentials werden interaktiv via getpass abgefragt, falls weggelassen):
+Aufruf (Credentials werden immer interaktiv via getpass abgefragt):
     # User-Modus:
     python3 check_inverter_api.py <HOST>
-    python3 check_inverter_api.py <HOST> <PASSWORT>                      # alt, weniger sicher
 
     # Master/Installer-Modus:
     python3 check_inverter_api.py <HOST> --installer
-    python3 check_inverter_api.py <HOST> <MASTER_KEY> <SERVICE_CODE>     # alt, weniger sicher
 
-Warnung: Wenn Credentials als CLI-Argumente übergeben werden, landen sie in
-Shell-History und Prozessliste. Bevorzuge den interaktiven Modus.
+Credentials als CLI-Argumente werden nicht mehr angenommen: sie landen in
+Shell-History und Prozessliste (für andere lokale Benutzer sichtbar).
 """
 
 import asyncio
@@ -26,6 +24,14 @@ import aiohttp
 from pykoplenti import ApiClient
 
 
+def _safe(value) -> str:
+    """Escape control characters in inverter-supplied text before printing it."""
+    return "".join(
+        ch if ch.isprintable() else ch.encode("unicode_escape").decode("ascii")
+        for ch in str(value)
+    )
+
+
 async def query_single(client, module_id: str, key: str):
     """Eine einzelne Key-Abfrage mit Fehler-Capture."""
     try:
@@ -33,7 +39,7 @@ async def query_single(client, module_id: str, key: str):
         entry = res.get(module_id, {}).get(key)
         return entry.value if entry is not None else None, None
     except Exception as e:
-        return None, str(e)
+        return None, _safe(e)
 
 
 async def main(host: str, key: str, service_code: Optional[str]) -> None:
@@ -50,9 +56,9 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
         # Verifiziere Login durch get_me() falls verfügbar
         try:
             me = await client.get_me()
-            print(f"  Server bestätigt Auth-Rolle: {me}\n")
+            print(f"  Server bestätigt Auth-Rolle: {_safe(me)}\n")
         except Exception as e:
-            print(f"  (get_me() failed: {e})\n")
+            print(f"  (get_me() failed: {_safe(e)})\n")
 
         all_modules = await client.get_process_data()
 
@@ -65,7 +71,7 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
         if not bat_keys:
             print("  ⚠️  Modul 'devices:local:battery' nicht verfügbar.")
         else:
-            print(f"  Alle verfügbaren Keys: {bat_keys}\n")
+            print(f"  Alle verfügbaren Keys: {_safe(bat_keys)}\n")
 
             # Test 1: Massenabfrage OHNE Key-Filter (alle Werte des Moduls)
             print("  Test 1: Massenabfrage ohne Key-Filter")
@@ -76,18 +82,18 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
                     print(f"    ✅ {len(mod)} Werte erhalten:")
                     for k, entry in mod.items():
                         val = entry.value if hasattr(entry, "value") else entry
-                        print(f"      {k}: {val}")
+                        print(f"      {_safe(k)}: {_safe(val)}")
                 else:
-                    print(f"    ⚠️  Leeres Ergebnis")
+                    print("    ⚠️  Leeres Ergebnis")
             except Exception as e:
-                print(f"    ❌ {e}")
+                print(f"    ❌ {_safe(e)}")
 
             # Test 2: Einzelabfrage harmloser Keys (Strings ohne 500-Risiko)
             print("\n  Test 2: Einzelabfrage harmloser String-Keys")
             for k in ("BatManufacturer", "BatModel", "BatSerialNo"):
                 if k in bat_keys:
                     val, err = await query_single(client, "devices:local:battery", k)
-                    print(f"    {k}: {val if err is None else f'❌ {err}'}")
+                    print(f"    {k}: {_safe(val) if err is None else f'❌ {err}'}")
 
             # Test 3: Einzelabfrage der eigentlichen Bug-#1-Keys
             print("\n  Test 3: Einzelabfrage der Kapazitäts-Keys (Bug #1)")
@@ -95,7 +101,7 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
                 if k in bat_keys:
                     val, err = await query_single(client, "devices:local:battery", k)
                     if err is None and val is not None:
-                        print(f"    {k}: {val}")
+                        print(f"    {k}: {_safe(val)}")
                         if k in ("FullChargeCap_E", "WorkCapacity"):
                             try:
                                 raw = float(val)
@@ -124,7 +130,7 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
             val, err = await query_single(
                 client, "scb:statistic:EnergyFlow", "Statistic:EnergyPv1:Day"
             )
-            print(f"    Statistic:EnergyPv1:Day: {val if err is None else f'❌ {err}'}")
+            print(f"    Statistic:EnergyPv1:Day: {_safe(val) if err is None else f'❌ {err}'}")
 
         # ── DC-Strings ──────────────────────────────────────────────────────
         print()
@@ -136,17 +142,16 @@ async def main(host: str, key: str, service_code: Optional[str]) -> None:
             cnt = s.get("devices:local", {}).get("Properties:StringCnt")
             if hasattr(cnt, "value"):
                 cnt = cnt.value
-            print(f"  Properties:StringCnt = {cnt}")
+            print(f"  Properties:StringCnt = {_safe(cnt)}")
         except Exception as e:
-            print(f"  ❌ {e}")
+            print(f"  ❌ {_safe(e)}")
 
         print()
         print("Fertig.")
 
 
 if __name__ == "__main__":
-    # GEÄNDERT: getpass-Fallback bei fehlenden Credentials.
-    # Alte Aufrufformen (Passwort/Key als CLI-Args) bleiben rückwärtskompatibel.
+    # Credentials nur interaktiv: CLI-Argumente sind in der Prozessliste sichtbar.
     args = sys.argv[1:]
     if not args:
         print("Aufruf:")
@@ -157,17 +162,17 @@ if __name__ == "__main__":
     host = args[0]
     rest = args[1:]
 
-    if rest and rest[0] == "--installer":
+    if rest == ["--installer"]:
         master_key = getpass.getpass("Master-Key: ")
         service_code = getpass.getpass("Service-Code: ")
         asyncio.run(main(host, master_key, service_code))
-    elif len(rest) == 0:
+    elif not rest:
         password = getpass.getpass("Passwort: ")
         asyncio.run(main(host, password, None))
-    elif len(rest) == 1:
-        asyncio.run(main(host, rest[0], None))
-    elif len(rest) == 2:
-        asyncio.run(main(host, rest[0], rest[1]))
     else:
-        print("Zu viele Argumente.")
+        print(
+            "Credentials werden nicht als Argumente angenommen (sichtbar in "
+            "Prozessliste/Shell-History). Aufruf ohne Credentials wiederholen; "
+            "sie werden interaktiv abgefragt."
+        )
         sys.exit(1)

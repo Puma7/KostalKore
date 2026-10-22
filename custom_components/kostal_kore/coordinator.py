@@ -46,6 +46,7 @@ from .helper import (
     get_hostname_id,
     is_allowed_write_target,
     is_rest_write_supported_target,
+    normalize_hostname,
     parse_firmware_version,
     parse_modbus_exception,
     requires_advanced_write_arm,
@@ -468,7 +469,7 @@ class Plenticore:
             )
 
         network_settings = settings.get("scb:network", {})
-        hostname = network_settings.get(hostname_id, self.host)
+        hostname = normalize_hostname(network_settings.get(hostname_id), self.host)
 
         self.device_info = DeviceInfo(
             configuration_url=f"http://{self.host}",
@@ -531,7 +532,7 @@ class DataUpdateCoordinatorMixin:
             return None
 
         try:
-            data = await client.get_setting_values(module_id, data_id)
+            data = await client.get_setting_values({module_id: [data_id]})
             # CHANGELOG (Codex, 2026-02-05):
             # Auto-clear transient inverter_busy issue on successful recovery.
             if (hass := getattr(self._plenticore, "hass", None)) is not None:
@@ -997,7 +998,10 @@ class ProcessDataUpdateCoordinator(
                 return self._last_result
             self._record_failure()
             raise UpdateFailed("Timeout fetching process data") from timeout_err
-        except (ApiException, ClientError, TimeoutError) as err:
+        except (ApiException, ClientError, TimeoutError, KeyError) as err:
+            # KeyError: pykoplenti's virtual PV sums raise it when the inverter
+            # briefly omits a requested value (e.g. pv1 'P' for a few seconds
+            # around 03:10, home-assistant/core#183701). Treat it as transient.
             error_msg = str(err)
             # GEÄNDERT: Stale-Cache TTL-gebunden statt unbegrenzt.
             if self._stale_cache_usable():

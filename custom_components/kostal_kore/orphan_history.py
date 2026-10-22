@@ -40,6 +40,7 @@ from .const import (
     SERVICE_APPLY_ORPHAN_HISTORY_MAPPING,
     SERVICE_SCAN_ORPHAN_HISTORY,
 )
+from .helper import async_require_admin
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -413,6 +414,8 @@ def async_register_orphan_history_services(hass: HomeAssistant) -> None:
         await _handle_scan_service(hass, call)
 
     async def _apply_wrapper(call: ServiceCall) -> None:
+        # Rewrites recorder history: admin only (the scan is read-only).
+        await async_require_admin(hass, call.context)
         await _handle_apply_service(hass, call)
 
     if not hass.services.has_service(DOMAIN, SERVICE_SCAN_ORPHAN_HISTORY):
