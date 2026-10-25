@@ -147,6 +147,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # generation is unchanged — a reconnect may mean the inverter reset and
         # discarded its volatile setpoints (see last_commanded()).
         self._last_commanded: dict[str, tuple[float, int]] = {}
+        self._command_revision: dict[str, int] = {}
         # Observations are separate from optimistic command/entity state. A
         # retained slow value or successful write never refreshes this cache.
         self._proxy_observations: dict[str, tuple[Any, float, int]] = {}
@@ -262,6 +263,14 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return value
 
+    def command_revision(self, name: str) -> int:
+        """Count of commands recorded for a register on any write path.
+
+        Two writes of the same value are different commands; this tells them
+        apart where ``last_commanded`` cannot.
+        """
+        return self._command_revision.get(name, 0)
+
     def _record_commanded(self, name: str, value: Any) -> None:
         """Cache a successfully-written value tagged with the current connection
         generation; non-numeric writes are dropped.
@@ -271,6 +280,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         receives ``int(80.5) == 80``), so a fractional command must not be
         reported back as the un-truncated value the inverter never applied.
         """
+        self._command_revision[name] = self._command_revision.get(name, 0) + 1
         try:
             fval = float(value)
         except (TypeError, ValueError):

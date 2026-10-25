@@ -338,8 +338,8 @@ class ModbusNumberEntity(
         self._keepalive_value: float | None = None
         self._keepalive_generation: int | None = None
         self._keepalive_incidents = 0
-        # (commanded value, outcome, last read-back) of the last entity write.
-        self._last_command: tuple[float, str, float | None] | None = None
+        # (command revision, outcome, last read-back) of the last entity write.
+        self._last_command: tuple[int, str, float | None] | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -411,13 +411,15 @@ class ModbusNumberEntity(
         The entity state is what the inverter reports, which for REG 1038 on
         a G3 is the limit in effect, not the command. The outcome and the
         read-back belong to the last write through this entity and are only
-        shown while that write is still the last command on any path.
+        shown while that write is still the last command on any path (same
+        command revision, so a later write of the same value hides them).
         """
         commanded = self.coordinator.last_commanded(self._register.name)
         if commanded is None:
             return None
         attrs: dict[str, Any] = {"last_commanded_value": commanded}
-        if self._last_command is not None and self._last_command[0] == commanded:
+        revision = self.coordinator.command_revision(self._register.name)
+        if self._last_command is not None and self._last_command[0] == revision:
             attrs["last_command_outcome"] = self._last_command[1]
             attrs["last_command_readback"] = self._last_command[2]
         return attrs
@@ -456,6 +458,7 @@ class ModbusNumberEntity(
             self._cancel_keepalive()
         await self.coordinator.async_write_register(self._register, value)
         write_generation = self.coordinator.client.connection_generation
+        revision = self.coordinator.command_revision(self._register.name)
 
         verified = False
         read_failed = False
@@ -494,7 +497,7 @@ class ModbusNumberEntity(
 
         outcome = self._readback_outcome(observed, value)
         if self._register.name in G3_CYCLIC_REGISTERS and not verified:
-            self._last_command = (value, outcome, observed)
+            self._last_command = (revision, outcome, observed)
             notify_control_lease_lost(getattr(self, "hass", None),
                                       getattr(self.coordinator, "_communication_entry_id", ""),
                                       control=f"modbus_{self._register.name}")
@@ -509,7 +512,7 @@ class ModbusNumberEntity(
             # accepted the limit. Publish a device refresh, then fail the call so
             # controllers cannot treat an ignored command as an applied limit.
             # The outcome tells them whether the limit reads higher or lower.
-            self._last_command = (value, outcome, observed)
+            self._last_command = (revision, outcome, observed)
             if not read_failed:
                 await self.coordinator.async_request_refresh()
             raise ReadbackUnconfirmedError(
@@ -540,14 +543,14 @@ class ModbusNumberEntity(
         if (self.coordinator.client.connection_generation != write_generation
                 or not self.coordinator.client.connected
                 or not self.coordinator.last_update_success or not refresh_confirmed):
-            self._last_command = (value, COMMAND_INVALIDATED, observed)
+            self._last_command = (revision, COMMAND_INVALIDATED, observed)
             if self._register.name in G3_CYCLIC_REGISTERS:
                 notify_control_lease_lost(getattr(self, "hass", None),
                                           getattr(self.coordinator, "_communication_entry_id", ""),
                                           control=f"modbus_{self._register.name}")
             raise ModbusClientError("Control confirmation was invalidated during refresh")
 
-        self._last_command = (value, COMMAND_CONFIRMED, observed)
+        self._last_command = (revision, COMMAND_CONFIRMED, observed)
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),

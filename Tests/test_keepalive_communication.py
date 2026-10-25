@@ -26,6 +26,7 @@ def entity():
         client=SimpleNamespace(connected=True, connection_generation=1), last_update_success=True,
         slow_poll_stale=False, communication=SimpleNamespace(faults=(), incidents=0),
         last_commanded=lambda name: 5000, async_write_register=AsyncMock(),
+        command_revision=lambda name: 1,
     )
     return result
 

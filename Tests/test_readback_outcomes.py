@@ -20,12 +20,20 @@ def _limit_entity(coord, register=mod.REG_BAT_MAX_CHARGE_LIMIT):
         min_value=0, max_value=12540, step=100, unit="W", device_class=None,
         entity_category=None, entry_id="night", device_info=_device_info(),
     )
-    # The coordinator records every command; the fixture mirrors that.
+    # The coordinator records every command (value and revision); the fixture
+    # mirrors that.
     coord._commanded = None
+    coord._revision = 0
     coord.async_write_register = AsyncMock(
-        side_effect=lambda _reg, value: setattr(coord, "_commanded", value))
+        side_effect=lambda _reg, value: _command(coord, value))
     coord.last_commanded = MagicMock(side_effect=lambda _name: coord._commanded)
+    coord.command_revision = MagicMock(side_effect=lambda _name: coord._revision)
     return entity
+
+
+def _command(coord, value):
+    coord._commanded = value
+    coord._revision += 1
 
 
 # Read-backs from the night of 24/25 October 2026.
@@ -105,8 +113,34 @@ async def test_outcome_is_hidden_once_another_path_commands_a_new_value() -> Non
     entity = _limit_entity(coord)
     with pytest.raises(ReadbackUnconfirmedError):
         await entity.async_set_native_value(1000)
-    coord._commanded = 2000.0  # e.g. a proxy or MQTT write after the entity write
+    _command(coord, 2000.0)  # e.g. a proxy or MQTT write after the entity write
     assert entity.extra_state_attributes == {"last_commanded_value": 2000.0}
+
+
+@pytest.mark.asyncio
+async def test_a_later_write_of_the_same_value_hides_the_old_outcome() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=0.0)
+    entity = _limit_entity(coord)
+    with pytest.raises(ReadbackUnconfirmedError):
+        await entity.async_set_native_value(1000)
+    _command(coord, 1000)  # the same value, written by MQTT or the proxy
+    assert entity.extra_state_attributes == {"last_commanded_value": 1000}
+
+
+def test_coordinator_counts_every_recorded_command(hass) -> None:
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+    from Tests.test_wave7_modbus_core_coverage import _modbus_client
+
+    coordinator = ModbusDataUpdateCoordinator(hass, _modbus_client())
+    name = mod.REG_BAT_MAX_CHARGE_LIMIT.name
+    assert coordinator.command_revision(name) == 0
+    coordinator._record_commanded(name, 1000)
+    coordinator._record_commanded(name, 1000)
+    assert coordinator.command_revision(name) == 2
+    coordinator._record_commanded(name, "bad")
+    assert coordinator.command_revision(name) == 3
+    assert coordinator.last_commanded(name) is None
 
 
 # ---------------------------------------------------------------------------
