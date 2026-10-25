@@ -66,8 +66,12 @@ TABLES = {
     ("sensor.py", "MODBUS_DIAGNOSTIC_SENSORS"): ("sensor", 1),
     ("sensor.py", "MODBUS_ENERGY_SENSORS"): ("sensor", 1),
     ("sensor.py", "KSEM_DIAGNOSTIC_SENSORS"): ("sensor", 1),
-    ("degradation_entities.py", "_PARAM_CONFIG"): ("sensor", "name"),
-    ("diagnostic_entities.py", "_AREA_CONFIG"): ("sensor", "name"),
+}
+# Files whose dict literals {"name": ...} describe entities of one platform.
+DICT_FILES = {
+    "degradation_entities.py": "sensor",
+    "diagnostic_entities.py": "sensor",
+    "modbus_number.py": "number",
 }
 # Calls whose ``name=`` is not an entity name.
 NOT_ENTITY_CALLEES = {"DeviceInfo", "ParameterTracker", "TrackedParameter", "__init__",
@@ -139,6 +143,28 @@ def collect() -> tuple[dict[str, set[str]], list[str]]:
                     for entry in ast.literal_eval(_strip_calls(node.value)):
                         add(domain, entry[field])
                     claimed.update(id(n) for n in ast.walk(node.value))
+
+        if path.name in DICT_FILES:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Dict):
+                    for key, value in zip(node.keys, node.values, strict=True):
+                        if (isinstance(key, ast.Constant) and key.value == "name"
+                                and isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                            add(DICT_FILES[path.name], value.value)
+
+        # Entity classes taking the name as a positional constructor argument.
+        name_index = {}
+        for cls in (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name in classes):
+            init = next((f for f in cls.body if isinstance(f, ast.FunctionDef) and f.name == "__init__"), None)
+            params = [a.arg for a in init.args.args[1:]] if init else []
+            if "name" in params:
+                name_index[cls.name] = params.index("name")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _callee(node) in name_index:
+                index = name_index[_callee(node)]
+                if len(node.args) > index and isinstance(node.args[index], ast.Constant):
+                    claimed.add(id(node.args[index]))
+                    add(classes[_callee(node)], node.args[index].value)
 
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
             domain = classes.get(cls.name)

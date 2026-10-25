@@ -220,6 +220,9 @@
       "active_power_ext_ctrl_ramp_time": {
         "name": "Active Power Ramp Time"
       },
+      "active_power_setpoint_modbus": {
+        "name": "Active Power Setpoint (Modbus)"
+      },
       "battery_charge_current_dc_absolute": {
         "name": "Battery Charge Current (DC) Absolute"
       },
@@ -237,6 +240,9 @@
       },
       "battery_charge_power_dc_relative": {
         "name": "Battery Charge Power (DC) Relative"
+      },
+      "battery_charge_power_modbus": {
+        "name": "Battery Charge Power (Modbus)"
       },
       "battery_com_monitor_time": {
         "name": "Battery Communication Monitor Time"
@@ -259,6 +265,9 @@
       "battery_extern_control_min_soc_rel": {
         "name": "Battery External Control Min SoC Relative"
       },
+      "battery_max_charge_limit_modbus": {
+        "name": "Battery Max Charge Limit (Modbus)"
+      },
       "battery_max_charge_power_fallback": {
         "name": "Battery Max Charge Power Fallback (G3)"
       },
@@ -267,6 +276,9 @@
       },
       "battery_max_charge_power_soc_ctrl": {
         "name": "Battery Max Charge Power (SoC Ctrl)"
+      },
+      "battery_max_discharge_limit_modbus": {
+        "name": "Battery Max Discharge Limit (Modbus)"
       },
       "battery_max_discharge_power_fallback": {
         "name": "Battery Max Discharge Power Fallback (G3)"
@@ -277,6 +289,9 @@
       "battery_max_discharge_power_soc_ctrl": {
         "name": "Battery Max Discharge Power (SoC Ctrl)"
       },
+      "battery_max_soc_modbus": {
+        "name": "Battery Max SoC (Modbus)"
+      },
       "battery_min_grid_feed_in": {
         "name": "Battery Minimum Grid Feed-in"
       },
@@ -285,6 +300,9 @@
       },
       "battery_min_soc": {
         "name": "Battery min SoC"
+      },
+      "battery_min_soc_modbus": {
+        "name": "Battery Min SoC (Modbus)"
       },
       "battery_target_soc": {
         "name": "Battery Target SoC"
@@ -366,6 +384,12 @@
       },
       "energy_mgmt_timed_bat_charge_wd_soc": {
         "name": "Timed Battery Charge Weekend SoC"
+      },
+      "g3_max_battery_charge_power_modbus": {
+        "name": "G3 Max Battery Charge Power (Modbus)"
+      },
+      "g3_max_battery_discharge_power_modbus": {
+        "name": "G3 Max Battery Discharge Power (Modbus)"
       },
       "grid_feed_in_limit": {
         "name": "Grid Feed-In Limit"
@@ -539,6 +563,9 @@
       "battery_soh_projection_5y": {
         "name": "Battery SoH Projection 5y"
       },
+      "battery_temperature_modbus": {
+        "name": "Battery Temperature (Modbus)"
+      },
       "battery_u": {
         "name": "Battery Voltage"
       },
@@ -619,6 +646,9 @@
       },
       "controller_temperature_health": {
         "name": "Controller Temperature (Health)"
+      },
+      "controller_temperature_modbus": {
+        "name": "Controller Temperature (Modbus)"
       },
       "dc1_current": {
         "name": "DC1 Current"

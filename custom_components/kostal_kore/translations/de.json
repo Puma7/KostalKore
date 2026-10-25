@@ -220,6 +220,9 @@
             "active_power_ext_ctrl_ramp_time": {
                 "name": "Wirkleistung Rampenzeit"
             },
+            "active_power_setpoint_modbus": {
+                "name": "Wirkleistungssollwert (Modbus)"
+            },
             "battery_charge_current_dc_absolute": {
                 "name": "Batterieladestrom (DC) absolut"
             },
@@ -237,6 +240,9 @@
             },
             "battery_charge_power_dc_relative": {
                 "name": "Batterieladeleistung (DC) relativ"
+            },
+            "battery_charge_power_modbus": {
+                "name": "Batterieladeleistung (Modbus)"
             },
             "battery_com_monitor_time": {
                 "name": "Zeit der Batterie-Kommunikationsüberwachung"
@@ -259,6 +265,9 @@
             "battery_extern_control_min_soc_rel": {
                 "name": "Minimaler SoC relativ (externe Batteriesteuerung)"
             },
+            "battery_max_charge_limit_modbus": {
+                "name": "Maximale Ladegrenze der Batterie (Modbus)"
+            },
             "battery_max_charge_power_fallback": {
                 "name": "Rückfallwert maximale Ladeleistung (G3)"
             },
@@ -267,6 +276,9 @@
             },
             "battery_max_charge_power_soc_ctrl": {
                 "name": "Maximale Ladeleistung (SoC Ctrl)"
+            },
+            "battery_max_discharge_limit_modbus": {
+                "name": "Maximale Entladegrenze der Batterie (Modbus)"
             },
             "battery_max_discharge_power_fallback": {
                 "name": "Rückfallwert maximale Entladeleistung (G3)"
@@ -277,6 +289,9 @@
             "battery_max_discharge_power_soc_ctrl": {
                 "name": "Maximale Entladeleistung (SoC Ctrl)"
             },
+            "battery_max_soc_modbus": {
+                "name": "Maximaler SoC der Batterie (Modbus)"
+            },
             "battery_min_grid_feed_in": {
                 "name": "Minimale Netzeinspeisung der Batterie"
             },
@@ -285,6 +300,9 @@
             },
             "battery_min_soc": {
                 "name": "Minimaler SoC der Batterie"
+            },
+            "battery_min_soc_modbus": {
+                "name": "Minimaler SoC der Batterie (Modbus)"
             },
             "battery_target_soc": {
                 "name": "Ziel-SoC der Batterie"
@@ -366,6 +384,12 @@
             },
             "energy_mgmt_timed_bat_charge_wd_soc": {
                 "name": "Zeitgesteuerte Batterieladung Wochenende SoC"
+            },
+            "g3_max_battery_charge_power_modbus": {
+                "name": "G3 maximale Batterieladeleistung (Modbus)"
+            },
+            "g3_max_battery_discharge_power_modbus": {
+                "name": "G3 maximale Batterieentladeleistung (Modbus)"
             },
             "grid_feed_in_limit": {
                 "name": "Netzeinspeisungsgrenze"
@@ -539,6 +563,9 @@
             "battery_soh_projection_5y": {
                 "name": "Batterie-SoH-Prognose 5 Jahre"
             },
+            "battery_temperature_modbus": {
+                "name": "Batterietemperatur (Modbus)"
+            },
             "battery_u": {
                 "name": "Batteriespannung"
             },
@@ -619,6 +646,9 @@
             },
             "controller_temperature_health": {
                 "name": "Controller-Temperatur (Health)"
+            },
+            "controller_temperature_modbus": {
+                "name": "Controller-Temperatur (Modbus)"
             },
             "dc1_current": {
                 "name": "DC1-Strom"
