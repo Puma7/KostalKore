@@ -544,6 +544,9 @@ class ModbusNumberEntity(
         await self.coordinator.async_refresh()
 
         refresh_confirmed = True
+        # The outcome below is decided on the completed poll when there is one,
+        # so the attribute reports that value next to it.
+        decided_readback = observed
         if self._register in CONTROL_READBACK_REGISTERS:
             try:
                 newest_value = self.coordinator.proxy_cache_data.get(self._register.name)
@@ -551,6 +554,7 @@ class ModbusNumberEntity(
                 matched = math.isfinite(newest) and self._readback_matches(newest, value)
                 limited = not matched and self._readback_limited(newest, value, previous)
                 refresh_confirmed = matched or limited
+                decided_readback = newest
             except (TypeError, ValueError):
                 refresh_confirmed = False
             retained = getattr(self.coordinator.client, "retained_quality_addresses", set())
@@ -567,7 +571,8 @@ class ModbusNumberEntity(
                                           control=f"modbus_{self._register.name}")
             raise ModbusClientError("Control confirmation was invalidated during refresh")
 
-        self._record_last_command(revision, COMMAND_LIMITED if limited else COMMAND_CONFIRMED, observed)
+        self._record_last_command(
+            revision, COMMAND_LIMITED if limited else COMMAND_CONFIRMED, decided_readback)
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),

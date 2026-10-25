@@ -89,7 +89,23 @@ async def test_a_limited_first_read_is_confirmed_by_a_matching_refresh() -> None
     entity = _limit_entity(coord)
     coord.data = {mod.REG_BAT_MAX_CHARGE_LIMIT.name: 999.0}
     await entity.async_set_native_value(1000)
-    assert entity.extra_state_attributes["last_command_outcome"] == mod.COMMAND_CONFIRMED
+    # The pair reports the completed poll the outcome was decided on.
+    assert entity.extra_state_attributes == {
+        "last_commanded_value": 1000,
+        "last_command_outcome": mod.COMMAND_CONFIRMED,
+        "last_command_readback": 999.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_matching_first_read_can_end_limited_by_the_refresh() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=1000.0)
+    entity = _limit_entity(coord)
+    coord.data = {mod.REG_BAT_MAX_CHARGE_LIMIT.name: 245.0}
+    await entity.async_set_native_value(1000)
+    assert entity.extra_state_attributes["last_command_outcome"] == mod.COMMAND_LIMITED
+    assert entity.extra_state_attributes["last_command_readback"] == 245.0
 
 
 @pytest.mark.asyncio
