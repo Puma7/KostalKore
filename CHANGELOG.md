@@ -34,8 +34,10 @@ Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
   unconfirmed" although the inverter applied them: a G3 reads 1000 W back as
   997.9-999.9 W (current x battery voltage) and the check required an exact
   match. Power registers (W) now accept 0.5 % / at least 5 W, capped below half
-  an input step (exclusive), so an ignored one-step command or a clamped limit (e.g. 51 W
-  instead of 1000 W) still fails. SoC and other registers stay exact.
+  an input step (exclusive), so an ignored one-step command still fails. A read
+  further below the command (e.g. 51 W for 1000 W) on 1038/1040 is the BMS limit
+  in effect and counts as `limited` (see Changed). SoC and other registers stay
+  exact.
 - The nightly G3 "Server device failure" (0x04) episode around 03:10 no longer
   publishes 0 Hz grid frequency, 0 V phase voltage or 0 % Modbus battery SoC:
   zero readings from a poll in which the inverter reported that error are
