@@ -20,6 +20,12 @@ Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
   `strings.json`/`en.json` in step with the code, and tests fail when a
   language misses a key or placeholder.
 
+- New logo and icon. Newer Home Assistant versions (checked on 2026.10) show
+  them from the integration's own `brand/` folder; older ones show the generic
+  icon; the README shows the logo and screenshots in English and
+  German, taken in the lab with an inverter emulator
+  (`scripts/docs_screenshots.py`).
+
 ### Changed
 - Entities that had German names in the code now have English source names
   (e.g. *Battery Longevity*, *Diagnosis: Battery*, *Degradation: Battery SoH*)

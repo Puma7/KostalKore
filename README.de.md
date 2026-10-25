@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <img src="docs/images/logo.svg" alt="KORE" width="380">
+  </picture>
+</p>
+
 # KOSTAL KORE für Home Assistant
 
 [English](README.md) · **Deutsch**
@@ -83,6 +90,15 @@ schreibt in deinen Wechselrichter. Prüfe ihre Wirkung an deiner eigenen Anlage.
 **Umzug** von der in Home Assistant eingebauten Integration `kostal_plenticore`,
 einschließlich Entity-IDs und Verlauf ([Anleitung](docs/de/migration.md)).
 
+### Bildschirmfotos
+
+Aufgenommen im Labor mit einem Wechselrichter-Emulator, nicht an einer echten
+Anlage (`scripts/docs_screenshots.py` erzeugt sie neu).
+
+| Geräteseite | Ladegrenze mit Rücklesen |
+|---|---|
+| ![Geräteseite](docs/images/screenshots/de/device.png) | ![Maximale Ladegrenze](docs/images/screenshots/de/battery-limit.png) |
+
 ## Voraussetzungen
 
 - Home Assistant 2024.12 oder neuer.
@@ -121,6 +137,8 @@ einschließlich Entity-IDs und Verlauf ([Anleitung](docs/de/migration.md)).
 Später ändert **Konfigurieren** die Optionen für Modbus, MQTT, Proxy und KSEM.
 Host, Passwort und Servicecode änderst du mit **Neu konfigurieren** im Menü des
 Eintrags.
+
+![Die Integration in Home Assistant](docs/images/screenshots/de/integration.png)
 
 ## Batteriesteuerung
 

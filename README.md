@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <img src="docs/images/logo.svg" alt="KORE" width="380">
+  </picture>
+</p>
+
 # KOSTAL KORE for Home Assistant
 
 **English** · [Deutsch](README.de.md)
@@ -79,6 +86,15 @@ your inverter. Check its effect on your own system.
 **Migration** from Home Assistant's built-in `kostal_plenticore` integration,
 including entity IDs and history ([guide](docs/en/migration.md)).
 
+### Screenshots
+
+Taken in the lab with an inverter emulator, not on a real installation
+(`scripts/docs_screenshots.py` regenerates them).
+
+| Device page | Charge limit with read-back |
+|---|---|
+| ![Device page](docs/images/screenshots/en/device.png) | ![Battery Max Charge Limit](docs/images/screenshots/en/battery-limit.png) |
+
 ## Requirements
 
 - Home Assistant 2024.12 or newer.
@@ -113,6 +129,8 @@ including entity IDs and history ([guide](docs/en/migration.md)).
 
 Later, **Configure** changes the Modbus, MQTT, proxy and KSEM options. Host,
 password and service code are changed with **Reconfigure** in the entry's menu.
+
+![The integration in Home Assistant](docs/images/screenshots/en/integration.png)
 
 ## Battery control
 
