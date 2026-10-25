@@ -60,13 +60,15 @@ async def test_lost_lease_prevents_stale_keepalive_writes(failure):
 async def test_current_owner_keeps_one_current_limit_alive():
     item = entity()
 
-    async def accepted(*args):
+    async def accepted(*args, **kwargs):
         item._keepalive_value = None
 
     item.coordinator.async_write_register.side_effect = accepted
     with patch("custom_components.kostal_kore.modbus_number.asyncio.sleep", AsyncMock()):
         await item._run_keepalive()
-    item.coordinator.async_write_register.assert_awaited_once_with(REG_G3_MAX_CHARGE, 5000)
+    # The keepalive re-writes the current command; it is not a new one.
+    item.coordinator.async_write_register.assert_awaited_once_with(
+        REG_G3_MAX_CHARGE, 5000, record_command=False)
 
 
 @pytest.mark.asyncio

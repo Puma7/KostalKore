@@ -623,8 +623,10 @@ class ModbusNumberEntity(
                                               control=f"modbus_{self._register.name}")
                     break
                 try:
+                    # Same command on the same connection (checked above): do
+                    # not count it as a new one, the entity outcome still holds.
                     await self.coordinator.async_write_register(
-                        self._register, self._keepalive_value
+                        self._register, self._keepalive_value, record_command=False,
                     )
                     _LOGGER.debug(
                         "G3 keepalive: re-wrote %s = %s",

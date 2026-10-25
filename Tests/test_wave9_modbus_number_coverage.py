@@ -297,7 +297,8 @@ async def test_modbus_number_entity_paths() -> None:
         new=AsyncMock(),
     ):
         await entity._run_keepalive()
-    coord.async_write_register.assert_awaited_once_with(mod.REG_G3_MAX_CHARGE, 111)
+    coord.async_write_register.assert_awaited_once_with(
+        mod.REG_G3_MAX_CHARGE, 111, record_command=False)
 
     entity._keepalive_value = 222
     coord.async_write_register = AsyncMock(side_effect=mod.ModbusClientError("bad"))

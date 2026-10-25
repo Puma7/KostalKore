@@ -207,3 +207,17 @@ def test_an_older_write_finishing_late_keeps_the_newer_outcome() -> None:
         "last_command_outcome": mod.COMMAND_CONFIRMED,
         "last_command_readback": 1999.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_keepalive_rewrite_is_not_a_new_command(hass) -> None:
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+    from Tests.test_wave7_modbus_core_coverage import _modbus_client
+
+    coordinator = ModbusDataUpdateCoordinator(hass, _modbus_client())
+    register = mod.REG_G3_MAX_CHARGE
+    await coordinator.async_write_register(register, 1000)
+    await coordinator.async_write_register(register, 1000, record_command=False)
+    assert coordinator.command_revision(register.name) == 1
+    assert coordinator.last_commanded(register.name) == 1000
+

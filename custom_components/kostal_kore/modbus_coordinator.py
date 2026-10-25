@@ -668,12 +668,15 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         audit_source: str = "modbus_coord",
         precondition: Callable[[], bool] | None = None,
+        record_command: bool = True,
     ) -> None:
         """Write a value to a control register with safety validation.
 
         audit_source lets callers (MQTT bridge, proxy) tag the event so the
         write-audit log distinguishes origin paths. precondition is checked
         before every client retry (see KostalModbusClient.write_register).
+        record_command=False is for a re-write of the command already
+        recorded (the G3 keepalive): it is not a new command.
         """
         if register.access != Access.RW:
             raise ValueError(f"Register {register.name} is read-only")
@@ -692,7 +695,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if register in CONTROL_READBACK_REGISTERS:
                 # The next refresh must read the device, not retain the old limit.
                 self._slow_tick = 5
-            self._record_commanded(register.name, value)
+            if record_command:
+                self._record_commanded(register.name, value)
             _LOGGER.info(
                 "Wrote %s = %s to inverter via Modbus", register.name, value
             )
