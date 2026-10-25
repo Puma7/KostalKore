@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
-    <img src="docs/images/logo.svg" alt="KORE" width="380">
-  </picture>
+  <img src="docs/images/banner.en.png" alt="KOSTAL KORE – Home Assistant integration for KOSTAL PLENTICORE inverters: live values, battery limits over Modbus, diagnostics, Modbus proxy and MQTT" width="100%">
 </p>
 
 # KOSTAL KORE for Home Assistant
@@ -89,7 +86,8 @@ including entity IDs and history ([guide](docs/en/migration.md)).
 ### Screenshots
 
 Taken in the lab with an inverter emulator, not on a real installation
-(`scripts/docs_screenshots.py` regenerates them).
+(`scripts/docs_screenshots.py` regenerates them, `scripts/make_banner.py` the
+banner at the top).
 
 | Device page | Charge limit with read-back |
 |---|---|

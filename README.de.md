@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
-    <img src="docs/images/logo.svg" alt="KORE" width="380">
-  </picture>
+  <img src="docs/images/banner.de.png" alt="KOSTAL KORE – Home-Assistant-Integration für KOSTAL-PLENTICORE-Wechselrichter: Live-Werte, Batteriegrenzen per Modbus, Diagnose, Modbus-Proxy und MQTT" width="100%">
 </p>
 
 # KOSTAL KORE für Home Assistant
@@ -93,7 +90,8 @@ einschließlich Entity-IDs und Verlauf ([Anleitung](docs/de/migration.md)).
 ### Bildschirmfotos
 
 Aufgenommen im Labor mit einem Wechselrichter-Emulator, nicht an einer echten
-Anlage (`scripts/docs_screenshots.py` erzeugt sie neu).
+Anlage (`scripts/docs_screenshots.py` erzeugt sie neu, `scripts/make_banner.py`
+das Banner oben).
 
 | Geräteseite | Ladegrenze mit Rücklesen |
 |---|---|

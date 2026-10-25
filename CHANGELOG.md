@@ -22,8 +22,9 @@ Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
 
 - New logo and icon. Newer Home Assistant versions (checked on 2026.10) show
   them from the integration's own `brand/` folder; older ones show the generic
-  icon; the README shows the logo and screenshots in English and
-  German, taken in the lab with an inverter emulator
+  icon. The READMEs start with a banner that explains in one picture what the
+  integration does (`scripts/make_banner.py`), and show screenshots in English
+  and German, taken in the lab with an inverter emulator
   (`scripts/docs_screenshots.py`).
 
 ### Changed
