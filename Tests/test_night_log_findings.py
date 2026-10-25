@@ -284,3 +284,24 @@ def test_rest_soc_hold_ignores_other_modules_and_text() -> None:
     assert proc._held_soc_for_zero("devices:local:battery", {"SoC": "n/a"}) is None
     proc._last_result = {}
     assert proc._held_soc_for_zero("devices:local:battery", {"SoC": "0"}) is None
+
+
+@pytest.mark.asyncio
+async def test_a_held_soc_alone_keeps_the_rest_channel_healthy(hass) -> None:
+    from types import SimpleNamespace
+
+    from Tests.test_bug_regression import _make_process_coord
+
+    proc = _make_process_coord(hass, {"devices:local:battery": ["SoC"]})
+    answers = iter(["21", "0"])
+
+    async def fetch(_request):
+        return {"devices:local:battery": {"SoC": SimpleNamespace(value=next(answers))}}
+
+    proc._plenticore._client.get_process_data_values = fetch
+    await proc._async_update_data()
+    success_ts = proc._last_success_ts
+    data = await proc._async_update_data()
+    assert data["devices:local:battery"]["SoC"] == "21"
+    assert proc.communication_stale is False
+    assert proc._last_success_ts == success_ts  # the held value does not extend the TTL

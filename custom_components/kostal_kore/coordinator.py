@@ -1092,6 +1092,7 @@ class ProcessDataUpdateCoordinator(
         result: dict[str, dict[str, str]] = {}
         fresh_result: dict[str, dict[str, str]] = {}
         partial_response = bool(set(fetch) - set(fetched_data))
+        held_any = False
         for module_id in fetched_data:
             try:
                 module_data = fetched_data[module_id]
@@ -1129,6 +1130,7 @@ class ProcessDataUpdateCoordinator(
                 # Held, not fresh: the cache keeps the last real SoC.
                 del fresh_result[module_id]["SoC"]
                 result[module_id]["SoC"] = held_soc
+                held_any = True
             self.fresh_fields.update((module_id, key) for key in fresh_result[module_id])
 
             if failed_fields:
@@ -1171,6 +1173,9 @@ class ProcessDataUpdateCoordinator(
                 any_fresh_data = True
         if any_fresh_data:
             self._last_success_ts = time.monotonic()  # für Stale-TTL-Check
+        # A held SoC still answered: the roundtrip is healthy, but the held
+        # value neither refreshes the cache nor extends its TTL.
+        if any_fresh_data or held_any:
             self._communication_roundtrip_ok = not partial_response
         return result
 
