@@ -12,6 +12,7 @@ from typing import Any, Final, cast
 
 from aiohttp.client_exceptions import ClientError
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -2482,14 +2483,15 @@ class ModbusDiagnosticSensor(
 
 
 class ModbusEnergySensor(
-    CoordinatorEntity[ModbusDataUpdateCoordinator], SensorEntity
+    CoordinatorEntity[ModbusDataUpdateCoordinator], RestoreSensor
 ):
     """Lifetime energy counter read from a Modbus register (Wh → kWh).
 
     A counter never runs backwards. A 0 or lower reading (e.g. a read fault
     during an inverter-internal error) would look like a meter reset to the
     statistics and double-count the whole total, so the last good value is
-    kept instead.
+    kept instead. That value survives a restart, so a low first reading after
+    a reload is not accepted either.
     """
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -2513,6 +2515,18 @@ class ModbusEnergySensor(
         self._attr_unique_id = f"{entry_id}_modbus_energy_{key}"
         self._attr_device_info = device_info
         self._last_kwh: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_sensor_data()
+        if last is None:
+            return
+        try:
+            restored = float(last.native_value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(restored) and restored > 0:
+            self._last_kwh = max(restored, self._last_kwh or 0.0)
 
     @property
     def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]

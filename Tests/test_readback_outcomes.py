@@ -170,3 +170,26 @@ def test_energy_counter_converts_and_never_runs_backwards() -> None:
         assert sensor.native_value == pytest.approx(1234.567)
     coord.data = {"total_ac_charge_grid": 1_235_000.0}
     assert sensor.native_value == pytest.approx(1235.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("restored", "expected"), [
+    (1234.5, 1234.5),   # a low first reading after a reload is not a new total
+    (None, 1000.0),
+    ("bad", 1000.0),
+    (0.0, 1000.0),
+])
+async def test_energy_counter_restores_its_total_after_a_reload(restored, expected) -> None:
+    from unittest.mock import patch
+
+    coord = SimpleNamespace(data={"total_dc_charge": 1_000_000.0})
+    sensor = sensor_mod.ModbusEnergySensor(
+        coord, "entry", {"identifiers": {("kostal_kore", "abc")}},
+        key="total_dc_charge", name="DC charge")
+    last = None if restored is None else SimpleNamespace(native_value=restored)
+    with (
+        patch.object(sensor_mod.CoordinatorEntity, "async_added_to_hass", AsyncMock()),
+        patch.object(sensor, "async_get_last_sensor_data", AsyncMock(return_value=last)),
+    ):
+        await sensor.async_added_to_hass()
+    assert sensor.native_value == pytest.approx(expected)
