@@ -1,5 +1,7 @@
 # Migrations-Leitfaden: von `kostal_plenticore` zu `kostal_kore`
 
+[English](../en/migration.md) · **Deutsch**
+
 Dieser Leitfaden beschreibt **alle** Migrationswege in KOSTAL KORE — von der einfachen Bedienung über die Geräteseite bis zu fortgeschrittenen Services unter **Entwicklerwerkzeuge**. Er richtet sich an Anfänger, Fortgeschrittene und Profis.
 
 **Kurzlinks**
@@ -7,10 +9,9 @@ Dieser Leitfaden beschreibt **alle** Migrationswege in KOSTAL KORE — von der e
 | Dokument | Sprache | Inhalt |
 |----------|---------|--------|
 | Dieser Leitfaden | Deutsch | Vollständig |
-| [MIGRATION_COMPLETE_EN.md](MIGRATION_COMPLETE_EN.md) | English | Full guide |
-| [migration_orphan_history.md](migration_orphan_history.md) | Deutsch | Nur Profil „lange auf KORE, nie migriert“ |
-| [../migration.md](../migration.md) | English | Kompakte Schritt-für-Schritt-Anleitung |
-| [../MIGRATION_ARCHITECTURE.md](../MIGRATION_ARCHITECTURE.md) | English | Technische Grenzen / Architektur (Entwickler) |
+| [migration.md (English)](../en/migration.md) | English | Full guide |
+| [orphan-history.md](orphan-history.md) | Deutsch | Nur Profil „lange auf KORE, nie migriert“ |
+| [MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md) | English | Technische Grenzen / Architektur (Entwickler) |
 
 ---
 
@@ -264,7 +265,7 @@ Apply ebenfalls mit 3-Schritt-Bestätigung wie in 4.1.
 2. `kostal_kore.apply_orphan_history_mapping` mit `dry_run: true`.
 3. Apply mit `dry_run: false`.
 
-Ausführlich: [migration_orphan_history.md](migration_orphan_history.md).
+Ausführlich: [orphan-history.md](orphan-history.md).
 
 ---
 
@@ -287,7 +288,7 @@ Ausführlich: [migration_orphan_history.md](migration_orphan_history.md).
 | `No legacy 'kostal_plenticore' config entry found` | Alter Eintrag gelöscht | Backup restore oder alten Eintrag neu anlegen; ggf. **Orphan-Weg** (Kap. 6) |
 | `Multiple legacy entries found` | Mehrere Plenticore-Einträge | `source_entry_id` bei Services setzen; einen Eintrag nach dem anderen migrieren |
 | Import: `0 entities migrated` | Legacy nicht geladen / falsches `unique_id`-Format | Legacy-Integration aktivieren; Logs prüfen; ggf. `adopt` mit `dry_run` |
-| Zweite Gerätekarte nach Migration | Bekannte Identifier-Thematik | Nach Import nur ein KORE-Gerät nutzen; siehe [MIGRATION_ARCHITECTURE.md](../MIGRATION_ARCHITECTURE.md) |
+| Zweite Gerätekarte nach Migration | Bekannte Identifier-Thematik | Nach Import nur ein KORE-Gerät nutzen; siehe [MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md) |
 | History leer trotz Import | Andere `entity_id` als erwartet | `copy_legacy_history` oder Orphan-Weg |
 | Cleanup-Code abgelehnt | Tippfehler / abgelaufen | Neuen Zyklus starten (Button erneut) |
 
@@ -317,7 +318,7 @@ Während der Testphase kurz möglich; nach Import ist Legacy **entladen**. Beide
 
 ### Wo finde ich technische Limitierungen?
 
-[MIGRATION_ARCHITECTURE.md](../MIGRATION_ARCHITECTURE.md) (Englisch, für Maintainer und HA-Core-2026.8-Kontext).
+[MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md) (Englisch, für Maintainer und HA-Core-2026.8-Kontext).
 
 ---
 

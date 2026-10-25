@@ -1,6 +1,8 @@
 # Orphan-History-Migration
 
-> Gesamtübersicht aller Migrationswege (Buttons, Services, Profile): [MIGRATION_LEITFADEN.md](MIGRATION_LEITFADEN.md) · [MIGRATION_COMPLETE_EN.md](MIGRATION_COMPLETE_EN.md)
+[English](../en/orphan-history.md) · **Deutsch**
+
+> Gesamtübersicht aller Migrationswege (Buttons, Services, Profile): [migration.md](migration.md) · [English](../en/migration.md)
 
 ## Wann brauche ich das?
 

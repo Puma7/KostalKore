@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
 
 ### Changed
+- Documentation: new `README.md` (English) and `README.de.md` (German) that state
+  what is tested (one PLENTICORE G3 L 20 kW) and what is not, without the old
+  feature marketing. User guides are bilingual under `docs/en/` and `docs/de/`
+  (entities, Modbus proxy/MQTT, energy dashboard, troubleshooting, diagnostics,
+  communication failures, firmware compatibility, migration, orphan history);
+  developer notes moved to `docs/development/`; new `CONTRIBUTING.md`. Copies of
+  KOSTAL's manuals (Modbus protocol description, event list) were removed in
+  favour of links to the official documents. The issue link in the old README
+  pointed to the wrong repository.
 - A Modbus write to `Battery Max Charge Limit` / `Battery Max Discharge Limit`
   (REG 1038 / 1040) that reads back **below** the command now counts as
   applied (`last_command_outcome = limited`) instead of failing as "Readback is

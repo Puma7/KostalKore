@@ -1,5 +1,7 @@
 # Communication failures and diagnosis
 
+**English** · [Deutsch](../de/communication-failures.md)
+
 The proxy serves recent **observations**, separately from entity/command caches.
 It invalidates observations on failed/partial polls, reconnects and writes. Fast
 values expire after three polling intervals (at least 15 seconds); slow values

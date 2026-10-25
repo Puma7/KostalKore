@@ -1,5 +1,7 @@
 # Entity-Referenz: KOSTAL KORE (Kostal Plenticore)
 
+[English](../en/entities.md) · **Deutsch**
+
 Vollständige Dokumentation aller Entities, Werte, Einheiten und deren Bedeutung.
 Hinweis: Verfügbarkeit einzelner Entities hängt von Inverter-Generation/Firmware sowie Zugriffsprofil (User/Installer) ab.
 
@@ -284,14 +286,14 @@ eingestuft.
 
 | Entity | Typ | Beschreibung |
 |---|---|---|
-| **Import Legacy Plenticore Data** | Button | Schritt 1 der Legacy-Migration: Importiert alte Entry-Daten und migriert Registry-Bindings, ohne die Legacy-Entry sofort zu entfernen. Vollständige Doku: [docs/MIGRATION_LEITFADEN.md](docs/MIGRATION_LEITFADEN.md). |
+| **Import Legacy Plenticore Data** | Button | Schritt 1 der Legacy-Migration: Importiert alte Entry-Daten und migriert Registry-Bindings, ohne die Legacy-Entry sofort zu entfernen. Vollständige Doku: [migration.md](migration.md). |
 | **Finalize Legacy Cleanup** | Button | Schritt 2 der Legacy-Migration: Entfernt verbleibende Legacy-Entities/-Geräteverknüpfungen und löscht anschließend die alte Legacy-Entry (3-stufige Bestätigung). |
 | **Legacy Cleanup Confirmation Code** | Text | Bestätigungscode für *Finalize Legacy Cleanup* (aus Benachrichtigung kopieren). |
 | **Reset Modbus Registers** | Button | Setzt alle temporär deaktivierten Register zurück. Nach Firmware-Update oder Inverterwechsel drücken, damit neue Register erkannt werden. |
 | **Run Modbus Diagnostics** | Button | Liest alle Register und erstellt einen ausführlichen Diagnosebericht als HA Persistent Notification. 100% read-only, kein Schreibzugriff. |
 
 Diagnosedownload, Debug-Aktion und die Einordnung von Ladegrenzen werden in
-[Diagnoseberichte](docs/DIAGNOSTIC_REPORTS.md) beschrieben.
+[Diagnoseberichte](diagnostics.md) beschrieben.
 
 ---
 

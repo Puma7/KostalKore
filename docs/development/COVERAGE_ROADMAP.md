@@ -11,7 +11,7 @@ the subset of files currently measured by coverage.
 
 As of 2026-03-28:
 - `48` Python modules exist under `custom_components/kostal_kore/`
-- `40` modules are excluded in [.coveragerc](./.coveragerc)
+- `40` modules are excluded in [.coveragerc](../../.coveragerc)
 - only `8` modules are currently part of the enforced `--cov-fail-under=100` gate
 
 This roadmap defines what "real 100%" means, what must change to get there, and
@@ -73,15 +73,15 @@ Goal: remove the easiest structural exclusions first and stabilize the test
 pattern for later waves.
 
 Target files:
-- [custom_components/kostal_kore/binary_sensor.py](./custom_components/kostal_kore/binary_sensor.py)
-- [custom_components/kostal_kore/button.py](./custom_components/kostal_kore/button.py)
-- [custom_components/kostal_kore/text.py](./custom_components/kostal_kore/text.py)
-- [custom_components/kostal_kore/notifications.py](./custom_components/kostal_kore/notifications.py)
-- [custom_components/kostal_kore/power_limits.py](./custom_components/kostal_kore/power_limits.py)
-- [custom_components/kostal_kore/diagnostics.py](./custom_components/kostal_kore/diagnostics.py)
-- [custom_components/kostal_kore/request_scheduler.py](./custom_components/kostal_kore/request_scheduler.py)
-- [custom_components/kostal_kore/scheduled_session.py](./custom_components/kostal_kore/scheduled_session.py)
-- [custom_components/kostal_kore/repairs.py](./custom_components/kostal_kore/repairs.py)
+- [custom_components/kostal_kore/binary_sensor.py](../../custom_components/kostal_kore/binary_sensor.py)
+- [custom_components/kostal_kore/button.py](../../custom_components/kostal_kore/button.py)
+- [custom_components/kostal_kore/text.py](../../custom_components/kostal_kore/text.py)
+- [custom_components/kostal_kore/notifications.py](../../custom_components/kostal_kore/notifications.py)
+- [custom_components/kostal_kore/power_limits.py](../../custom_components/kostal_kore/power_limits.py)
+- [custom_components/kostal_kore/diagnostics.py](../../custom_components/kostal_kore/diagnostics.py)
+- [custom_components/kostal_kore/request_scheduler.py](../../custom_components/kostal_kore/request_scheduler.py)
+- [custom_components/kostal_kore/scheduled_session.py](../../custom_components/kostal_kore/scheduled_session.py)
+- [custom_components/kostal_kore/repairs.py](../../custom_components/kostal_kore/repairs.py)
 
 Why first:
 - smallest external blast radius
@@ -101,12 +101,12 @@ Exit criteria:
 Goal: cover the files with the highest user-facing setup and repair impact.
 
 Target files:
-- [custom_components/kostal_kore/config_flow.py](./custom_components/kostal_kore/config_flow.py)
-- [custom_components/kostal_kore/legacy_migration.py](./custom_components/kostal_kore/legacy_migration.py)
-- [custom_components/kostal_kore/migration_services.py](./custom_components/kostal_kore/migration_services.py)
-- [custom_components/kostal_kore/system_health_check.py](./custom_components/kostal_kore/system_health_check.py)
-- [custom_components/kostal_kore/diagnostics_engine.py](./custom_components/kostal_kore/diagnostics_engine.py)
-- [custom_components/kostal_kore/diagnostic_entities.py](./custom_components/kostal_kore/diagnostic_entities.py)
+- [custom_components/kostal_kore/config_flow.py](../../custom_components/kostal_kore/config_flow.py)
+- [custom_components/kostal_kore/legacy_migration.py](../../custom_components/kostal_kore/legacy_migration.py)
+- [custom_components/kostal_kore/migration_services.py](../../custom_components/kostal_kore/migration_services.py)
+- [custom_components/kostal_kore/system_health_check.py](../../custom_components/kostal_kore/system_health_check.py)
+- [custom_components/kostal_kore/diagnostics_engine.py](../../custom_components/kostal_kore/diagnostics_engine.py)
+- [custom_components/kostal_kore/diagnostic_entities.py](../../custom_components/kostal_kore/diagnostic_entities.py)
 
 Why second:
 - many previously reviewed P1/P2 issues live here
@@ -126,15 +126,15 @@ Exit criteria:
 Goal: cover the most failure-prone transport and write-control logic.
 
 Target files:
-- [custom_components/kostal_kore/modbus_client.py](./custom_components/kostal_kore/modbus_client.py)
-- [custom_components/kostal_kore/modbus_coordinator.py](./custom_components/kostal_kore/modbus_coordinator.py)
-- [custom_components/kostal_kore/modbus_proxy.py](./custom_components/kostal_kore/modbus_proxy.py)
-- [custom_components/kostal_kore/mqtt_bridge.py](./custom_components/kostal_kore/mqtt_bridge.py)
-- [custom_components/kostal_kore/ksem_coordinator.py](./custom_components/kostal_kore/ksem_coordinator.py)
-- [custom_components/kostal_kore/modbus_button.py](./custom_components/kostal_kore/modbus_button.py)
-- [custom_components/kostal_kore/modbus_number.py](./custom_components/kostal_kore/modbus_number.py)
-- [custom_components/kostal_kore/live_test.py](./custom_components/kostal_kore/live_test.py)
-- [custom_components/kostal_kore/modbus_test.py](./custom_components/kostal_kore/modbus_test.py)
+- [custom_components/kostal_kore/modbus_client.py](../../custom_components/kostal_kore/modbus_client.py)
+- [custom_components/kostal_kore/modbus_coordinator.py](../../custom_components/kostal_kore/modbus_coordinator.py)
+- [custom_components/kostal_kore/modbus_proxy.py](../../custom_components/kostal_kore/modbus_proxy.py)
+- [custom_components/kostal_kore/mqtt_bridge.py](../../custom_components/kostal_kore/mqtt_bridge.py)
+- [custom_components/kostal_kore/ksem_coordinator.py](../../custom_components/kostal_kore/ksem_coordinator.py)
+- [custom_components/kostal_kore/modbus_button.py](../../custom_components/kostal_kore/modbus_button.py)
+- [custom_components/kostal_kore/modbus_number.py](../../custom_components/kostal_kore/modbus_number.py)
+- [custom_components/kostal_kore/live_test.py](../../custom_components/kostal_kore/live_test.py)
+- `custom_components/kostal_kore/modbus_test.py` (removed since)
 
 Why third:
 - highest density of protocol edge cases
@@ -157,26 +157,26 @@ Goal: finish real coverage on the large Home Assistant platform files and all
 specialized monitoring logic.
 
 Target files:
-- [custom_components/kostal_kore/sensor.py](./custom_components/kostal_kore/sensor.py)
-- [custom_components/kostal_kore/switch.py](./custom_components/kostal_kore/switch.py)
-- [custom_components/kostal_kore/number.py](./custom_components/kostal_kore/number.py)
-- [custom_components/kostal_kore/select.py](./custom_components/kostal_kore/select.py)
-- [custom_components/kostal_kore/coordinator.py](./custom_components/kostal_kore/coordinator.py)
-- [custom_components/kostal_kore/health_monitor.py](./custom_components/kostal_kore/health_monitor.py)
-- [custom_components/kostal_kore/health_sensor.py](./custom_components/kostal_kore/health_sensor.py)
-- [custom_components/kostal_kore/health_binary_sensor.py](./custom_components/kostal_kore/health_binary_sensor.py)
-- [custom_components/kostal_kore/fire_safety.py](./custom_components/kostal_kore/fire_safety.py)
-- [custom_components/kostal_kore/fire_safety_entities.py](./custom_components/kostal_kore/fire_safety_entities.py)
-- [custom_components/kostal_kore/battery_chemistry.py](./custom_components/kostal_kore/battery_chemistry.py)
-- [custom_components/kostal_kore/longevity_advisor.py](./custom_components/kostal_kore/longevity_advisor.py)
-- [custom_components/kostal_kore/longevity_entities.py](./custom_components/kostal_kore/longevity_entities.py)
-- [custom_components/kostal_kore/degradation_tracker.py](./custom_components/kostal_kore/degradation_tracker.py)
-- [custom_components/kostal_kore/degradation_entities.py](./custom_components/kostal_kore/degradation_entities.py)
-- [custom_components/kostal_kore/battery_soc_controller.py](./custom_components/kostal_kore/battery_soc_controller.py)
-- [custom_components/kostal_kore/soc_controller_entities.py](./custom_components/kostal_kore/soc_controller_entities.py)
-- [custom_components/kostal_kore/charge_block_switch.py](./custom_components/kostal_kore/charge_block_switch.py)
-- [custom_components/kostal_kore/grid_charge_limiter.py](./custom_components/kostal_kore/grid_charge_limiter.py)
-- [custom_components/kostal_kore/battery_test.py](./custom_components/kostal_kore/battery_test.py)
+- [custom_components/kostal_kore/sensor.py](../../custom_components/kostal_kore/sensor.py)
+- [custom_components/kostal_kore/switch.py](../../custom_components/kostal_kore/switch.py)
+- [custom_components/kostal_kore/number.py](../../custom_components/kostal_kore/number.py)
+- [custom_components/kostal_kore/select.py](../../custom_components/kostal_kore/select.py)
+- [custom_components/kostal_kore/coordinator.py](../../custom_components/kostal_kore/coordinator.py)
+- [custom_components/kostal_kore/health_monitor.py](../../custom_components/kostal_kore/health_monitor.py)
+- [custom_components/kostal_kore/health_sensor.py](../../custom_components/kostal_kore/health_sensor.py)
+- [custom_components/kostal_kore/health_binary_sensor.py](../../custom_components/kostal_kore/health_binary_sensor.py)
+- [custom_components/kostal_kore/fire_safety.py](../../custom_components/kostal_kore/fire_safety.py)
+- [custom_components/kostal_kore/fire_safety_entities.py](../../custom_components/kostal_kore/fire_safety_entities.py)
+- [custom_components/kostal_kore/battery_chemistry.py](../../custom_components/kostal_kore/battery_chemistry.py)
+- [custom_components/kostal_kore/longevity_advisor.py](../../custom_components/kostal_kore/longevity_advisor.py)
+- [custom_components/kostal_kore/longevity_entities.py](../../custom_components/kostal_kore/longevity_entities.py)
+- [custom_components/kostal_kore/degradation_tracker.py](../../custom_components/kostal_kore/degradation_tracker.py)
+- [custom_components/kostal_kore/degradation_entities.py](../../custom_components/kostal_kore/degradation_entities.py)
+- [custom_components/kostal_kore/battery_soc_controller.py](../../custom_components/kostal_kore/battery_soc_controller.py)
+- [custom_components/kostal_kore/soc_controller_entities.py](../../custom_components/kostal_kore/soc_controller_entities.py)
+- [custom_components/kostal_kore/charge_block_switch.py](../../custom_components/kostal_kore/charge_block_switch.py)
+- [custom_components/kostal_kore/grid_charge_limiter.py](../../custom_components/kostal_kore/grid_charge_limiter.py)
+- [custom_components/kostal_kore/battery_test.py](../../custom_components/kostal_kore/battery_test.py)
 
 Why last:
 - these files are the broadest and most stateful

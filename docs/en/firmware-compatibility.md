@@ -1,5 +1,7 @@
 # Firmware compatibility and register 1024
 
+**English** · [Deutsch](../de/firmware-compatibility.md)
+
 ## Verified manufacturer references
 
 - [G3 release notes, 3.07.03.27419](https://www.kostal-solar-electric.com/fileadmin/downloadcenter/kse/Software/PLENTICORE_G3/Release_notes_G3_3.07.03.27419.txt), dated 2026-10-14: fixes ignored external-battery commands on register 1024. It also extends G3 battery-type register 588 to 32 bits while retaining 16-bit read compatibility.

@@ -1,5 +1,7 @@
 # KOSTAL KORE Proxy – evcc & externe Systeme anbinden
 
+[English](../en/modbus-proxy-mqtt.md) · **Deutsch**
+
 ## Architektur
 
 ```

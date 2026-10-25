@@ -1,6 +1,6 @@
 # Tier is gated by the lowest unmet mandatory rule. `test-coverage` (silver) is
 # NOT met: the enforced 100% branch-coverage gate currently spans 17 of 56
-# modules (39 are omitted in .coveragerc) — see COVERAGE_ROADMAP.md. Most
+# modules (39 are omitted in .coveragerc) — see docs/development/COVERAGE_ROADMAP.md. Most
 # gold/platinum rules below are individually met; the scale reflects that one
 # open rule rather than the per-rule progress.
 quality_scale: bronze
@@ -89,7 +89,7 @@ rules:
     comment: >-
       Enforced 100% branch coverage (906 tests) currently covers 17 of 56
       modules; the rest are omitted in .coveragerc. Reaching real all-module
-      coverage is tracked in COVERAGE_ROADMAP.md (Open).
+      coverage is tracked in docs/development/COVERAGE_ROADMAP.md (Open).
 
   # ============================================================
   # Gold
@@ -161,7 +161,7 @@ rules:
     status: todo
     comment: >-
       Not yet met: .coveragerc omits 39 modules from the enforced gate. Tracked
-      in COVERAGE_ROADMAP.md.
+      in docs/development/COVERAGE_ROADMAP.md.
 
   # ============================================================
   # Platinum (all done)
