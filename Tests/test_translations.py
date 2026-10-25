@@ -98,6 +98,17 @@ def test_explicit_key_is_kept_and_names_the_id_in_english() -> None:
     assert entity.entity_id == "sensor.inverter_state"
 
 
+def test_explicit_key_without_translation_falls_back_to_the_name() -> None:
+    entity = _Sensor(description=SensorEntityDescription(key="x", name="Battery Power", translation_key="bat_p"))
+    naming.apply_names(entity, "sensor", ENGLISH_NAMES)
+    assert entity.translation_key == "battery_power"
+    assert entity.entity_id == "sensor.kostal_battery_power"
+    unknown = _Sensor(description=SensorEntityDescription(key="y", name="Something New", translation_key="new"))
+    naming.apply_names(unknown, "sensor", ENGLISH_NAMES)
+    assert unknown.name == "Something New"
+    assert unknown.entity_id == "sensor.kostal_something_new"
+
+
 def test_unknown_name_stays_english_without_translation() -> None:
     entity = _Sensor("Something New")
     naming.apply_names(entity, "sensor", ENGLISH_NAMES)
@@ -182,3 +193,11 @@ async def test_names_follow_the_language_and_ids_stay_english(
     entity_id = "select.scb_battery_charging_usage_mode"
     assert er.async_get(hass).async_is_registered(entity_id)
     assert hass.states.get(entity_id).attributes["friendly_name"] == friendly_name
+
+    catalog = naming.load_english_names()
+    uncatalogued = [
+        (entry.entity_id, entry.translation_key)
+        for entry in er.async_entries_for_config_entry(er.async_get(hass), mock_config_entry.entry_id)
+        if entry.translation_key not in catalog.get(entry.domain, {})
+    ]
+    assert not uncatalogued

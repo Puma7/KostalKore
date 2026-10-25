@@ -83,6 +83,8 @@ def apply_names(entity: Entity, domain: str, english: EnglishNames) -> None:
     key = getattr(entity, "_attr_translation_key", None)
     if key is None:
         key = getattr(getattr(entity, "entity_description", None), "translation_key", None)
+    if key is not None and key not in known:
+        key = None  # a key without a translation (e.g. built from an API key): look up the name
     if key is None and source is not None:
         if (found := _key_for(known, source)) is not None:
             key = found
