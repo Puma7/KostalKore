@@ -128,431 +128,112 @@
     }
   },
   "entity": {
-    "sensor": {
-      "inverter_state": {
-        "name": "Inverter State"
+    "binary_sensor": {
+      "active_inverter_errors": {
+        "name": "Active Inverter Errors"
       },
-      "dc_p": {
-        "name": "Solar Power"
+      "battery_fire_risk": {
+        "name": "Battery Fire Risk"
       },
-      "grid_p": {
-        "name": "Grid Power"
+      "battery_health_warning": {
+        "name": "Battery Health Warning"
       },
-      "homebat_p": {
-        "name": "Home Power from Battery"
+      "battery_temperature_warning": {
+        "name": "Battery Temperature Warning"
       },
-      "homegrid_p": {
-        "name": "Home Power from Grid"
+      "controller_overheat_warning": {
+        "name": "Controller Overheat Warning"
       },
-      "homeown_p": {
-        "name": "Home Power from Own"
+      "dc_cable_danger": {
+        "name": "DC Cable Danger"
       },
-      "homepv_p": {
-        "name": "Home Power from PV"
+      "dc_string_imbalance_warning": {
+        "name": "DC String Imbalance Warning"
       },
-      "home_p": {
-        "name": "Home Power"
+      "grid_frequency_warning": {
+        "name": "Grid Frequency Warning"
       },
-      "ac_p": {
-        "name": "AC Power"
+      "high_error_rate_warning": {
+        "name": "High Error Rate Warning"
       },
-      "pv2bat_p": {
-        "name": "PV to Battery Power"
+      "isolation_fault_danger": {
+        "name": "Isolation Fault Danger"
       },
-      "em_state": {
-        "name": "Energy Manager State"
+      "isolation_resistance_warning": {
+        "name": "Isolation Resistance Warning"
       },
-      "battery_cycles": {
-        "name": "Battery Cycles"
+      "phase_1_voltage_warning": {
+        "name": "Phase 1 Voltage Warning"
       },
-      "battery_p": {
-        "name": "Battery Power"
+      "phase_2_voltage_warning": {
+        "name": "Phase 2 Voltage Warning"
       },
-      "battery_soc": {
-        "name": "Battery SoC"
+      "phase_3_voltage_warning": {
+        "name": "Phase 3 Voltage Warning"
       },
-      "battery_u": {
-        "name": "Battery Voltage"
+      "pv_system_safety": {
+        "name": "PV System Safety"
+      }
+    },
+    "button": {
+      "battery_charge_discharge_test": {
+        "name": "Battery Charge/Discharge Test"
       },
-      "battery_i": {
-        "name": "Battery Current"
+      "finalize_legacy_cleanup": {
+        "name": "Finalize Legacy Cleanup"
       },
-      "battery_soh": {
-        "name": "Battery State of Health"
+      "import_legacy_plenticore_data": {
+        "name": "Import Legacy Plenticore Data"
       },
-      "battery_fullchargecap_e": {
-        "name": "Battery Full Charge Capacity"
+      "reset_modbus_registers": {
+        "name": "Reset Modbus Registers"
       },
-      "battery_workcapacity": {
-        "name": "Battery Work Capacity"
+      "run_modbus_diagnostics": {
+        "name": "Run Modbus Diagnostics"
       },
-      "battery_batmanufacturer": {
-        "name": "Battery Manufacturer"
-      },
-      "battery_batmodel": {
-        "name": "Battery Model"
-      },
-      "battery_batserialno": {
-        "name": "Battery Serial Number"
-      },
-      "battery_batversionfw": {
-        "name": "Battery Firmware Version"
-      },
-      "battery_batmodulecnt": {
-        "name": "Battery Module Count"
-      },
-      "stat_autarky_day": {
-        "name": "Autarky Day"
-      },
-      "stat_autarky_month": {
-        "name": "Autarky Month"
-      },
-      "stat_autarky_total": {
-        "name": "Autarky Total"
-      },
-      "stat_autarky_year": {
-        "name": "Autarky Year"
-      },
-      "stat_ownconsumptionrate_day": {
-        "name": "Own Consumption Rate Day"
-      },
-      "stat_ownconsumptionrate_month": {
-        "name": "Own Consumption Rate Month"
-      },
-      "stat_ownconsumptionrate_total": {
-        "name": "Own Consumption Rate Total"
-      },
-      "stat_ownconsumptionrate_year": {
-        "name": "Own Consumption Rate Year"
-      },
-      "stat_energyhome_day": {
-        "name": "Home Consumption Day"
-      },
-      "stat_energyhome_month": {
-        "name": "Home Consumption Month"
-      },
-      "stat_energyhome_year": {
-        "name": "Home Consumption Year"
-      },
-      "stat_energyhome_total": {
-        "name": "Home Consumption Total"
-      },
-      "stat_energyhomebat_day": {
-        "name": "Home Consumption from Battery Day"
-      },
-      "stat_energyhomebat_month": {
-        "name": "Home Consumption from Battery Month"
-      },
-      "stat_energyhomebat_year": {
-        "name": "Home Consumption from Battery Year"
-      },
-      "stat_energyhomebat_total": {
-        "name": "Home Consumption from Battery Total"
-      },
-      "stat_energyhomegrid_day": {
-        "name": "Home Consumption from Grid Day"
-      },
-      "stat_energyhomegrid_month": {
-        "name": "Home Consumption from Grid Month"
-      },
-      "stat_energyhomegrid_year": {
-        "name": "Home Consumption from Grid Year"
-      },
-      "stat_energyhomegrid_total": {
-        "name": "Home Consumption from Grid Total"
-      },
-      "stat_energyhomepv_day": {
-        "name": "Home Consumption from PV Day"
-      },
-      "stat_energyhomepv_month": {
-        "name": "Home Consumption from PV Month"
-      },
-      "stat_energyhomepv_year": {
-        "name": "Home Consumption from PV Year"
-      },
-      "stat_energyhomepv_total": {
-        "name": "Home Consumption from PV Total"
-      },
-      "stat_energypv1_day": {
-        "name": "Energy PV1 Day"
-      },
-      "stat_energypv1_month": {
-        "name": "Energy PV1 Month"
-      },
-      "stat_energypv1_year": {
-        "name": "Energy PV1 Year"
-      },
-      "stat_energypv1_total": {
-        "name": "Energy PV1 Total"
-      },
-      "stat_energypv2_day": {
-        "name": "Energy PV2 Day"
-      },
-      "stat_energypv2_month": {
-        "name": "Energy PV2 Month"
-      },
-      "stat_energypv2_year": {
-        "name": "Energy PV2 Year"
-      },
-      "stat_energypv2_total": {
-        "name": "Energy PV2 Total"
-      },
-      "stat_energypv3_day": {
-        "name": "Energy PV3 Day"
-      },
-      "stat_energypv3_month": {
-        "name": "Energy PV3 Month"
-      },
-      "stat_energypv3_year": {
-        "name": "Energy PV3 Year"
-      },
-      "stat_energypv3_total": {
-        "name": "Energy PV3 Total"
-      },
-      "stat_yield_day": {
-        "name": "Energy Yield Day"
-      },
-      "stat_yield_month": {
-        "name": "Energy Yield Month"
-      },
-      "stat_yield_year": {
-        "name": "Energy Yield Year"
-      },
-      "stat_yield_total": {
-        "name": "Energy Yield Total"
-      },
-      "stat_energychargegrid_day": {
-        "name": "Battery Charge from Grid Day"
-      },
-      "stat_energychargegrid_month": {
-        "name": "Battery Charge from Grid Month"
-      },
-      "stat_energychargegrid_year": {
-        "name": "Battery Charge from Grid Year"
-      },
-      "stat_energychargegrid_total": {
-        "name": "Battery Charge from Grid Total"
-      },
-      "stat_energychargepv_day": {
-        "name": "Battery Charge from PV Day"
-      },
-      "stat_energychargepv_month": {
-        "name": "Battery Charge from PV Month"
-      },
-      "stat_energychargepv_year": {
-        "name": "Battery Charge from PV Year"
-      },
-      "stat_energychargepv_total": {
-        "name": "Battery Charge from PV Total"
-      },
-      "stat_energydischarge_day": {
-        "name": "Battery Discharge Day"
-      },
-      "stat_energydischarge_month": {
-        "name": "Battery Discharge Month"
-      },
-      "stat_energydischarge_year": {
-        "name": "Battery Discharge Year"
-      },
-      "stat_energydischarge_total": {
-        "name": "Battery Discharge Total"
-      },
-      "stat_energydischargegrid_day": {
-        "name": "Energy Discharge to Grid Day"
-      },
-      "stat_energydischargegrid_month": {
-        "name": "Energy Discharge to Grid Month"
-      },
-      "stat_energydischargegrid_year": {
-        "name": "Energy Discharge to Grid Year"
-      },
-      "stat_energydischargegrid_total": {
-        "name": "Energy Discharge to Grid Total"
-      },
-      "calc_totalgridconsumption_day": {
-        "name": "Total Grid Consumption Day"
-      },
-      "calc_totalgridconsumption_month": {
-        "name": "Total Grid Consumption Month"
-      },
-      "calc_totalgridconsumption_year": {
-        "name": "Total Grid Consumption Year"
-      },
-      "calc_totalgridconsumption_total": {
-        "name": "Total Grid Consumption Total"
-      },
-      "calc_batterydischargetotal_day": {
-        "name": "Battery Discharge Total Day"
-      },
-      "calc_batterydischargetotal_month": {
-        "name": "Battery Discharge Total Month"
-      },
-      "calc_batterydischargetotal_year": {
-        "name": "Battery Discharge Total Year"
-      },
-      "calc_batterydischargetotal_total": {
-        "name": "Battery Discharge Total Total"
-      },
-      "calc_batterychargetotal_day": {
-        "name": "Battery Charge Total Day"
-      },
-      "calc_batterychargetotal_month": {
-        "name": "Battery Charge Total Month"
-      },
-      "calc_batterychargetotal_year": {
-        "name": "Battery Charge Total Year"
-      },
-      "calc_batterychargetotal_total": {
-        "name": "Battery Charge Total Total"
-      },
-      "calc_batteryefficiency_day": {
-        "name": "Battery Efficiency Day"
-      },
-      "calc_batteryefficiency_month": {
-        "name": "Battery Efficiency Month"
-      },
-      "calc_batteryefficiency_year": {
-        "name": "Battery Efficiency Year"
-      },
-      "calc_batteryefficiency_total": {
-        "name": "Battery Efficiency Total"
-      },
-      "calc_batterynetefficiency_day": {
-        "name": "Battery Net Efficiency Day"
-      },
-      "calc_batterynetefficiency_month": {
-        "name": "Battery Net Efficiency Month"
-      },
-      "calc_batterynetefficiency_year": {
-        "name": "Battery Net Efficiency Year"
-      },
-      "calc_batterynetefficiency_total": {
-        "name": "Battery Net Efficiency Total"
-      },
-      "calc_inverterdischargeefficiency_day": {
-        "name": "Inverter Discharge Efficiency Day"
-      },
-      "calc_inverterdischargeefficiency_month": {
-        "name": "Inverter Discharge Efficiency Month"
-      },
-      "calc_inverterdischargeefficiency_year": {
-        "name": "Inverter Discharge Efficiency Year"
-      },
-      "calc_inverterdischargeefficiency_total": {
-        "name": "Inverter Discharge Efficiency Total"
-      },
-      "event_activeerrorcnt": {
-        "name": "Active Alarms"
-      },
-      "event_activewarningcnt": {
-        "name": "Active Warning Count"
-      },
-      "event_activeackcnt": {
-        "name": "Active Acknowledgment Count"
-      },
-      "virt_pv_p": {
-        "name": "PV Total Power"
-      },
-      "virt_statistic_energygrid_total": {
-        "name": "Energy to Grid Total"
-      },
-      "virt_statistic_energygrid_year": {
-        "name": "Energy to Grid Year"
-      },
-      "virt_statistic_energygrid_month": {
-        "name": "Energy to Grid Month"
-      },
-      "virt_statistic_energygrid_day": {
-        "name": "Energy to Grid Day"
-      },
-      "ac_l1_p": {
-        "name": "AC L1 Power"
-      },
-      "ac_l2_p": {
-        "name": "AC L2 Power"
-      },
-      "ac_l3_p": {
-        "name": "AC L3 Power"
-      },
-      "ac_l1_u": {
-        "name": "AC L1 Voltage"
-      },
-      "ac_l2_u": {
-        "name": "AC L2 Voltage"
-      },
-      "ac_l3_u": {
-        "name": "AC L3 Voltage"
-      },
-      "ac_l1_i": {
-        "name": "AC L1 Current"
-      },
-      "ac_l2_i": {
-        "name": "AC L2 Current"
-      },
-      "ac_l3_i": {
-        "name": "AC L3 Current"
-      },
-      "ac_frequency": {
-        "name": "AC Frequency"
-      },
-      "ac_cosphi": {
-        "name": "AC Power Factor"
-      },
-      "powermeter_p": {
-        "name": "Power Meter Power"
-      },
-      "powermeter_l1_p": {
-        "name": "Power Meter L1 Power"
-      },
-      "powermeter_l2_p": {
-        "name": "Power Meter L2 Power"
-      },
-      "powermeter_l3_p": {
-        "name": "Power Meter L3 Power"
-      },
-      "powermeter_l1_u": {
-        "name": "Power Meter L1 Voltage"
-      },
-      "powermeter_l2_u": {
-        "name": "Power Meter L2 Voltage"
-      },
-      "powermeter_l3_u": {
-        "name": "Power Meter L3 Voltage"
-      },
-      "powermeter_frequency": {
-        "name": "Power Meter Frequency"
-      },
-      "system_state": {
-        "name": "System State"
-      },
-      "update_status": {
-        "name": "Update Status"
-      },
-      "update_progress": {
-        "name": "Update Progress"
-      },
-      "update_version": {
-        "name": "Update Version"
+      "run_system_health_check": {
+        "name": "Run System Health Check"
       }
     },
     "number": {
-      "battery_min_soc": {
-        "name": "Battery min SoC"
+      "active_power_ext_ctrl_mode_gradient": {
+        "name": "Active Power Gradient Mode"
       },
-      "battery_min_home_consumption": {
-        "name": "Battery min Home Consumption"
+      "active_power_ext_ctrl_mode_gradient_low_priority": {
+        "name": "Active Power Gradient Mode Low Priority"
       },
-      "battery_charge_power_ac_absolute": {
-        "name": "Battery Charge Power (AC) Absolute"
+      "active_power_ext_ctrl_mode_pt1_low_priority_tau": {
+        "name": "Active Power PT1 Low Priority Tau"
+      },
+      "active_power_ext_ctrl_mode_pt1_tau": {
+        "name": "Active Power PT1 Tau"
+      },
+      "active_power_ext_ctrl_p_limit_grid_supply": {
+        "name": "Active Power Limit Grid Supply"
+      },
+      "active_power_ext_ctrl_p_p": {
+        "name": "Active Power P"
+      },
+      "active_power_ext_ctrl_p_p_fine": {
+        "name": "Active Power P Fine"
+      },
+      "active_power_ext_ctrl_ramp_time": {
+        "name": "Active Power Ramp Time"
+      },
+      "active_power_setpoint_modbus": {
+        "name": "Active Power Setpoint (Modbus)"
+      },
+      "battery_charge_current_dc_absolute": {
+        "name": "Battery Charge Current (DC) Absolute"
       },
       "battery_charge_current_dc_relative": {
         "name": "Battery Charge Current (DC) Relative"
       },
+      "battery_charge_power_ac_absolute": {
+        "name": "Battery Charge Power (AC) Absolute"
+      },
       "battery_charge_power_ac_relative": {
         "name": "Battery Charge Power (AC) Relative"
-      },
-      "battery_charge_current_dc_absolute": {
-        "name": "Battery Charge Current (DC) Absolute"
       },
       "battery_charge_power_dc_absolute": {
         "name": "Battery Charge Power (DC) Absolute"
@@ -560,20 +241,17 @@
       "battery_charge_power_dc_relative": {
         "name": "Battery Charge Power (DC) Relative"
       },
-      "battery_max_charge_power_g3": {
-        "name": "Battery Max Charge Power (G3)"
+      "battery_charge_power_modbus": {
+        "name": "Battery Charge Power (Modbus)"
       },
-      "battery_max_discharge_power_g3": {
-        "name": "Battery Max Discharge Power (G3)"
+      "battery_com_monitor_time": {
+        "name": "Battery Communication Monitor Time"
       },
-      "battery_max_charge_power_fallback": {
-        "name": "Battery Max Charge Power Fallback (G3)"
+      "battery_esb_min_soc": {
+        "name": "Battery ESB Minimum SoC"
       },
-      "battery_max_discharge_power_fallback": {
-        "name": "Battery Max Discharge Power Fallback (G3)"
-      },
-      "battery_time_until_fallback": {
-        "name": "Battery Time Until Fallback (G3)"
+      "battery_esb_start_soc": {
+        "name": "Battery ESB Start SoC"
       },
       "battery_extern_control_max_charge_power_abs": {
         "name": "Battery External Control Max Charge Power Absolute"
@@ -587,11 +265,53 @@
       "battery_extern_control_min_soc_rel": {
         "name": "Battery External Control Min SoC Relative"
       },
-      "battery_esb_min_soc": {
-        "name": "Battery ESB Minimum SoC"
+      "battery_max_charge_limit_modbus": {
+        "name": "Battery Max Charge Limit (Modbus)"
       },
-      "battery_esb_start_soc": {
-        "name": "Battery ESB Start SoC"
+      "battery_max_charge_power_fallback": {
+        "name": "Battery Max Charge Power Fallback (G3)"
+      },
+      "battery_max_charge_power_g3": {
+        "name": "Battery Max Charge Power (G3)"
+      },
+      "battery_max_charge_power_soc_ctrl": {
+        "name": "Battery Max Charge Power (SoC Ctrl)"
+      },
+      "battery_max_discharge_limit_modbus": {
+        "name": "Battery Max Discharge Limit (Modbus)"
+      },
+      "battery_max_discharge_power_fallback": {
+        "name": "Battery Max Discharge Power Fallback (G3)"
+      },
+      "battery_max_discharge_power_g3": {
+        "name": "Battery Max Discharge Power (G3)"
+      },
+      "battery_max_discharge_power_soc_ctrl": {
+        "name": "Battery Max Discharge Power (SoC Ctrl)"
+      },
+      "battery_max_soc_modbus": {
+        "name": "Battery Max SoC (Modbus)"
+      },
+      "battery_min_grid_feed_in": {
+        "name": "Battery Minimum Grid Feed-in"
+      },
+      "battery_min_home_consumption": {
+        "name": "Battery min Home Consumption"
+      },
+      "battery_min_soc": {
+        "name": "Battery min SoC"
+      },
+      "battery_min_soc_modbus": {
+        "name": "Battery Min SoC (Modbus)"
+      },
+      "battery_target_soc": {
+        "name": "Battery Target SoC"
+      },
+      "battery_time_until_fallback": {
+        "name": "Battery Time Until Fallback (G3)"
+      },
+      "battery_winter_end_month": {
+        "name": "Battery Winter End Month"
       },
       "battery_winter_min_soc": {
         "name": "Battery Winter Minimum SoC"
@@ -599,14 +319,50 @@
       "battery_winter_start_month": {
         "name": "Battery Winter Start Month"
       },
-      "battery_winter_end_month": {
-        "name": "Battery Winter End Month"
+      "digital_out1_power_ctl_delay_time": {
+        "name": "Digital Out 1 Power Control Delay Time"
       },
-      "battery_min_grid_feed_in": {
-        "name": "Battery Minimum Grid Feed-in"
+      "digital_out1_power_ctl_off_power_threshold": {
+        "name": "Digital Out 1 Power Control Off Threshold"
       },
-      "battery_com_monitor_time": {
-        "name": "Battery Communication Monitor Time"
+      "digital_out1_power_ctl_on_power_threshold": {
+        "name": "Digital Out 1 Power Control On Threshold"
+      },
+      "digital_out1_power_ctl_run_time": {
+        "name": "Digital Out 1 Power Control Run Time"
+      },
+      "digital_out1_power_ctl_stable_time": {
+        "name": "Digital Out 1 Power Control Stable Time"
+      },
+      "digital_out_bat_discharge_soc": {
+        "name": "Digital Out Battery Discharge SoC"
+      },
+      "digital_out_output_enable_soc": {
+        "name": "Digital Out Output Enable SoC"
+      },
+      "digital_outputs_customer_configuration_flags": {
+        "name": "Digital Outputs Customer Configuration Flags"
+      },
+      "digital_outputs_customer_delay_time": {
+        "name": "Digital Outputs Customer Delay Time"
+      },
+      "digital_outputs_customer_power_mode_off_threshold": {
+        "name": "Digital Outputs Customer Power Mode Off Threshold"
+      },
+      "digital_outputs_customer_power_mode_on_threshold": {
+        "name": "Digital Outputs Customer Power Mode On Threshold"
+      },
+      "digital_outputs_customer_time_mode_max_cycles_per_day": {
+        "name": "Digital Outputs Customer Time Mode Max Cycles Per Day"
+      },
+      "digital_outputs_customer_time_mode_power_threshold": {
+        "name": "Digital Outputs Customer Time Mode Power Threshold"
+      },
+      "digital_outputs_customer_time_mode_run_time": {
+        "name": "Digital Outputs Customer Time Mode Run Time"
+      },
+      "digital_outputs_customer_time_mode_stable_time": {
+        "name": "Digital Outputs Customer Time Mode Stable Time"
       },
       "energy_mgmt_bat_ctrl_power_offset": {
         "name": "Energy Management Battery Control Power Offset"
@@ -629,41 +385,62 @@
       "energy_mgmt_timed_bat_charge_wd_soc": {
         "name": "Timed Battery Charge Weekend SoC"
       },
-      "active_power_ext_ctrl_mode_gradient": {
-        "name": "Active Power Gradient Mode"
+      "g3_max_battery_charge_power_modbus": {
+        "name": "G3 Max Battery Charge Power (Modbus)"
       },
-      "active_power_ext_ctrl_mode_gradient_low_priority": {
-        "name": "Active Power Gradient Mode Low Priority"
+      "g3_max_battery_discharge_power_modbus": {
+        "name": "G3 Max Battery Discharge Power (Modbus)"
       },
-      "active_power_ext_ctrl_mode_pt1_tau": {
-        "name": "Active Power PT1 Tau"
-      },
-      "active_power_ext_ctrl_mode_pt1_low_priority_tau": {
-        "name": "Active Power PT1 Low Priority Tau"
-      },
-      "active_power_ext_ctrl_ramp_time": {
-        "name": "Active Power Ramp Time"
-      },
-      "active_power_ext_ctrl_p_limit_grid_supply": {
-        "name": "Active Power Limit Grid Supply"
-      },
-      "active_power_ext_ctrl_p_p": {
-        "name": "Active Power P"
-      },
-      "active_power_ext_ctrl_p_p_fine": {
-        "name": "Active Power P Fine"
-      },
-      "inverter_active_power_limitation": {
-        "name": "Inverter Active Power Limitation"
+      "grid_feed_in_limit": {
+        "name": "Grid Feed-In Limit"
       },
       "inverter_active_power_consum_limitation": {
         "name": "Inverter Active Power Consumption Limitation"
       },
-      "reactive_power_fix_cos_phi_delta": {
-        "name": "Reactive Power Fix Cos Phi Delta"
+      "inverter_active_power_limitation": {
+        "name": "Inverter Active Power Limitation"
       },
-      "reactive_power_fix_q": {
-        "name": "Reactive Power Fix Q"
+      "lvrt_hvrt_gradient_and_time": {
+        "name": "LVRT/HVRT Gradient and Time"
+      },
+      "lvrt_hvrt_k_factor_hvrt": {
+        "name": "HVRT K Factor"
+      },
+      "lvrt_hvrt_k_factor_lvrt": {
+        "name": "LVRT K Factor"
+      },
+      "lvrt_hvrt_lower_voltage_lvrt": {
+        "name": "LVRT Lower Voltage"
+      },
+      "lvrt_hvrt_threshold_hvrt": {
+        "name": "HVRT Threshold"
+      },
+      "lvrt_hvrt_threshold_lvrt": {
+        "name": "LVRT Threshold"
+      },
+      "lvrt_hvrt_upper_voltage_hvrt": {
+        "name": "HVRT Upper Voltage"
+      },
+      "pof_f_delay_reaction_time": {
+        "name": "Power of Frequency Delay Reaction Time"
+      },
+      "pof_f_nominal_frequency": {
+        "name": "Power of Frequency Nominal Frequency"
+      },
+      "pof_f_reduction_end_frequency": {
+        "name": "Power of Frequency Reduction End Frequency"
+      },
+      "pof_f_reduction_start_frequency": {
+        "name": "Power of Frequency Reduction Start Frequency"
+      },
+      "pof_u_reduction_end_voltage": {
+        "name": "Power of Voltage Reduction End Voltage"
+      },
+      "pof_u_reduction_start_voltage": {
+        "name": "Power of Voltage Reduction Start Voltage"
+      },
+      "pof_u_settling_time": {
+        "name": "Power of Voltage Settling Time"
       },
       "reactive_power_ext_ctrl_fix_cos_phi_delta": {
         "name": "Reactive Power Ext Ctrl Fix Cos Phi Delta"
@@ -674,79 +451,716 @@
       "reactive_power_ext_ctrl_settling_time": {
         "name": "Reactive Power Ext Ctrl Settling Time"
       },
+      "reactive_power_fix_cos_phi_delta": {
+        "name": "Reactive Power Fix Cos Phi Delta"
+      },
+      "reactive_power_fix_q": {
+        "name": "Reactive Power Fix Q"
+      },
       "reactive_power_power_limit_input_prio_high_mode": {
         "name": "Reactive Power Power Limit Input Priority High Mode"
+      }
+    },
+    "select": {
+      "battery_charge": {
+        "name": "Battery Charging / Usage mode"
+      }
+    },
+    "sensor": {
+      "ac_cosphi": {
+        "name": "AC Power Factor"
       },
-      "lvrt_hvrt_k_factor_lvrt": {
-        "name": "LVRT K Factor"
+      "ac_frequency": {
+        "name": "AC Frequency"
       },
-      "lvrt_hvrt_k_factor_hvrt": {
-        "name": "HVRT K Factor"
+      "ac_l1_i": {
+        "name": "AC L1 Current"
       },
-      "lvrt_hvrt_threshold_lvrt": {
-        "name": "LVRT Threshold"
+      "ac_l1_p": {
+        "name": "AC L1 Power"
       },
-      "lvrt_hvrt_threshold_hvrt": {
-        "name": "HVRT Threshold"
+      "ac_l1_u": {
+        "name": "AC L1 Voltage"
       },
-      "lvrt_hvrt_lower_voltage_lvrt": {
-        "name": "LVRT Lower Voltage"
+      "ac_l2_i": {
+        "name": "AC L2 Current"
       },
-      "lvrt_hvrt_upper_voltage_hvrt": {
-        "name": "HVRT Upper Voltage"
+      "ac_l2_p": {
+        "name": "AC L2 Power"
       },
-      "lvrt_hvrt_gradient_and_time": {
-        "name": "LVRT/HVRT Gradient and Time"
+      "ac_l2_u": {
+        "name": "AC L2 Voltage"
       },
-      "pof_f_nominal_frequency": {
-        "name": "Power of Frequency Nominal Frequency"
+      "ac_l3_i": {
+        "name": "AC L3 Current"
       },
-      "pof_f_reduction_start_frequency": {
-        "name": "Power of Frequency Reduction Start Frequency"
+      "ac_l3_p": {
+        "name": "AC L3 Power"
       },
-      "pof_f_reduction_end_frequency": {
-        "name": "Power of Frequency Reduction End Frequency"
+      "ac_l3_u": {
+        "name": "AC L3 Voltage"
       },
-      "pof_f_delay_reaction_time": {
-        "name": "Power of Frequency Delay Reaction Time"
+      "ac_p": {
+        "name": "AC Power"
       },
-      "pof_u_reduction_start_voltage": {
-        "name": "Power of Voltage Reduction Start Voltage"
+      "active_error_events": {
+        "name": "Active Error Events"
       },
-      "pof_u_reduction_end_voltage": {
-        "name": "Power of Voltage Reduction End Voltage"
+      "active_safety_alerts": {
+        "name": "Active Safety Alerts"
       },
-      "pof_u_settling_time": {
-        "name": "Power of Voltage Settling Time"
+      "battery_ac_charge_energy_from_grid_total_modbus": {
+        "name": "Battery AC Charge Energy from Grid Total (Modbus)"
       },
-      "digital_out1_power_ctl_on_power_threshold": {
-        "name": "Digital Out 1 Power Control On Threshold"
+      "battery_batmanufacturer": {
+        "name": "Battery Manufacturer"
       },
-      "digital_out1_power_ctl_off_power_threshold": {
-        "name": "Digital Out 1 Power Control Off Threshold"
+      "battery_batmodel": {
+        "name": "Battery Model"
       },
-      "digital_out1_power_ctl_delay_time": {
-        "name": "Digital Out 1 Power Control Delay Time"
+      "battery_batmodulecnt": {
+        "name": "Battery Module Count"
       },
-      "digital_out1_power_ctl_stable_time": {
-        "name": "Digital Out 1 Power Control Stable Time"
+      "battery_batserialno": {
+        "name": "Battery Serial Number"
       },
-      "digital_out1_power_ctl_run_time": {
-        "name": "Digital Out 1 Power Control Run Time"
+      "battery_batversionfw": {
+        "name": "Battery Firmware Version"
       },
-      "digital_out_bat_discharge_soc": {
-        "name": "Digital Out Battery Discharge SoC"
+      "battery_cycles": {
+        "name": "Battery Cycles"
       },
-      "digital_out_output_enable_soc": {
-        "name": "Digital Out Output Enable SoC"
+      "battery_dc_charge_energy_total_modbus": {
+        "name": "Battery DC Charge Energy Total (Modbus)"
+      },
+      "battery_fullchargecap_e": {
+        "name": "Battery Full Charge Capacity"
+      },
+      "battery_health_soh_trend": {
+        "name": "Battery Health (SoH Trend)"
+      },
+      "battery_i": {
+        "name": "Battery Current"
+      },
+      "battery_longevity": {
+        "name": "Battery Longevity"
+      },
+      "battery_p": {
+        "name": "Battery Power"
+      },
+      "battery_ready_flag_modbus": {
+        "name": "Battery Ready Flag (Modbus)"
+      },
+      "battery_soc": {
+        "name": "Battery SoC"
+      },
+      "battery_soh": {
+        "name": "Battery State of Health"
+      },
+      "battery_soh_calculated": {
+        "name": "Battery SoH (Calculated)"
+      },
+      "battery_soh_projection_5y": {
+        "name": "Battery SoH Projection 5y"
+      },
+      "battery_temperature_modbus": {
+        "name": "Battery Temperature (Modbus)"
+      },
+      "battery_u": {
+        "name": "Battery Voltage"
+      },
+      "battery_workcapacity": {
+        "name": "Battery Work Capacity"
+      },
+      "calc_batterychargetotal_day": {
+        "name": "Battery Charge Total Day"
+      },
+      "calc_batterychargetotal_month": {
+        "name": "Battery Charge Total Month"
+      },
+      "calc_batterychargetotal_total": {
+        "name": "Battery Charge Total Total"
+      },
+      "calc_batterychargetotal_year": {
+        "name": "Battery Charge Total Year"
+      },
+      "calc_batterydischargetotal_day": {
+        "name": "Battery Discharge Total Day"
+      },
+      "calc_batterydischargetotal_month": {
+        "name": "Battery Discharge Total Month"
+      },
+      "calc_batterydischargetotal_total": {
+        "name": "Battery Discharge Total Total"
+      },
+      "calc_batterydischargetotal_year": {
+        "name": "Battery Discharge Total Year"
+      },
+      "calc_batteryefficiency_day": {
+        "name": "Battery Efficiency Day"
+      },
+      "calc_batteryefficiency_month": {
+        "name": "Battery Efficiency Month"
+      },
+      "calc_batteryefficiency_total": {
+        "name": "Battery Efficiency Total"
+      },
+      "calc_batteryefficiency_year": {
+        "name": "Battery Efficiency Year"
+      },
+      "calc_batterynetefficiency_day": {
+        "name": "Battery Net Efficiency Day"
+      },
+      "calc_batterynetefficiency_month": {
+        "name": "Battery Net Efficiency Month"
+      },
+      "calc_batterynetefficiency_total": {
+        "name": "Battery Net Efficiency Total"
+      },
+      "calc_batterynetefficiency_year": {
+        "name": "Battery Net Efficiency Year"
+      },
+      "calc_inverterdischargeefficiency_day": {
+        "name": "Inverter Discharge Efficiency Day"
+      },
+      "calc_inverterdischargeefficiency_month": {
+        "name": "Inverter Discharge Efficiency Month"
+      },
+      "calc_inverterdischargeefficiency_total": {
+        "name": "Inverter Discharge Efficiency Total"
+      },
+      "calc_inverterdischargeefficiency_year": {
+        "name": "Inverter Discharge Efficiency Year"
+      },
+      "calc_totalgridconsumption_day": {
+        "name": "Total Grid Consumption Day"
+      },
+      "calc_totalgridconsumption_month": {
+        "name": "Total Grid Consumption Month"
+      },
+      "calc_totalgridconsumption_total": {
+        "name": "Total Grid Consumption Total"
+      },
+      "calc_totalgridconsumption_year": {
+        "name": "Total Grid Consumption Year"
+      },
+      "controller_temperature_health": {
+        "name": "Controller Temperature (Health)"
+      },
+      "controller_temperature_modbus": {
+        "name": "Controller Temperature (Modbus)"
+      },
+      "dc1_current": {
+        "name": "DC1 Current"
+      },
+      "dc1_power": {
+        "name": "DC1 Power"
+      },
+      "dc1_voltage": {
+        "name": "DC1 Voltage"
+      },
+      "dc2_current": {
+        "name": "DC2 Current"
+      },
+      "dc2_power": {
+        "name": "DC2 Power"
+      },
+      "dc2_voltage": {
+        "name": "DC2 Voltage"
+      },
+      "dc3_current": {
+        "name": "DC3 Current"
+      },
+      "dc3_power": {
+        "name": "DC3 Power"
+      },
+      "dc3_voltage": {
+        "name": "DC3 Voltage"
+      },
+      "dc4_current": {
+        "name": "DC4 Current"
+      },
+      "dc4_power": {
+        "name": "DC4 Power"
+      },
+      "dc4_voltage": {
+        "name": "DC4 Voltage"
+      },
+      "dc5_current": {
+        "name": "DC5 Current"
+      },
+      "dc5_power": {
+        "name": "DC5 Power"
+      },
+      "dc5_voltage": {
+        "name": "DC5 Voltage"
+      },
+      "dc6_current": {
+        "name": "DC6 Current"
+      },
+      "dc6_power": {
+        "name": "DC6 Power"
+      },
+      "dc6_voltage": {
+        "name": "DC6 Voltage"
+      },
+      "dc_p": {
+        "name": "Solar Power"
+      },
+      "dc_string_imbalance": {
+        "name": "DC String Imbalance"
+      },
+      "degradation_alerts": {
+        "name": "Degradation Alerts"
+      },
+      "degradation_battery_capacity": {
+        "name": "Degradation: Battery Capacity"
+      },
+      "degradation_battery_soh": {
+        "name": "Degradation: Battery SoH"
+      },
+      "degradation_battery_temperature": {
+        "name": "Degradation: Battery Temperature"
+      },
+      "degradation_controller_temperature": {
+        "name": "Degradation: Controller Temperature"
+      },
+      "degradation_daily_yield": {
+        "name": "Degradation: Daily Yield"
+      },
+      "degradation_dc1_peak_power": {
+        "name": "Degradation: DC1 Peak Power"
+      },
+      "degradation_dc2_peak_power": {
+        "name": "Degradation: DC2 Peak Power"
+      },
+      "degradation_isolation_resistance": {
+        "name": "Degradation: Isolation Resistance"
+      },
+      "diagnosis_ac_grid_connection": {
+        "name": "Diagnosis: AC Grid Connection"
+      },
+      "diagnosis_battery": {
+        "name": "Diagnosis: Battery"
+      },
+      "diagnosis_dc_solar_array": {
+        "name": "Diagnosis: DC Solar Array"
+      },
+      "diagnosis_inverter": {
+        "name": "Diagnosis: Inverter"
+      },
+      "diagnosis_safety": {
+        "name": "Diagnosis: Safety"
+      },
+      "em_state": {
+        "name": "Energy Manager State"
+      },
+      "energy_pv4_day": {
+        "name": "Energy PV4 Day"
+      },
+      "energy_pv4_month": {
+        "name": "Energy PV4 Month"
+      },
+      "energy_pv4_total": {
+        "name": "Energy PV4 Total"
+      },
+      "energy_pv4_year": {
+        "name": "Energy PV4 Year"
+      },
+      "energy_pv5_day": {
+        "name": "Energy PV5 Day"
+      },
+      "energy_pv5_month": {
+        "name": "Energy PV5 Month"
+      },
+      "energy_pv5_total": {
+        "name": "Energy PV5 Total"
+      },
+      "energy_pv5_year": {
+        "name": "Energy PV5 Year"
+      },
+      "energy_pv6_day": {
+        "name": "Energy PV6 Day"
+      },
+      "energy_pv6_month": {
+        "name": "Energy PV6 Month"
+      },
+      "energy_pv6_total": {
+        "name": "Energy PV6 Total"
+      },
+      "energy_pv6_year": {
+        "name": "Energy PV6 Year"
+      },
+      "error_rate_per_hour": {
+        "name": "Error Rate (per hour)"
+      },
+      "event_activeackcnt": {
+        "name": "Active Acknowledgment Count"
+      },
+      "event_activeerrorcnt": {
+        "name": "Active Alarms"
+      },
+      "event_activewarningcnt": {
+        "name": "Active Warning Count"
+      },
+      "fire_risk_level": {
+        "name": "Fire Risk Level"
+      },
+      "grid_p": {
+        "name": "Grid Power"
+      },
+      "grid_power_preferred_source": {
+        "name": "Grid Power Preferred Source"
+      },
+      "grid_to_battery_power": {
+        "name": "Grid to Battery Power"
+      },
+      "home_p": {
+        "name": "Home Power"
+      },
+      "homebat_p": {
+        "name": "Home Power from Battery"
+      },
+      "homegrid_p": {
+        "name": "Home Power from Grid"
+      },
+      "homeown_p": {
+        "name": "Home Power from Own"
+      },
+      "homepv_p": {
+        "name": "Home Power from PV"
+      },
+      "inverter_health_level": {
+        "name": "Inverter Health Level"
+      },
+      "inverter_health_score": {
+        "name": "Inverter Health Score"
+      },
+      "inverter_longevity": {
+        "name": "Inverter Longevity"
+      },
+      "inverter_state": {
+        "name": "Inverter State"
+      },
+      "inverter_state_changes": {
+        "name": "Inverter State Changes"
+      },
+      "isolation_resistance_health": {
+        "name": "Isolation Resistance (Health)"
+      },
+      "ksem_active_power_export": {
+        "name": "KSEM Active Power Export"
+      },
+      "ksem_active_power_import": {
+        "name": "KSEM Active Power Import"
+      },
+      "ksem_frequency": {
+        "name": "KSEM Frequency"
+      },
+      "ksem_net_active_power": {
+        "name": "KSEM Net Active Power"
+      },
+      "ksem_power_factor": {
+        "name": "KSEM Power Factor"
+      },
+      "last_event_age": {
+        "name": "Last Event Age"
+      },
+      "last_event_category": {
+        "name": "Last Event Category"
+      },
+      "last_event_code": {
+        "name": "Last Event Code"
+      },
+      "modbus_communication_reliability": {
+        "name": "Modbus Communication Reliability"
+      },
+      "modbus_coordinator_updates": {
+        "name": "Modbus Coordinator Updates"
+      },
+      "phase_voltage_imbalance": {
+        "name": "Phase Voltage Imbalance"
+      },
+      "power_meter_l1_apparent_power_modbus": {
+        "name": "Power Meter L1 Apparent Power (Modbus)"
+      },
+      "power_meter_l1_current_modbus": {
+        "name": "Power Meter L1 Current (Modbus)"
+      },
+      "power_meter_l1_reactive_power_modbus": {
+        "name": "Power Meter L1 Reactive Power (Modbus)"
+      },
+      "power_meter_l2_apparent_power_modbus": {
+        "name": "Power Meter L2 Apparent Power (Modbus)"
+      },
+      "power_meter_l2_current_modbus": {
+        "name": "Power Meter L2 Current (Modbus)"
+      },
+      "power_meter_l2_reactive_power_modbus": {
+        "name": "Power Meter L2 Reactive Power (Modbus)"
+      },
+      "power_meter_l3_apparent_power_modbus": {
+        "name": "Power Meter L3 Apparent Power (Modbus)"
+      },
+      "power_meter_l3_current_modbus": {
+        "name": "Power Meter L3 Current (Modbus)"
+      },
+      "power_meter_l3_reactive_power_modbus": {
+        "name": "Power Meter L3 Reactive Power (Modbus)"
+      },
+      "powermeter_frequency": {
+        "name": "Power Meter Frequency"
+      },
+      "powermeter_l1_p": {
+        "name": "Power Meter L1 Power"
+      },
+      "powermeter_l1_u": {
+        "name": "Power Meter L1 Voltage"
+      },
+      "powermeter_l2_p": {
+        "name": "Power Meter L2 Power"
+      },
+      "powermeter_l2_u": {
+        "name": "Power Meter L2 Voltage"
+      },
+      "powermeter_l3_p": {
+        "name": "Power Meter L3 Power"
+      },
+      "powermeter_l3_u": {
+        "name": "Power Meter L3 Voltage"
+      },
+      "powermeter_p": {
+        "name": "Power Meter Power"
+      },
+      "pssb_fuse_state_modbus": {
+        "name": "PSSB Fuse State (Modbus)"
+      },
+      "pv2bat_p": {
+        "name": "PV to Battery Power"
+      },
+      "pv_system_longevity": {
+        "name": "PV System Longevity"
+      },
+      "request_scheduler_requests": {
+        "name": "Request Scheduler Requests"
+      },
+      "rest_modbus_consistency": {
+        "name": "REST/Modbus Consistency"
+      },
+      "stat_autarky_day": {
+        "name": "Autarky Day"
+      },
+      "stat_autarky_month": {
+        "name": "Autarky Month"
+      },
+      "stat_autarky_total": {
+        "name": "Autarky Total"
+      },
+      "stat_autarky_year": {
+        "name": "Autarky Year"
+      },
+      "stat_energychargegrid_day": {
+        "name": "Battery Charge from Grid Day"
+      },
+      "stat_energychargegrid_month": {
+        "name": "Battery Charge from Grid Month"
+      },
+      "stat_energychargegrid_total": {
+        "name": "Battery Charge from Grid Total"
+      },
+      "stat_energychargegrid_year": {
+        "name": "Battery Charge from Grid Year"
+      },
+      "stat_energychargepv_day": {
+        "name": "Battery Charge from PV Day"
+      },
+      "stat_energychargepv_month": {
+        "name": "Battery Charge from PV Month"
+      },
+      "stat_energychargepv_total": {
+        "name": "Battery Charge from PV Total"
+      },
+      "stat_energychargepv_year": {
+        "name": "Battery Charge from PV Year"
+      },
+      "stat_energydischarge_day": {
+        "name": "Battery Discharge Day"
+      },
+      "stat_energydischarge_month": {
+        "name": "Battery Discharge Month"
+      },
+      "stat_energydischarge_total": {
+        "name": "Battery Discharge Total"
+      },
+      "stat_energydischarge_year": {
+        "name": "Battery Discharge Year"
+      },
+      "stat_energydischargegrid_day": {
+        "name": "Energy Discharge to Grid Day"
+      },
+      "stat_energydischargegrid_month": {
+        "name": "Energy Discharge to Grid Month"
+      },
+      "stat_energydischargegrid_total": {
+        "name": "Energy Discharge to Grid Total"
+      },
+      "stat_energydischargegrid_year": {
+        "name": "Energy Discharge to Grid Year"
+      },
+      "stat_energyhome_day": {
+        "name": "Home Consumption Day"
+      },
+      "stat_energyhome_month": {
+        "name": "Home Consumption Month"
+      },
+      "stat_energyhome_total": {
+        "name": "Home Consumption Total"
+      },
+      "stat_energyhome_year": {
+        "name": "Home Consumption Year"
+      },
+      "stat_energyhomebat_day": {
+        "name": "Home Consumption from Battery Day"
+      },
+      "stat_energyhomebat_month": {
+        "name": "Home Consumption from Battery Month"
+      },
+      "stat_energyhomebat_total": {
+        "name": "Home Consumption from Battery Total"
+      },
+      "stat_energyhomebat_year": {
+        "name": "Home Consumption from Battery Year"
+      },
+      "stat_energyhomegrid_day": {
+        "name": "Home Consumption from Grid Day"
+      },
+      "stat_energyhomegrid_month": {
+        "name": "Home Consumption from Grid Month"
+      },
+      "stat_energyhomegrid_total": {
+        "name": "Home Consumption from Grid Total"
+      },
+      "stat_energyhomegrid_year": {
+        "name": "Home Consumption from Grid Year"
+      },
+      "stat_energyhomepv_day": {
+        "name": "Home Consumption from PV Day"
+      },
+      "stat_energyhomepv_month": {
+        "name": "Home Consumption from PV Month"
+      },
+      "stat_energyhomepv_total": {
+        "name": "Home Consumption from PV Total"
+      },
+      "stat_energyhomepv_year": {
+        "name": "Home Consumption from PV Year"
+      },
+      "stat_energypv1_day": {
+        "name": "Energy PV1 Day"
+      },
+      "stat_energypv1_month": {
+        "name": "Energy PV1 Month"
+      },
+      "stat_energypv1_total": {
+        "name": "Energy PV1 Total"
+      },
+      "stat_energypv1_year": {
+        "name": "Energy PV1 Year"
+      },
+      "stat_energypv2_day": {
+        "name": "Energy PV2 Day"
+      },
+      "stat_energypv2_month": {
+        "name": "Energy PV2 Month"
+      },
+      "stat_energypv2_total": {
+        "name": "Energy PV2 Total"
+      },
+      "stat_energypv2_year": {
+        "name": "Energy PV2 Year"
+      },
+      "stat_energypv3_day": {
+        "name": "Energy PV3 Day"
+      },
+      "stat_energypv3_month": {
+        "name": "Energy PV3 Month"
+      },
+      "stat_energypv3_total": {
+        "name": "Energy PV3 Total"
+      },
+      "stat_energypv3_year": {
+        "name": "Energy PV3 Year"
+      },
+      "stat_ownconsumptionrate_day": {
+        "name": "Own Consumption Rate Day"
+      },
+      "stat_ownconsumptionrate_month": {
+        "name": "Own Consumption Rate Month"
+      },
+      "stat_ownconsumptionrate_total": {
+        "name": "Own Consumption Rate Total"
+      },
+      "stat_ownconsumptionrate_year": {
+        "name": "Own Consumption Rate Year"
+      },
+      "stat_yield_day": {
+        "name": "Energy Yield Day"
+      },
+      "stat_yield_month": {
+        "name": "Energy Yield Month"
+      },
+      "stat_yield_total": {
+        "name": "Energy Yield Total"
+      },
+      "stat_yield_year": {
+        "name": "Energy Yield Year"
+      },
+      "sum_power_of_all_pv_dc_inputs": {
+        "name": "Sum power of all PV DC inputs"
+      },
+      "system_state": {
+        "name": "System State"
+      },
+      "update_progress": {
+        "name": "Update Progress"
+      },
+      "update_status": {
+        "name": "Update Status"
+      },
+      "update_version": {
+        "name": "Update Version"
+      },
+      "virt_pv_p": {
+        "name": "PV Total Power"
+      },
+      "virt_statistic_energygrid_day": {
+        "name": "Energy to Grid Day"
+      },
+      "virt_statistic_energygrid_month": {
+        "name": "Energy to Grid Month"
+      },
+      "virt_statistic_energygrid_total": {
+        "name": "Energy to Grid Total"
+      },
+      "virt_statistic_energygrid_year": {
+        "name": "Energy to Grid Year"
+      },
+      "write_audit_event_rate": {
+        "name": "Write Audit Event Rate"
       }
     },
     "switch": {
-      "battery_strategy": {
-        "name": "Battery Strategy"
+      "activepower_extctrl_modegradientenable": {
+        "name": "Active Power Gradient Mode"
       },
-      "battery_manualcharge": {
-        "name": "Battery Manual Charge"
+      "activepower_extctrl_modept1enable": {
+        "name": "Active Power PT1 Mode"
+      },
+      "arm_advanced_controls": {
+        "name": "Arm Advanced Controls"
+      },
+      "battery_backup_mode": {
+        "name": "Battery Backup Mode"
       },
       "battery_closeseparator": {
         "name": "Battery Close Separator"
@@ -757,71 +1171,26 @@
       "battery_dynamicsoc_enable": {
         "name": "Battery Dynamic SoC"
       },
+      "battery_manualcharge": {
+        "name": "Battery Manual Charge"
+      },
       "battery_modehomecomsumption": {
         "name": "Battery Mode Home Consumption"
       },
       "battery_smartbatterycontrol_enable": {
         "name": "Battery Smart Control"
       },
+      "battery_strategy": {
+        "name": "Battery Strategy"
+      },
       "battery_timecontrol_enable": {
         "name": "Battery Time Control"
       },
-      "energymgmt_acstorage": {
-        "name": "AC Storage"
-      },
-      "energymgmt_batctrl_disabeldischarge": {
-        "name": "Battery Disable Discharge"
-      },
-      "energymgmt_smartcontrol_fallbackenable": {
-        "name": "Smart Control Fallback"
-      },
-      "activepower_extctrl_modegradientenable": {
-        "name": "Active Power Gradient Mode"
-      },
-      "activepower_extctrl_modept1enable": {
-        "name": "Active Power PT1 Mode"
-      },
-      "inverter_activepowerconsumlimitationenable": {
-        "name": "Inverter Active Power Consumption Limitation"
-      },
-      "lvrthvrt_enablehvrt": {
-        "name": "HVRT Enable"
-      },
-      "lvrthvrt_enablelvrt": {
-        "name": "LVRT Enable"
-      },
-      "poff_enable": {
-        "name": "Power of Frequency Enable"
-      },
-      "pofu_enable": {
-        "name": "Power of Voltage Enable"
+      "block_battery_charging": {
+        "name": "Block Battery Charging"
       },
       "digitalinputs_spd_enable": {
         "name": "SPD Enable"
-      },
-      "esb_sleepmodeallowed": {
-        "name": "ESB Sleep Mode Allowed"
-      },
-      "generator_swapdetection_enable": {
-        "name": "Generator Swap Detection"
-      },
-      "reactivepower_qofup_holdonvoltagereturn": {
-        "name": "Reactive Power QOfUP Hold On Voltage Return"
-      },
-      "poff_holdpoweronfrequencydecrease": {
-        "name": "Power of Frequency Hold Power On Decrease"
-      },
-      "poff_increaseenable": {
-        "name": "Power of Frequency Increase Enable"
-      },
-      "pofu_holdpoweronvoltagedecrease": {
-        "name": "Power of Voltage Hold Power On Decrease"
-      },
-      "lvrthvrt_addreactivepowerbeforefault": {
-        "name": "LVRT/HVRT Add Reactive Power Before Fault"
-      },
-      "lvrthvrt_fillupwithactivecurrent": {
-        "name": "LVRT/HVRT Fill Up With Active Current"
       },
       "digitalout1_externalctl": {
         "name": "Digital Out 1 External Control"
@@ -835,28 +1204,174 @@
       "digitalout4_externalctl": {
         "name": "Digital Out 4 External Control"
       },
+      "energymgmt_acstorage": {
+        "name": "AC Storage"
+      },
+      "energymgmt_batctrl_disabeldischarge": {
+        "name": "Battery Disable Discharge"
+      },
+      "energymgmt_smartcontrol_fallbackenable": {
+        "name": "Smart Control Fallback"
+      },
+      "esb_sleepmodeallowed": {
+        "name": "ESB Sleep Mode Allowed"
+      },
+      "generator_swapdetection_enable": {
+        "name": "Generator Swap Detection"
+      },
+      "grid_feed_in_optimizer": {
+        "name": "Grid Feed-In Optimizer"
+      },
+      "inverter_activepowerconsumlimitationenable": {
+        "name": "Inverter Active Power Consumption Limitation"
+      },
+      "lvrthvrt_addreactivepowerbeforefault": {
+        "name": "LVRT/HVRT Add Reactive Power Before Fault"
+      },
+      "lvrthvrt_enablehvrt": {
+        "name": "HVRT Enable"
+      },
+      "lvrthvrt_enablelvrt": {
+        "name": "LVRT Enable"
+      },
+      "lvrthvrt_fillupwithactivecurrent": {
+        "name": "LVRT/HVRT Fill Up With Active Current"
+      },
       "pave_enable": {
         "name": "Power Average Enable"
       },
       "pave_rampafterpowerreductionne": {
         "name": "Power Average Ramp After Power Reduction"
+      },
+      "poff_enable": {
+        "name": "Power of Frequency Enable"
+      },
+      "poff_holdpoweronfrequencydecrease": {
+        "name": "Power of Frequency Hold Power On Decrease"
+      },
+      "poff_increaseenable": {
+        "name": "Power of Frequency Increase Enable"
+      },
+      "pofu_enable": {
+        "name": "Power of Voltage Enable"
+      },
+      "pofu_holdpoweronvoltagedecrease": {
+        "name": "Power of Voltage Hold Power On Decrease"
+      },
+      "reactivepower_qofup_holdonvoltagereturn": {
+        "name": "Reactive Power QOfUP Hold On Voltage Return"
+      },
+      "shadow_management_dc_string_1": {
+        "name": "Shadow Management DC string 1"
+      },
+      "shadow_management_dc_string_2": {
+        "name": "Shadow Management DC string 2"
+      },
+      "shadow_management_dc_string_3": {
+        "name": "Shadow Management DC string 3"
+      },
+      "shadow_management_dc_string_4": {
+        "name": "Shadow Management DC string 4"
+      },
+      "shadow_management_dc_string_5": {
+        "name": "Shadow Management DC string 5"
+      },
+      "shadow_management_dc_string_6": {
+        "name": "Shadow Management DC string 6"
       }
     },
-    "select": {
-      "battery_charge": {
-        "name": "Battery Charging / Usage mode"
+    "text": {
+      "legacy_cleanup_confirmation_code": {
+        "name": "Legacy Cleanup Confirmation Code"
+      }
+    }
+  },
+  "services": {
+    "adopt_legacy_entity_ids": {
+      "name": "Adopt legacy entity IDs",
+      "description": "Rebind legacy kostal_plenticore entities/devices to a kostal_kore config entry. Use dry-run first. Apply mode is guarded by a three-step confirmation flow: (1) call with dry_run=false to generate a code, (2) call again with the code to arm, (3) call with final_confirm=true to execute.",
+      "fields": {
+        "target_entry_id": {
+          "name": "Target config entry ID",
+          "description": "Entry ID of the kostal_kore config entry. Optional if only one exists."
+        },
+        "source_entry_id": {
+          "name": "Source legacy config entry ID",
+          "description": "Optional legacy kostal_plenticore entry ID. Required only if multiple legacy entries exist."
+        },
+        "dry_run": {
+          "name": "Dry-run",
+          "description": "Preview only (no changes). Defaults to true."
+        },
+        "confirmation_code": {
+          "name": "Confirmation code",
+          "description": "Code shown in the persistent notification for guarded apply mode."
+        },
+        "final_confirm": {
+          "name": "Final confirm",
+          "description": "Set true on the third call to execute guarded apply mode."
+        }
       }
     },
-    "button": {
-      "reset_modbus_registers": {
-        "name": "Reset Modbus Registers"
-      },
-      "run_modbus_diagnostics": {
-        "name": "Run Modbus Diagnostics"
-      },
-      "battery_charge_discharge_test": {
-        "name": "Battery Charge/Discharge Test"
+    "copy_legacy_history": {
+      "name": "Copy/merge legacy history",
+      "description": "Advanced recorder history copy/merge from old entity IDs to new ones. Dry-run recommended first. Apply mode is guarded by a three-step confirmation flow: (1) call with dry_run=false to generate a code, (2) call again with the code to arm, (3) call with final_confirm=true to execute.",
+      "fields": {
+        "target_entry_id": {
+          "name": "Target config entry ID",
+          "description": "Entry ID of the kostal_kore config entry. Optional if only one exists."
+        },
+        "source_entry_id": {
+          "name": "Source legacy config entry ID",
+          "description": "Optional legacy kostal_plenticore entry ID used for automatic pair discovery."
+        },
+        "include_auto_map": {
+          "name": "Include auto mapping",
+          "description": "Auto-detect old/new pairs from duplicate unique IDs."
+        },
+        "entity_map": {
+          "name": "Manual mapping",
+          "description": "Optional list of manual old/new entity ID pairs to include in copy/merge. Each item must have 'old_entity_id' and 'new_entity_id' keys."
+        },
+        "dry_run": {
+          "name": "Dry-run",
+          "description": "Preview only (no database changes). Defaults to true."
+        },
+        "confirmation_code": {
+          "name": "Confirmation code",
+          "description": "Code shown in the persistent notification for guarded apply mode."
+        },
+        "final_confirm": {
+          "name": "Final confirm",
+          "description": "Set true on the third call to execute guarded apply mode."
+        }
       }
+    },
+    "scan_orphan_history": {
+      "name": "Scan orphan Recorder history",
+      "description": "Read-only scan: finds entity_ids in the Recorder database that came from the removed legacy kostal_plenticore integration but have no current Entity Registry binding. Posts a persistent notification with suggested mappings to current kostal_kore entities. Never writes to the database."
+    },
+    "export_debug_bundle": {
+      "name": "Export debug bundle",
+      "description": "Collects a full diagnostic snapshot (Modbus/REST data, write audit, health summary, scheduler stats, proxy state) and writes it to kostal_kore_debug/kore_debug_<entry>_<timestamp>.json inside the Home Assistant configuration directory (not www). Administrators only. Returns signed, one-hour download URLs and errors as optional action response data and posts a persistent notification with the file names. Files are deleted after 24 hours. Passwords, service codes, and named sensitive fields are redacted before writing the file. The normal integration diagnostic download also contains cached readings and REST polling details."
+    },
+    "apply_orphan_history_mapping": {
+      "name": "Apply orphan history mapping",
+      "description": "Merge orphan Recorder rows into current kostal_kore entities using a user-supplied mapping. Dry-run by default. Target entities are required to be registered to the kostal_kore platform; unit-mismatch protection from the migration engine still applies.",
+      "fields": {
+        "mapping": {
+          "name": "Old → new mapping",
+          "description": "Dictionary mapping each orphan entity_id (old Plenticore) to a current kostal_kore entity_id."
+        },
+        "dry_run": {
+          "name": "Dry-run",
+          "description": "Preview only (no database changes). Defaults to true."
+        }
+      }
+    },
+    "communication_diagnostics": {
+      "name": "Communication diagnostics",
+      "description": "Read local communication health and proxy counters without device requests or writes."
     }
   }
 }

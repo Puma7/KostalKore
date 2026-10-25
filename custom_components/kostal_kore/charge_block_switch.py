@@ -44,7 +44,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
     """Switch to block battery charging from PV/grid."""
 
     _attr_has_entity_name = True
-    _attr_name = "Block Battery Charging"
+    _english_name = "Block Battery Charging"
     _attr_icon = "mdi:battery-off"
     _attr_entity_category = EntityCategory.CONFIG
 

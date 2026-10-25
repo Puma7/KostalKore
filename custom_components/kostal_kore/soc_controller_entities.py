@@ -32,7 +32,7 @@ class TargetSocNumber(NumberEntity):
     """Number entity to set the battery target SoC."""
 
     _attr_has_entity_name = True
-    _attr_name = "Battery Target SoC"
+    _english_name = "Battery Target SoC"
     _attr_icon = "mdi:battery-charging-wireless"
     _attr_native_min_value = 0
     _attr_native_max_value = 95
@@ -76,7 +76,7 @@ class MaxChargePowerNumber(NumberEntity):
     """Number entity to set the maximum charge power."""
 
     _attr_has_entity_name = True
-    _attr_name = "Battery Max Charge Power (SoC Ctrl)"
+    _english_name = "Battery Max Charge Power (SoC Ctrl)"
     _attr_icon = "mdi:battery-charging-high"
     _attr_native_min_value = 100
     _attr_native_step = 100
@@ -108,7 +108,7 @@ class MaxDischargePowerNumber(NumberEntity):
     """Number entity to set the maximum discharge power."""
 
     _attr_has_entity_name = True
-    _attr_name = "Battery Max Discharge Power (SoC Ctrl)"
+    _english_name = "Battery Max Discharge Power (SoC Ctrl)"
     _attr_icon = "mdi:battery-arrow-down"
     _attr_native_min_value = 100
     _attr_native_step = 100

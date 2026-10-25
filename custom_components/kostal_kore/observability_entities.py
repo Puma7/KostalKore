@@ -55,7 +55,7 @@ class WriteAuditSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], SensorEnt
     _attr_native_unit_of_measurement = "events/min"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Write Audit Event Rate"
+    _english_name = "Write Audit Event Rate"
     _attr_suggested_display_precision = 1
 
     def __init__(
@@ -93,7 +93,7 @@ class RequestSchedulerSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], Sen
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Request Scheduler Requests"
+    _english_name = "Request Scheduler Requests"
 
     def __init__(
         self,
@@ -129,7 +129,7 @@ class ModbusCoordinatorSensor(CoordinatorEntity[ModbusDataUpdateCoordinator], Se
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Modbus Coordinator Updates"
+    _english_name = "Modbus Coordinator Updates"
 
     def __init__(
         self,
@@ -169,7 +169,7 @@ class RestModbusConsistencySensor(CoordinatorEntity[ModbusDataUpdateCoordinator]
     _attr_icon = "mdi:scale-balance"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "REST/Modbus Consistency"
+    _english_name = "REST/Modbus Consistency"
 
     def __init__(
         self,

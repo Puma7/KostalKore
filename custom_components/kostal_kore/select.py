@@ -21,6 +21,7 @@ from .const import AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
 from .coordinator import PlenticoreConfigEntry, SelectDataUpdateCoordinator
 from .helper import parse_modbus_exception
+from .naming import async_translated_adder
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add kostal plenticore Select widget."""
+    async_add_entities = await async_translated_adder(hass, "select", async_add_entities)
     plenticore = entry.runtime_data
 
     # Fetch fresh settings data with timeout protection and retry
@@ -237,7 +239,7 @@ class PlenticoreDataSelect(
         self._attr_unique_id = f"{entry_id}_{description.module_id}_{description.key}"
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
-        self._attr_name = name
+        self._english_name = name
         self._attr_translation_key = _normalize_translation_key(description.key)
 
     @property

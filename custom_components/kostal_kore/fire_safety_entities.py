@@ -25,7 +25,7 @@ class FireRiskSensor(SensorEntity):
     _attr_icon = "mdi:fire-alert"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Fire Risk Level"
+    _english_name = "Fire Risk Level"
 
     def __init__(self, monitor: FireSafetyMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -78,7 +78,7 @@ class FireAlertCountSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Active Safety Alerts"
+    _english_name = "Active Safety Alerts"
 
     def __init__(self, monitor: FireSafetyMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -103,7 +103,7 @@ class FireSafetyOkBinarySensor(BinarySensorEntity):
 
     _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_has_entity_name = True
-    _attr_name = "PV System Safety"
+    _english_name = "PV System Safety"
 
     def __init__(self, monitor: FireSafetyMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -137,7 +137,7 @@ class IsolationDangerBinarySensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Isolation Fault Danger"
+    _english_name = "Isolation Fault Danger"
 
     def __init__(self, monitor: FireSafetyMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -162,7 +162,7 @@ class BatteryFireRiskBinarySensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Battery Fire Risk"
+    _english_name = "Battery Fire Risk"
 
     def __init__(self, monitor: FireSafetyMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -188,7 +188,7 @@ class DCCableDangerBinarySensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.SAFETY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "DC Cable Danger"
+    _english_name = "DC Cable Danger"
 
     def __init__(self, monitor: FireSafetyMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor

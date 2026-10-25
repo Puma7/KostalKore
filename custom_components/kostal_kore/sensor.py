@@ -47,6 +47,7 @@ from .helper import (
 )
 from .ksem_coordinator import KsemDataUpdateCoordinator
 from .modbus_coordinator import ModbusDataUpdateCoordinator
+from .naming import async_translated_adder
 from .startup_trace import log_entity_batch
 
 _LOGGER = logging.getLogger(__name__)
@@ -1440,6 +1441,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add kostal plenticore Sensors."""
+    async_add_entities = await async_translated_adder(hass, "sensor", async_add_entities)
     plenticore = entry.runtime_data
 
     entities: list[PlenticoreDataSensor | CalculatedPvSumSensor] = []
@@ -1538,7 +1540,7 @@ async def async_setup_entry(
     # Feed REST battery SoH into the health monitor and degradation tracker.
     # The Modbus path does not expose SoH (no register), so without this
     # listener the battery_soh trackers stay empty and "Battery Health
-    # (SoH Trend)" / "Battery Health Warning" / "Degradation: Batterie SoH"
+    # (SoH Trend)" / "Battery Health Warning" / "Degradation: Battery SoH"
     # remain in state "unknown".
     _health_monitor_obj = (
         _entry_store_pc.get("health_monitor")
@@ -2036,7 +2038,7 @@ class PlenticoreCalculatedSensor(
         self._attr_unique_id = f"{entry_id}_{self.module_id}_{self.data_id}"
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
-        self._attr_name = name
+        self._english_name = name
 
         tk = _sensor_translation_key(description.module_id, description.key)
         if tk is not None:
@@ -2347,7 +2349,7 @@ class CalculatedPvSumSensor(
         self._attr_unique_id = f"{entry_id}_{description.module_id}_{description.key}"
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
-        self._attr_name = name
+        self._english_name = name
 
         tk = _sensor_translation_key(description.module_id, description.key)
         if tk is not None:
@@ -2423,7 +2425,7 @@ class PlenticoreEventSensor(
     ) -> None:
         super().__init__(coordinator)
         self._key = key
-        self._attr_name = name
+        self._english_name = name
         self._attr_icon = icon
         self._attr_unique_id = f"{entry_id}_{EVENT_SENSOR_MODULE_ID}_{key}"
         self._attr_device_info = device_info
@@ -2464,7 +2466,7 @@ class ModbusDiagnosticSensor(
     ) -> None:
         super().__init__(coordinator)
         self._key = key
-        self._attr_name = name
+        self._english_name = name
         self._attr_unique_id = f"{entry_id}_modbus_diag_{key}"
         self._attr_device_info = device_info
         if unit is not None:
@@ -2511,7 +2513,7 @@ class ModbusEnergySensor(
     ) -> None:
         super().__init__(coordinator)
         self._key = key
-        self._attr_name = name
+        self._english_name = name
         self._attr_unique_id = f"{entry_id}_modbus_energy_{key}"
         self._attr_device_info = device_info
         self._last_kwh: float | None = None
@@ -2562,7 +2564,7 @@ class KsemDiagnosticSensor(
     ) -> None:
         super().__init__(coordinator)
         self._key = key
-        self._attr_name = name
+        self._english_name = name
         self._attr_unique_id = f"{entry_id}_ksem_diag_{key}"
         self._attr_device_info = device_info
         if unit is not None:
@@ -2582,7 +2584,7 @@ class PreferredGridPowerSensor(
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Grid Power Preferred Source"
+    _english_name = "Grid Power Preferred Source"
     _attr_icon = "mdi:source-merge"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
 
@@ -2730,7 +2732,7 @@ class PlenticoreDataSensor(
         self._attr_unique_id = f"{entry_id}_{self.module_id}_{self.data_id}"
         self._attr_has_entity_name = True
         name = description.name if isinstance(description.name, str) else ""
-        self._attr_name = name
+        self._english_name = name
         # QA-4: cache the last good value so MEASUREMENT sensors survive a
         # single NaN/Inf parse from the API instead of flickering to None.
         # TOTAL_INCREASING sensors deliberately do NOT use this cache –

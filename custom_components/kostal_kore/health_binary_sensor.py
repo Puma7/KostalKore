@@ -43,7 +43,7 @@ class _HealthWarningBinarySensor(BinarySensorEntity):
         self._tracker = tracker
         self._icon_on = icon_on
         self._icon_off = icon_off
-        self._attr_name = name
+        self._english_name = name
         self._attr_unique_id = f"{entry_id}_health_{unique_suffix}"
         self._attr_device_info = device_info
 
@@ -155,7 +155,7 @@ class HighErrorRateWarning(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "High Error Rate Warning"
+    _english_name = "High Error Rate Warning"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -204,7 +204,7 @@ class DCStringImbalanceWarning(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "DC String Imbalance Warning"
+    _english_name = "DC String Imbalance Warning"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -246,7 +246,7 @@ class ActiveErrorsWarning(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Active Inverter Errors"
+    _english_name = "Active Inverter Errors"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor

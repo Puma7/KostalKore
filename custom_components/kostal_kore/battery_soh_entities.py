@@ -43,7 +43,7 @@ class BatterySohCalculatedSensor(_BatterySohBase):
     """Current calculated SoH from work_capacity vs baseline."""
 
     _attr_icon = "mdi:battery-heart-outline"
-    _attr_name = "Battery SoH (Calculated)"
+    _english_name = "Battery SoH (Calculated)"
 
     def __init__(
         self,
@@ -93,7 +93,7 @@ class BatterySohProjection5yearsSensor(_BatterySohBase):
     """Extrapolated SoH in 5 years from observed degradation slope."""
 
     _attr_icon = "mdi:chart-line-variant"
-    _attr_name = "Battery SoH Projection 5y"
+    _english_name = "Battery SoH Projection 5y"
 
     def __init__(
         self,

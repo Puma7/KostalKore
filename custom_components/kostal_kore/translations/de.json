@@ -1,0 +1,1377 @@
+{
+    "options": {
+        "step": {
+            "init": {
+                "title": "Einstellungen für Modbus und MQTT-Bridge",
+                "description": "Aktiviere den direkten Modbus-TCP-Zugriff auf den Wechselrichter. Dies ermöglicht die Steuerung von Laden/Entladen der Batterie und teilt Daten per MQTT mit externen Systemen (evcc, ioBroker). Sicherheitshinweis: Belasse den Modbus-Proxy auf 127.0.0.1, sofern ein Fernzugriff nicht ausdrücklich erforderlich ist.\n\nErkannte Zugriffsrolle: {access_role}\nSchreibzugriff: {write_access}",
+                "data": {
+                    "modbus_enabled": "Modbus TCP aktivieren",
+                    "modbus_port": "Modbus-TCP-Port",
+                    "modbus_unit_id": "Modbus-Unit-ID",
+                    "modbus_endianness": "Bytereihenfolge (Endianness)",
+                    "mqtt_bridge_enabled": "MQTT-Bridge aktivieren",
+                    "modbus_proxy_enabled": "Modbus-Proxy-Server aktivieren",
+                    "modbus_proxy_port": "Modbus-Proxy-Port",
+                    "modbus_proxy_bind": "Bind-Adresse des Modbus-Proxys (Standard: 127.0.0.1)",
+                    "modbus_proxy_client_timeout_s": "Timeout für erwarteten Proxy-Verkehr (Sekunden, 0 = deaktiviert)",
+                    "ksem_enabled": "Externe KSEM-Quelle aktivieren",
+                    "ksem_host": "KSEM-Host/IP (leer = Host des Wechselrichters)",
+                    "ksem_port": "KSEM-Modbus-TCP-Port",
+                    "ksem_unit_id": "KSEM-Modbus-Unit-ID"
+                }
+            },
+            "modbus_test": {
+                "title": "Modbus-Verbindungstest",
+                "description": "Ergebnis des Verbindungstests:\n\n{test_result}\n"
+            }
+        },
+        "error": {
+            "modbus_test_failed": "Modbus-Verbindungstest fehlgeschlagen – prüfe Einstellungen und Netzwerk",
+            "invalid_bind_address": "Die Bind-Adresse des Proxys muss eine literale IP-Adresse sein (z. B. 127.0.0.1 nur für lokalen Zugriff oder 0.0.0.0 für alle Schnittstellen)"
+        },
+        "abort": {
+            "unsupported_ha_version": "Diese Integration erfordert Home Assistant 2024.12.0 oder neuer (die installierte Version stellt die Eigenschaft config_entry des Options-Flows nicht bereit)"
+        }
+    },
+    "config": {
+        "abort": {
+            "already_configured": "Gerät ist bereits konfiguriert",
+            "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
+            "reauth_successful": "Die erneute Authentifizierung war erfolgreich"
+        },
+        "error": {
+            "cannot_connect": "Fehler beim Verbinden",
+            "invalid_auth": "Ungültige Authentifizierung",
+            "no_discovered_inverter": "Es wurde kein Wechselrichter automatisch gefunden. Gib den Host/die IP manuell ein.",
+            "timeout": "Zeitüberschreitung der Verbindung. Der Wechselrichter ist möglicherweise überlastet oder nicht erreichbar – versuche es später erneut.",
+            "unknown": "Unerwarteter Fehler",
+            "invalid_inverter_model": "Wechselrichtermodell nicht unterstützt oder nicht kompatibel",
+            "inverter_error": "Interner Fehler des Wechselrichters, prüfe den Gerätestatus",
+            "modbus_error": "MODBUS-Kommunikationsfehler",
+            "invalid_bind_address": "Die Bind-Adresse des Proxys muss eine literale IP-Adresse sein (z. B. 127.0.0.1 nur für lokalen Zugriff oder 0.0.0.0 für alle Schnittstellen)"
+        },
+        "step": {
+            "reauth_confirm": {
+                "description": "Gib deine Zugangsdaten erneut ein. Der Host aus der bestehenden Konfiguration wird verwendet.",
+                "data": {
+                    "host": "Host/IP (schreibgeschützt, verwendet den bestehenden Eintrag)",
+                    "password": "Passwort",
+                    "service_code": "Servicecode"
+                }
+            },
+            "reconfigure": {
+                "description": "Gib einen Host/eine IP manuell an oder lass den Host leer, um ihn in lokalen Netzwerken automatisch zu erkennen.",
+                "data": {
+                    "host": "Host/IP (optional bei automatischer Erkennung)",
+                    "password": "Passwort",
+                    "service_code": "Servicecode"
+                }
+            },
+            "user": {
+                "description": "Gib die Zugangsdaten des Wechselrichters ein. Lass den Host leer, um die IP des Wechselrichters in deinem lokalen Netzwerk automatisch zu erkennen.",
+                "data": {
+                    "host": "Host/IP (optional bei automatischer Erkennung)",
+                    "password": "Passwort",
+                    "service_code": "Servicecode"
+                }
+            },
+            "setup_options": {
+                "title": "Assistent für die Ersteinrichtung",
+                "description": "Host: {detected_host}\nErkannte Zugriffsrolle: {access_role}\nSchreibzugriff: {write_access}\n\nWähle aus, welche optionalen Funktionen sofort aktiviert werden sollen.",
+                "data": {
+                    "modbus_enabled": "Modbus TCP aktivieren",
+                    "modbus_port": "Modbus-TCP-Port",
+                    "modbus_unit_id": "Modbus-Unit-ID",
+                    "modbus_endianness": "Bytereihenfolge (Endianness)",
+                    "mqtt_bridge_enabled": "MQTT-Bridge aktivieren",
+                    "modbus_proxy_enabled": "Modbus-Proxy-Server aktivieren",
+                    "modbus_proxy_port": "Modbus-Proxy-Port",
+                    "modbus_proxy_bind": "Bind-Adresse des Modbus-Proxys (Standard: 127.0.0.1)",
+                    "modbus_proxy_client_timeout_s": "Timeout für erwarteten Proxy-Verkehr (Sekunden, 0 = deaktiviert)",
+                    "ksem_enabled": "Externe KSEM-Quelle aktivieren",
+                    "ksem_host": "KSEM-Host/IP (leer = Host des Wechselrichters)",
+                    "ksem_port": "KSEM-Modbus-TCP-Port",
+                    "ksem_unit_id": "KSEM-Modbus-Unit-ID"
+                }
+            },
+            "setup_modbus_test": {
+                "title": "Modbus-Verbindungstest",
+                "description": "Ergebnis des Verbindungstests:\n\n{test_result}\n"
+            }
+        }
+    },
+    "issues": {
+        "auth_failed": {
+            "title": "Authentifizierung fehlgeschlagen",
+            "description": "Eine erneute Authentifizierung ist erforderlich. Bitte konfiguriere die Integration neu."
+        },
+        "api_unreachable": {
+            "title": "Wechselrichter nicht erreichbar",
+            "description": "Der Wechselrichter antwortet nicht. Prüfe die Netzwerkverbindung und den Gerätestatus."
+        },
+        "inverter_busy": {
+            "title": "Wechselrichter ausgelastet",
+            "description": "Der Wechselrichter hat einen internen Kommunikationsfehler (503) gemeldet. Versuche es später erneut."
+        },
+        "installer_required": {
+            "title": "Installateur-Zugriff erforderlich",
+            "description": "Diese Aktion erfordert den Installateur-/Servicecode. Konfiguriere die Integration mit dem Servicecode neu, um erweiterte Steuerungsfunktionen zu aktivieren."
+        },
+        "battery_capacity_unit_migration": {
+            "title": "Einheit der Batterie-Arbeitskapazität geändert",
+            "description": "Die Einheit von `sensor.battery_work_capacity` wurde von Ah auf Wh korrigiert (1 Wh ≠ 1 Ah; die bisherige Bezeichnung war falsch).\n\n**Für bestehende Installationen sind zwei manuelle Schritte erforderlich:**\n\n1. **Recorder-Statistiken**: Öffne *Entwicklerwerkzeuge → Statistiken*, suche „Batterie-Nutzkapazität“ (bzw. `sensor.battery_work_capacity`) und behebe die Warnung zur Einheitenänderung, damit die historischen Daten durchgängig bleiben.\n2. **Anzeigeeinheit (optional)**: Die Entität zeigt weiterhin rohe Wh-Werte an, da Home Assistant die vorgeschlagene Anzeigeeinheit (kWh) nur auf neu registrierte Entitäten anwendet. Öffne die Entitätseinstellungen (Zahnradsymbol) und setze *Maßeinheit* auf `kWh`, um eine besser lesbare Anzeige zu erhalten.\n\nDieser Hinweis verschwindet automatisch, sobald Schritt 1 erledigt ist."
+        }
+    },
+    "exceptions": {
+        "write_setting_failed": {
+            "message": "Einstellung konnte nicht geschrieben werden: {error}"
+        }
+    },
+    "entity": {
+        "binary_sensor": {
+            "active_inverter_errors": {
+                "name": "Aktive Wechselrichterfehler"
+            },
+            "battery_fire_risk": {
+                "name": "Brandrisiko Batterie"
+            },
+            "battery_health_warning": {
+                "name": "Warnung Batteriezustand"
+            },
+            "battery_temperature_warning": {
+                "name": "Warnung Batterietemperatur"
+            },
+            "controller_overheat_warning": {
+                "name": "Warnung Controller-Überhitzung"
+            },
+            "dc_cable_danger": {
+                "name": "Gefahr DC-Kabel"
+            },
+            "dc_string_imbalance_warning": {
+                "name": "Warnung DC-String-Ungleichgewicht"
+            },
+            "grid_frequency_warning": {
+                "name": "Warnung Netzfrequenz"
+            },
+            "high_error_rate_warning": {
+                "name": "Warnung hohe Fehlerrate"
+            },
+            "isolation_fault_danger": {
+                "name": "Gefahr Isolationsfehler"
+            },
+            "isolation_resistance_warning": {
+                "name": "Warnung Isolationswiderstand"
+            },
+            "phase_1_voltage_warning": {
+                "name": "Warnung Spannung Phase 1"
+            },
+            "phase_2_voltage_warning": {
+                "name": "Warnung Spannung Phase 2"
+            },
+            "phase_3_voltage_warning": {
+                "name": "Warnung Spannung Phase 3"
+            },
+            "pv_system_safety": {
+                "name": "Sicherheit PV-Anlage"
+            }
+        },
+        "button": {
+            "battery_charge_discharge_test": {
+                "name": "Lade-/Entladetest der Batterie"
+            },
+            "finalize_legacy_cleanup": {
+                "name": "Legacy-Bereinigung abschließen"
+            },
+            "import_legacy_plenticore_data": {
+                "name": "Legacy-Plenticore-Daten importieren"
+            },
+            "reset_modbus_registers": {
+                "name": "Modbus-Register zurücksetzen"
+            },
+            "run_modbus_diagnostics": {
+                "name": "Modbus-Diagnose ausführen"
+            },
+            "run_system_health_check": {
+                "name": "Systemzustandsprüfung ausführen"
+            }
+        },
+        "number": {
+            "active_power_ext_ctrl_mode_gradient": {
+                "name": "Wirkleistung Gradientenmodus"
+            },
+            "active_power_ext_ctrl_mode_gradient_low_priority": {
+                "name": "Wirkleistung Gradientenmodus (niedrige Priorität)"
+            },
+            "active_power_ext_ctrl_mode_pt1_low_priority_tau": {
+                "name": "Wirkleistung PT1 Tau (niedrige Priorität)"
+            },
+            "active_power_ext_ctrl_mode_pt1_tau": {
+                "name": "Wirkleistung PT1 Tau"
+            },
+            "active_power_ext_ctrl_p_limit_grid_supply": {
+                "name": "Wirkleistung Begrenzung Netzeinspeisung"
+            },
+            "active_power_ext_ctrl_p_p": {
+                "name": "Wirkleistung P"
+            },
+            "active_power_ext_ctrl_p_p_fine": {
+                "name": "Wirkleistung P fein"
+            },
+            "active_power_ext_ctrl_ramp_time": {
+                "name": "Wirkleistung Rampenzeit"
+            },
+            "active_power_setpoint_modbus": {
+                "name": "Wirkleistungssollwert (Modbus)"
+            },
+            "battery_charge_current_dc_absolute": {
+                "name": "Batterieladestrom (DC) absolut"
+            },
+            "battery_charge_current_dc_relative": {
+                "name": "Batterieladestrom (DC) relativ"
+            },
+            "battery_charge_power_ac_absolute": {
+                "name": "Batterieladeleistung (AC) absolut"
+            },
+            "battery_charge_power_ac_relative": {
+                "name": "Batterieladeleistung (AC) relativ"
+            },
+            "battery_charge_power_dc_absolute": {
+                "name": "Batterieladeleistung (DC) absolut"
+            },
+            "battery_charge_power_dc_relative": {
+                "name": "Batterieladeleistung (DC) relativ"
+            },
+            "battery_charge_power_modbus": {
+                "name": "Batterieladeleistung (Modbus)"
+            },
+            "battery_com_monitor_time": {
+                "name": "Zeit der Batterie-Kommunikationsüberwachung"
+            },
+            "battery_esb_min_soc": {
+                "name": "Minimaler ESB-SoC der Batterie"
+            },
+            "battery_esb_start_soc": {
+                "name": "ESB-Start-SoC der Batterie"
+            },
+            "battery_extern_control_max_charge_power_abs": {
+                "name": "Maximale Ladeleistung absolut (externe Batteriesteuerung)"
+            },
+            "battery_extern_control_max_discharge_power_abs": {
+                "name": "Maximale Entladeleistung absolut (externe Batteriesteuerung)"
+            },
+            "battery_extern_control_max_soc_rel": {
+                "name": "Maximaler SoC relativ (externe Batteriesteuerung)"
+            },
+            "battery_extern_control_min_soc_rel": {
+                "name": "Minimaler SoC relativ (externe Batteriesteuerung)"
+            },
+            "battery_max_charge_limit_modbus": {
+                "name": "Maximale Ladegrenze der Batterie (Modbus)"
+            },
+            "battery_max_charge_power_fallback": {
+                "name": "Rückfallwert maximale Ladeleistung (G3)"
+            },
+            "battery_max_charge_power_g3": {
+                "name": "Maximale Ladeleistung (G3)"
+            },
+            "battery_max_charge_power_soc_ctrl": {
+                "name": "Maximale Ladeleistung (SoC Ctrl)"
+            },
+            "battery_max_discharge_limit_modbus": {
+                "name": "Maximale Entladegrenze der Batterie (Modbus)"
+            },
+            "battery_max_discharge_power_fallback": {
+                "name": "Rückfallwert maximale Entladeleistung (G3)"
+            },
+            "battery_max_discharge_power_g3": {
+                "name": "Maximale Entladeleistung (G3)"
+            },
+            "battery_max_discharge_power_soc_ctrl": {
+                "name": "Maximale Entladeleistung (SoC Ctrl)"
+            },
+            "battery_max_soc_modbus": {
+                "name": "Maximaler SoC der Batterie (Modbus)"
+            },
+            "battery_min_grid_feed_in": {
+                "name": "Minimale Netzeinspeisung der Batterie"
+            },
+            "battery_min_home_consumption": {
+                "name": "Minimaler Hausverbrauch der Batterie"
+            },
+            "battery_min_soc": {
+                "name": "Minimaler SoC der Batterie"
+            },
+            "battery_min_soc_modbus": {
+                "name": "Minimaler SoC der Batterie (Modbus)"
+            },
+            "battery_target_soc": {
+                "name": "Ziel-SoC der Batterie"
+            },
+            "battery_time_until_fallback": {
+                "name": "Zeit bis zum Rückfallwert (G3)"
+            },
+            "battery_winter_end_month": {
+                "name": "Winter-Endmonat der Batterie"
+            },
+            "battery_winter_min_soc": {
+                "name": "Minimaler Winter-SoC der Batterie"
+            },
+            "battery_winter_start_month": {
+                "name": "Winter-Startmonat der Batterie"
+            },
+            "digital_out1_power_ctl_delay_time": {
+                "name": "Digitalausgang 1 Leistungssteuerung Verzögerungszeit"
+            },
+            "digital_out1_power_ctl_off_power_threshold": {
+                "name": "Digitalausgang 1 Leistungssteuerung Ausschaltschwelle"
+            },
+            "digital_out1_power_ctl_on_power_threshold": {
+                "name": "Digitalausgang 1 Leistungssteuerung Einschaltschwelle"
+            },
+            "digital_out1_power_ctl_run_time": {
+                "name": "Digitalausgang 1 Leistungssteuerung Laufzeit"
+            },
+            "digital_out1_power_ctl_stable_time": {
+                "name": "Digitalausgang 1 Leistungssteuerung Stabilitätszeit"
+            },
+            "digital_out_bat_discharge_soc": {
+                "name": "Digitalausgang Batterieentlade-SoC"
+            },
+            "digital_out_output_enable_soc": {
+                "name": "Digitalausgang Freigabe-SoC"
+            },
+            "digital_outputs_customer_configuration_flags": {
+                "name": "Digitalausgänge (benutzerdefiniert) Konfigurations-Flags"
+            },
+            "digital_outputs_customer_delay_time": {
+                "name": "Digitalausgänge (benutzerdefiniert) Verzögerungszeit"
+            },
+            "digital_outputs_customer_power_mode_off_threshold": {
+                "name": "Digitalausgänge (benutzerdefiniert) Leistungsmodus Ausschaltschwelle"
+            },
+            "digital_outputs_customer_power_mode_on_threshold": {
+                "name": "Digitalausgänge (benutzerdefiniert) Leistungsmodus Einschaltschwelle"
+            },
+            "digital_outputs_customer_time_mode_max_cycles_per_day": {
+                "name": "Digitalausgänge (benutzerdefiniert) Zeitmodus max. Zyklen pro Tag"
+            },
+            "digital_outputs_customer_time_mode_power_threshold": {
+                "name": "Digitalausgänge (benutzerdefiniert) Zeitmodus Leistungsschwelle"
+            },
+            "digital_outputs_customer_time_mode_run_time": {
+                "name": "Digitalausgänge (benutzerdefiniert) Zeitmodus Laufzeit"
+            },
+            "digital_outputs_customer_time_mode_stable_time": {
+                "name": "Digitalausgänge (benutzerdefiniert) Zeitmodus Stabilitätszeit"
+            },
+            "energy_mgmt_bat_ctrl_power_offset": {
+                "name": "Energiemanagement Batteriesteuerung Leistungsoffset"
+            },
+            "energy_mgmt_limit_grid_supply": {
+                "name": "Energiemanagement Begrenzung Netzeinspeisung"
+            },
+            "energy_mgmt_smart_control_fallback_max_time": {
+                "name": "Energiemanagement intelligente Steuerung max. Rückfallzeit"
+            },
+            "energy_mgmt_timed_bat_charge_grid_power": {
+                "name": "Zeitgesteuerte Batterieladung Netzleistung"
+            },
+            "energy_mgmt_timed_bat_charge_soc": {
+                "name": "Zeitgesteuerte Batterieladung SoC"
+            },
+            "energy_mgmt_timed_bat_charge_wd_grid_power": {
+                "name": "Zeitgesteuerte Batterieladung Wochenende Netzleistung"
+            },
+            "energy_mgmt_timed_bat_charge_wd_soc": {
+                "name": "Zeitgesteuerte Batterieladung Wochenende SoC"
+            },
+            "g3_max_battery_charge_power_modbus": {
+                "name": "G3 maximale Batterieladeleistung (Modbus)"
+            },
+            "g3_max_battery_discharge_power_modbus": {
+                "name": "G3 maximale Batterieentladeleistung (Modbus)"
+            },
+            "grid_feed_in_limit": {
+                "name": "Netzeinspeisungsgrenze"
+            },
+            "inverter_active_power_consum_limitation": {
+                "name": "Wirkleistungs-Bezugsbegrenzung des Wechselrichters"
+            },
+            "inverter_active_power_limitation": {
+                "name": "Wirkleistungsbegrenzung des Wechselrichters"
+            },
+            "lvrt_hvrt_gradient_and_time": {
+                "name": "LVRT/HVRT Gradient und Zeit"
+            },
+            "lvrt_hvrt_k_factor_hvrt": {
+                "name": "HVRT-K-Faktor"
+            },
+            "lvrt_hvrt_k_factor_lvrt": {
+                "name": "LVRT-K-Faktor"
+            },
+            "lvrt_hvrt_lower_voltage_lvrt": {
+                "name": "LVRT untere Spannung"
+            },
+            "lvrt_hvrt_threshold_hvrt": {
+                "name": "HVRT-Schwellenwert"
+            },
+            "lvrt_hvrt_threshold_lvrt": {
+                "name": "LVRT-Schwellenwert"
+            },
+            "lvrt_hvrt_upper_voltage_hvrt": {
+                "name": "HVRT obere Spannung"
+            },
+            "pof_f_delay_reaction_time": {
+                "name": "P(f) Reaktionsverzögerung"
+            },
+            "pof_f_nominal_frequency": {
+                "name": "P(f) Nennfrequenz"
+            },
+            "pof_f_reduction_end_frequency": {
+                "name": "P(f) Reduktions-Endfrequenz"
+            },
+            "pof_f_reduction_start_frequency": {
+                "name": "P(f) Reduktions-Startfrequenz"
+            },
+            "pof_u_reduction_end_voltage": {
+                "name": "P(U) Reduktions-Endspannung"
+            },
+            "pof_u_reduction_start_voltage": {
+                "name": "P(U) Reduktions-Startspannung"
+            },
+            "pof_u_settling_time": {
+                "name": "P(U) Einschwingzeit"
+            },
+            "reactive_power_ext_ctrl_fix_cos_phi_delta": {
+                "name": "Blindleistung ext. Steuerung fester cos φ Delta"
+            },
+            "reactive_power_ext_ctrl_fix_q": {
+                "name": "Blindleistung ext. Steuerung festes Q"
+            },
+            "reactive_power_ext_ctrl_settling_time": {
+                "name": "Blindleistung ext. Steuerung Einschwingzeit"
+            },
+            "reactive_power_fix_cos_phi_delta": {
+                "name": "Blindleistung fester cos φ Delta"
+            },
+            "reactive_power_fix_q": {
+                "name": "Blindleistung festes Q"
+            },
+            "reactive_power_power_limit_input_prio_high_mode": {
+                "name": "Blindleistung Leistungsgrenze Eingang Modus hohe Priorität"
+            }
+        },
+        "select": {
+            "battery_charge": {
+                "name": "Lade-/Nutzungsmodus der Batterie"
+            }
+        },
+        "sensor": {
+            "ac_cosphi": {
+                "name": "AC-Leistungsfaktor"
+            },
+            "ac_frequency": {
+                "name": "AC-Frequenz"
+            },
+            "ac_l1_i": {
+                "name": "AC-Strom L1"
+            },
+            "ac_l1_p": {
+                "name": "AC-Leistung L1"
+            },
+            "ac_l1_u": {
+                "name": "AC-Spannung L1"
+            },
+            "ac_l2_i": {
+                "name": "AC-Strom L2"
+            },
+            "ac_l2_p": {
+                "name": "AC-Leistung L2"
+            },
+            "ac_l2_u": {
+                "name": "AC-Spannung L2"
+            },
+            "ac_l3_i": {
+                "name": "AC-Strom L3"
+            },
+            "ac_l3_p": {
+                "name": "AC-Leistung L3"
+            },
+            "ac_l3_u": {
+                "name": "AC-Spannung L3"
+            },
+            "ac_p": {
+                "name": "AC-Leistung"
+            },
+            "active_error_events": {
+                "name": "Aktive Fehlerereignisse"
+            },
+            "active_safety_alerts": {
+                "name": "Aktive Sicherheitsalarme"
+            },
+            "battery_ac_charge_energy_from_grid_total_modbus": {
+                "name": "Batterie-AC-Ladeenergie aus dem Netz Gesamt (Modbus)"
+            },
+            "battery_batmanufacturer": {
+                "name": "Batteriehersteller"
+            },
+            "battery_batmodel": {
+                "name": "Batteriemodell"
+            },
+            "battery_batmodulecnt": {
+                "name": "Anzahl Batteriemodule"
+            },
+            "battery_batserialno": {
+                "name": "Batterie-Seriennummer"
+            },
+            "battery_batversionfw": {
+                "name": "Batterie-Firmwareversion"
+            },
+            "battery_cycles": {
+                "name": "Batteriezyklen"
+            },
+            "battery_dc_charge_energy_total_modbus": {
+                "name": "Batterie-DC-Ladeenergie Gesamt (Modbus)"
+            },
+            "battery_fullchargecap_e": {
+                "name": "Batterie-Vollladekapazität"
+            },
+            "battery_health_soh_trend": {
+                "name": "Batteriegesundheit (SoH Trend)"
+            },
+            "battery_i": {
+                "name": "Batteriestrom"
+            },
+            "battery_longevity": {
+                "name": "Batterie-Langlebigkeit"
+            },
+            "battery_p": {
+                "name": "Batterieleistung"
+            },
+            "battery_ready_flag_modbus": {
+                "name": "Batterie-Bereit-Flag (Modbus)"
+            },
+            "battery_soc": {
+                "name": "Batterie-SoC"
+            },
+            "battery_soh": {
+                "name": "Batterie-Gesundheitszustand"
+            },
+            "battery_soh_calculated": {
+                "name": "Batterie-SoH (berechnet)"
+            },
+            "battery_soh_projection_5y": {
+                "name": "Batterie-SoH-Prognose 5 Jahre"
+            },
+            "battery_temperature_modbus": {
+                "name": "Batterietemperatur (Modbus)"
+            },
+            "battery_u": {
+                "name": "Batteriespannung"
+            },
+            "battery_workcapacity": {
+                "name": "Batterie-Nutzkapazität"
+            },
+            "calc_batterychargetotal_day": {
+                "name": "Batterieladung Summe Tag"
+            },
+            "calc_batterychargetotal_month": {
+                "name": "Batterieladung Summe Monat"
+            },
+            "calc_batterychargetotal_total": {
+                "name": "Batterieladung Summe Gesamt"
+            },
+            "calc_batterychargetotal_year": {
+                "name": "Batterieladung Summe Jahr"
+            },
+            "calc_batterydischargetotal_day": {
+                "name": "Batterieentladung Summe Tag"
+            },
+            "calc_batterydischargetotal_month": {
+                "name": "Batterieentladung Summe Monat"
+            },
+            "calc_batterydischargetotal_total": {
+                "name": "Batterieentladung Summe Gesamt"
+            },
+            "calc_batterydischargetotal_year": {
+                "name": "Batterieentladung Summe Jahr"
+            },
+            "calc_batteryefficiency_day": {
+                "name": "Batteriewirkungsgrad Tag"
+            },
+            "calc_batteryefficiency_month": {
+                "name": "Batteriewirkungsgrad Monat"
+            },
+            "calc_batteryefficiency_total": {
+                "name": "Batteriewirkungsgrad Gesamt"
+            },
+            "calc_batteryefficiency_year": {
+                "name": "Batteriewirkungsgrad Jahr"
+            },
+            "calc_batterynetefficiency_day": {
+                "name": "Batterie-Nettowirkungsgrad Tag"
+            },
+            "calc_batterynetefficiency_month": {
+                "name": "Batterie-Nettowirkungsgrad Monat"
+            },
+            "calc_batterynetefficiency_total": {
+                "name": "Batterie-Nettowirkungsgrad Gesamt"
+            },
+            "calc_batterynetefficiency_year": {
+                "name": "Batterie-Nettowirkungsgrad Jahr"
+            },
+            "calc_inverterdischargeefficiency_day": {
+                "name": "Wechselrichter-Entladewirkungsgrad Tag"
+            },
+            "calc_inverterdischargeefficiency_month": {
+                "name": "Wechselrichter-Entladewirkungsgrad Monat"
+            },
+            "calc_inverterdischargeefficiency_total": {
+                "name": "Wechselrichter-Entladewirkungsgrad Gesamt"
+            },
+            "calc_inverterdischargeefficiency_year": {
+                "name": "Wechselrichter-Entladewirkungsgrad Jahr"
+            },
+            "calc_totalgridconsumption_day": {
+                "name": "Netzbezug Summe Tag"
+            },
+            "calc_totalgridconsumption_month": {
+                "name": "Netzbezug Summe Monat"
+            },
+            "calc_totalgridconsumption_total": {
+                "name": "Netzbezug Summe Gesamt"
+            },
+            "calc_totalgridconsumption_year": {
+                "name": "Netzbezug Summe Jahr"
+            },
+            "controller_temperature_health": {
+                "name": "Controller-Temperatur (Health)"
+            },
+            "controller_temperature_modbus": {
+                "name": "Controller-Temperatur (Modbus)"
+            },
+            "dc1_current": {
+                "name": "DC1-Strom"
+            },
+            "dc1_power": {
+                "name": "DC1-Leistung"
+            },
+            "dc1_voltage": {
+                "name": "DC1-Spannung"
+            },
+            "dc2_current": {
+                "name": "DC2-Strom"
+            },
+            "dc2_power": {
+                "name": "DC2-Leistung"
+            },
+            "dc2_voltage": {
+                "name": "DC2-Spannung"
+            },
+            "dc3_current": {
+                "name": "DC3-Strom"
+            },
+            "dc3_power": {
+                "name": "DC3-Leistung"
+            },
+            "dc3_voltage": {
+                "name": "DC3-Spannung"
+            },
+            "dc4_current": {
+                "name": "DC4-Strom"
+            },
+            "dc4_power": {
+                "name": "DC4-Leistung"
+            },
+            "dc4_voltage": {
+                "name": "DC4-Spannung"
+            },
+            "dc5_current": {
+                "name": "DC5-Strom"
+            },
+            "dc5_power": {
+                "name": "DC5-Leistung"
+            },
+            "dc5_voltage": {
+                "name": "DC5-Spannung"
+            },
+            "dc6_current": {
+                "name": "DC6-Strom"
+            },
+            "dc6_power": {
+                "name": "DC6-Leistung"
+            },
+            "dc6_voltage": {
+                "name": "DC6-Spannung"
+            },
+            "dc_p": {
+                "name": "Solarleistung"
+            },
+            "dc_string_imbalance": {
+                "name": "DC-String-Ungleichgewicht"
+            },
+            "degradation_alerts": {
+                "name": "Degradationsalarme"
+            },
+            "degradation_battery_capacity": {
+                "name": "Degradation: Batteriekapazität"
+            },
+            "degradation_battery_soh": {
+                "name": "Degradation: Batterie-SoH"
+            },
+            "degradation_battery_temperature": {
+                "name": "Degradation: Batterietemperatur"
+            },
+            "degradation_controller_temperature": {
+                "name": "Degradation: Controller-Temperatur"
+            },
+            "degradation_daily_yield": {
+                "name": "Degradation: Tagesertrag"
+            },
+            "degradation_dc1_peak_power": {
+                "name": "Degradation: DC1-Spitzenleistung"
+            },
+            "degradation_dc2_peak_power": {
+                "name": "Degradation: DC2-Spitzenleistung"
+            },
+            "degradation_isolation_resistance": {
+                "name": "Degradation: Isolationswiderstand"
+            },
+            "diagnosis_ac_grid_connection": {
+                "name": "Diagnose: AC-Netzanschluss"
+            },
+            "diagnosis_battery": {
+                "name": "Diagnose: Batterie"
+            },
+            "diagnosis_dc_solar_array": {
+                "name": "Diagnose: DC-Solargenerator"
+            },
+            "diagnosis_inverter": {
+                "name": "Diagnose: Wechselrichter"
+            },
+            "diagnosis_safety": {
+                "name": "Diagnose: Sicherheit"
+            },
+            "em_state": {
+                "name": "Energiemanager-Status"
+            },
+            "energy_pv4_day": {
+                "name": "Energie PV4 Tag"
+            },
+            "energy_pv4_month": {
+                "name": "Energie PV4 Monat"
+            },
+            "energy_pv4_total": {
+                "name": "Energie PV4 Gesamt"
+            },
+            "energy_pv4_year": {
+                "name": "Energie PV4 Jahr"
+            },
+            "energy_pv5_day": {
+                "name": "Energie PV5 Tag"
+            },
+            "energy_pv5_month": {
+                "name": "Energie PV5 Monat"
+            },
+            "energy_pv5_total": {
+                "name": "Energie PV5 Gesamt"
+            },
+            "energy_pv5_year": {
+                "name": "Energie PV5 Jahr"
+            },
+            "energy_pv6_day": {
+                "name": "Energie PV6 Tag"
+            },
+            "energy_pv6_month": {
+                "name": "Energie PV6 Monat"
+            },
+            "energy_pv6_total": {
+                "name": "Energie PV6 Gesamt"
+            },
+            "energy_pv6_year": {
+                "name": "Energie PV6 Jahr"
+            },
+            "error_rate_per_hour": {
+                "name": "Fehlerrate (pro Stunde)"
+            },
+            "event_activeackcnt": {
+                "name": "Anzahl aktiver Quittierungen"
+            },
+            "event_activeerrorcnt": {
+                "name": "Aktive Alarme"
+            },
+            "event_activewarningcnt": {
+                "name": "Anzahl aktiver Warnungen"
+            },
+            "fire_risk_level": {
+                "name": "Brandrisikostufe"
+            },
+            "grid_p": {
+                "name": "Netzleistung"
+            },
+            "grid_power_preferred_source": {
+                "name": "Bevorzugte Quelle Netzleistung"
+            },
+            "grid_to_battery_power": {
+                "name": "Leistung Netz zu Batterie"
+            },
+            "home_p": {
+                "name": "Hausleistung"
+            },
+            "homebat_p": {
+                "name": "Hausleistung aus der Batterie"
+            },
+            "homegrid_p": {
+                "name": "Hausleistung aus dem Netz"
+            },
+            "homeown_p": {
+                "name": "Hausleistung aus Eigenerzeugung"
+            },
+            "homepv_p": {
+                "name": "Hausleistung aus PV"
+            },
+            "inverter_health_level": {
+                "name": "Wechselrichter-Zustandsstufe"
+            },
+            "inverter_health_score": {
+                "name": "Wechselrichter-Zustandswert"
+            },
+            "inverter_longevity": {
+                "name": "Wechselrichter-Langlebigkeit"
+            },
+            "inverter_state": {
+                "name": "Wechselrichter-Status"
+            },
+            "inverter_state_changes": {
+                "name": "Wechselrichter-Statuswechsel"
+            },
+            "isolation_resistance_health": {
+                "name": "Isolationswiderstand (Health)"
+            },
+            "ksem_active_power_export": {
+                "name": "KSEM Wirkleistung Einspeisung"
+            },
+            "ksem_active_power_import": {
+                "name": "KSEM Wirkleistung Bezug"
+            },
+            "ksem_frequency": {
+                "name": "KSEM Frequenz"
+            },
+            "ksem_net_active_power": {
+                "name": "KSEM Netto-Wirkleistung"
+            },
+            "ksem_power_factor": {
+                "name": "KSEM Leistungsfaktor"
+            },
+            "last_event_age": {
+                "name": "Alter des letzten Ereignisses"
+            },
+            "last_event_category": {
+                "name": "Kategorie des letzten Ereignisses"
+            },
+            "last_event_code": {
+                "name": "Code des letzten Ereignisses"
+            },
+            "modbus_communication_reliability": {
+                "name": "Modbus-Kommunikationszuverlässigkeit"
+            },
+            "modbus_coordinator_updates": {
+                "name": "Modbus-Koordinator-Aktualisierungen"
+            },
+            "phase_voltage_imbalance": {
+                "name": "Phasenspannungs-Ungleichgewicht"
+            },
+            "power_meter_l1_apparent_power_modbus": {
+                "name": "Energiezähler Scheinleistung L1 (Modbus)"
+            },
+            "power_meter_l1_current_modbus": {
+                "name": "Energiezähler Strom L1 (Modbus)"
+            },
+            "power_meter_l1_reactive_power_modbus": {
+                "name": "Energiezähler Blindleistung L1 (Modbus)"
+            },
+            "power_meter_l2_apparent_power_modbus": {
+                "name": "Energiezähler Scheinleistung L2 (Modbus)"
+            },
+            "power_meter_l2_current_modbus": {
+                "name": "Energiezähler Strom L2 (Modbus)"
+            },
+            "power_meter_l2_reactive_power_modbus": {
+                "name": "Energiezähler Blindleistung L2 (Modbus)"
+            },
+            "power_meter_l3_apparent_power_modbus": {
+                "name": "Energiezähler Scheinleistung L3 (Modbus)"
+            },
+            "power_meter_l3_current_modbus": {
+                "name": "Energiezähler Strom L3 (Modbus)"
+            },
+            "power_meter_l3_reactive_power_modbus": {
+                "name": "Energiezähler Blindleistung L3 (Modbus)"
+            },
+            "powermeter_frequency": {
+                "name": "Energiezähler Frequenz"
+            },
+            "powermeter_l1_p": {
+                "name": "Energiezähler Leistung L1"
+            },
+            "powermeter_l1_u": {
+                "name": "Energiezähler Spannung L1"
+            },
+            "powermeter_l2_p": {
+                "name": "Energiezähler Leistung L2"
+            },
+            "powermeter_l2_u": {
+                "name": "Energiezähler Spannung L2"
+            },
+            "powermeter_l3_p": {
+                "name": "Energiezähler Leistung L3"
+            },
+            "powermeter_l3_u": {
+                "name": "Energiezähler Spannung L3"
+            },
+            "powermeter_p": {
+                "name": "Energiezähler Leistung"
+            },
+            "pssb_fuse_state_modbus": {
+                "name": "PSSB-Sicherungsstatus (Modbus)"
+            },
+            "pv2bat_p": {
+                "name": "Leistung PV zu Batterie"
+            },
+            "pv_system_longevity": {
+                "name": "PV-Anlagen-Langlebigkeit"
+            },
+            "request_scheduler_requests": {
+                "name": "Request-Scheduler-Anfragen"
+            },
+            "rest_modbus_consistency": {
+                "name": "REST/Modbus-Konsistenz"
+            },
+            "stat_autarky_day": {
+                "name": "Autarkie Tag"
+            },
+            "stat_autarky_month": {
+                "name": "Autarkie Monat"
+            },
+            "stat_autarky_total": {
+                "name": "Autarkie Gesamt"
+            },
+            "stat_autarky_year": {
+                "name": "Autarkie Jahr"
+            },
+            "stat_energychargegrid_day": {
+                "name": "Batterieladung aus dem Netz Tag"
+            },
+            "stat_energychargegrid_month": {
+                "name": "Batterieladung aus dem Netz Monat"
+            },
+            "stat_energychargegrid_total": {
+                "name": "Batterieladung aus dem Netz Gesamt"
+            },
+            "stat_energychargegrid_year": {
+                "name": "Batterieladung aus dem Netz Jahr"
+            },
+            "stat_energychargepv_day": {
+                "name": "Batterieladung aus PV Tag"
+            },
+            "stat_energychargepv_month": {
+                "name": "Batterieladung aus PV Monat"
+            },
+            "stat_energychargepv_total": {
+                "name": "Batterieladung aus PV Gesamt"
+            },
+            "stat_energychargepv_year": {
+                "name": "Batterieladung aus PV Jahr"
+            },
+            "stat_energydischarge_day": {
+                "name": "Batterieentladung Tag"
+            },
+            "stat_energydischarge_month": {
+                "name": "Batterieentladung Monat"
+            },
+            "stat_energydischarge_total": {
+                "name": "Batterieentladung Gesamt"
+            },
+            "stat_energydischarge_year": {
+                "name": "Batterieentladung Jahr"
+            },
+            "stat_energydischargegrid_day": {
+                "name": "Energieentladung ins Netz Tag"
+            },
+            "stat_energydischargegrid_month": {
+                "name": "Energieentladung ins Netz Monat"
+            },
+            "stat_energydischargegrid_total": {
+                "name": "Energieentladung ins Netz Gesamt"
+            },
+            "stat_energydischargegrid_year": {
+                "name": "Energieentladung ins Netz Jahr"
+            },
+            "stat_energyhome_day": {
+                "name": "Hausverbrauch Tag"
+            },
+            "stat_energyhome_month": {
+                "name": "Hausverbrauch Monat"
+            },
+            "stat_energyhome_total": {
+                "name": "Hausverbrauch Gesamt"
+            },
+            "stat_energyhome_year": {
+                "name": "Hausverbrauch Jahr"
+            },
+            "stat_energyhomebat_day": {
+                "name": "Hausverbrauch aus der Batterie Tag"
+            },
+            "stat_energyhomebat_month": {
+                "name": "Hausverbrauch aus der Batterie Monat"
+            },
+            "stat_energyhomebat_total": {
+                "name": "Hausverbrauch aus der Batterie Gesamt"
+            },
+            "stat_energyhomebat_year": {
+                "name": "Hausverbrauch aus der Batterie Jahr"
+            },
+            "stat_energyhomegrid_day": {
+                "name": "Hausverbrauch aus dem Netz Tag"
+            },
+            "stat_energyhomegrid_month": {
+                "name": "Hausverbrauch aus dem Netz Monat"
+            },
+            "stat_energyhomegrid_total": {
+                "name": "Hausverbrauch aus dem Netz Gesamt"
+            },
+            "stat_energyhomegrid_year": {
+                "name": "Hausverbrauch aus dem Netz Jahr"
+            },
+            "stat_energyhomepv_day": {
+                "name": "Hausverbrauch aus PV Tag"
+            },
+            "stat_energyhomepv_month": {
+                "name": "Hausverbrauch aus PV Monat"
+            },
+            "stat_energyhomepv_total": {
+                "name": "Hausverbrauch aus PV Gesamt"
+            },
+            "stat_energyhomepv_year": {
+                "name": "Hausverbrauch aus PV Jahr"
+            },
+            "stat_energypv1_day": {
+                "name": "Energie PV1 Tag"
+            },
+            "stat_energypv1_month": {
+                "name": "Energie PV1 Monat"
+            },
+            "stat_energypv1_total": {
+                "name": "Energie PV1 Gesamt"
+            },
+            "stat_energypv1_year": {
+                "name": "Energie PV1 Jahr"
+            },
+            "stat_energypv2_day": {
+                "name": "Energie PV2 Tag"
+            },
+            "stat_energypv2_month": {
+                "name": "Energie PV2 Monat"
+            },
+            "stat_energypv2_total": {
+                "name": "Energie PV2 Gesamt"
+            },
+            "stat_energypv2_year": {
+                "name": "Energie PV2 Jahr"
+            },
+            "stat_energypv3_day": {
+                "name": "Energie PV3 Tag"
+            },
+            "stat_energypv3_month": {
+                "name": "Energie PV3 Monat"
+            },
+            "stat_energypv3_total": {
+                "name": "Energie PV3 Gesamt"
+            },
+            "stat_energypv3_year": {
+                "name": "Energie PV3 Jahr"
+            },
+            "stat_ownconsumptionrate_day": {
+                "name": "Eigenverbrauchsquote Tag"
+            },
+            "stat_ownconsumptionrate_month": {
+                "name": "Eigenverbrauchsquote Monat"
+            },
+            "stat_ownconsumptionrate_total": {
+                "name": "Eigenverbrauchsquote Gesamt"
+            },
+            "stat_ownconsumptionrate_year": {
+                "name": "Eigenverbrauchsquote Jahr"
+            },
+            "stat_yield_day": {
+                "name": "Energieertrag Tag"
+            },
+            "stat_yield_month": {
+                "name": "Energieertrag Monat"
+            },
+            "stat_yield_total": {
+                "name": "Energieertrag Gesamt"
+            },
+            "stat_yield_year": {
+                "name": "Energieertrag Jahr"
+            },
+            "sum_power_of_all_pv_dc_inputs": {
+                "name": "Summenleistung aller PV-DC-Eingänge"
+            },
+            "system_state": {
+                "name": "Systemstatus"
+            },
+            "update_progress": {
+                "name": "Update-Fortschritt"
+            },
+            "update_status": {
+                "name": "Update-Status"
+            },
+            "update_version": {
+                "name": "Update-Version"
+            },
+            "virt_pv_p": {
+                "name": "PV-Gesamtleistung"
+            },
+            "virt_statistic_energygrid_day": {
+                "name": "Energie ins Netz Tag"
+            },
+            "virt_statistic_energygrid_month": {
+                "name": "Energie ins Netz Monat"
+            },
+            "virt_statistic_energygrid_total": {
+                "name": "Energie ins Netz Gesamt"
+            },
+            "virt_statistic_energygrid_year": {
+                "name": "Energie ins Netz Jahr"
+            },
+            "write_audit_event_rate": {
+                "name": "Schreib-Audit-Ereignisrate"
+            }
+        },
+        "switch": {
+            "activepower_extctrl_modegradientenable": {
+                "name": "Wirkleistung Gradientenmodus"
+            },
+            "activepower_extctrl_modept1enable": {
+                "name": "Wirkleistung PT1-Modus"
+            },
+            "arm_advanced_controls": {
+                "name": "Erweiterte Steuerung freischalten"
+            },
+            "battery_backup_mode": {
+                "name": "Notstrommodus der Batterie"
+            },
+            "battery_closeseparator": {
+                "name": "Batterietrenner schließen"
+            },
+            "battery_commonitor_enable": {
+                "name": "Batterie-Kommunikationsüberwachung"
+            },
+            "battery_dynamicsoc_enable": {
+                "name": "Dynamischer SoC der Batterie"
+            },
+            "battery_manualcharge": {
+                "name": "Manuelle Batterieladung"
+            },
+            "battery_modehomecomsumption": {
+                "name": "Batteriemodus Hausverbrauch"
+            },
+            "battery_smartbatterycontrol_enable": {
+                "name": "Intelligente Batteriesteuerung"
+            },
+            "battery_strategy": {
+                "name": "Batteriestrategie"
+            },
+            "battery_timecontrol_enable": {
+                "name": "Zeitsteuerung der Batterie"
+            },
+            "block_battery_charging": {
+                "name": "Batterieladung sperren"
+            },
+            "digitalinputs_spd_enable": {
+                "name": "Überspannungsschutz (SPD) aktivieren"
+            },
+            "digitalout1_externalctl": {
+                "name": "Digitalausgang 1 externe Steuerung"
+            },
+            "digitalout2_externalctl": {
+                "name": "Digitalausgang 2 externe Steuerung"
+            },
+            "digitalout3_externalctl": {
+                "name": "Digitalausgang 3 externe Steuerung"
+            },
+            "digitalout4_externalctl": {
+                "name": "Digitalausgang 4 externe Steuerung"
+            },
+            "energymgmt_acstorage": {
+                "name": "AC-Speicher"
+            },
+            "energymgmt_batctrl_disabeldischarge": {
+                "name": "Batterieentladung deaktivieren"
+            },
+            "energymgmt_smartcontrol_fallbackenable": {
+                "name": "Rückfallwert intelligente Steuerung"
+            },
+            "esb_sleepmodeallowed": {
+                "name": "ESB-Schlafmodus erlaubt"
+            },
+            "generator_swapdetection_enable": {
+                "name": "Generator-Vertauschungserkennung"
+            },
+            "grid_feed_in_optimizer": {
+                "name": "Netzeinspeisungs-Optimierer"
+            },
+            "inverter_activepowerconsumlimitationenable": {
+                "name": "Wirkleistungs-Bezugsbegrenzung des Wechselrichters"
+            },
+            "lvrthvrt_addreactivepowerbeforefault": {
+                "name": "LVRT/HVRT Blindleistung vor Fehler addieren"
+            },
+            "lvrthvrt_enablehvrt": {
+                "name": "HVRT aktivieren"
+            },
+            "lvrthvrt_enablelvrt": {
+                "name": "LVRT aktivieren"
+            },
+            "lvrthvrt_fillupwithactivecurrent": {
+                "name": "LVRT/HVRT mit Wirkstrom auffüllen"
+            },
+            "pave_enable": {
+                "name": "Leistungsmittelung aktivieren"
+            },
+            "pave_rampafterpowerreductionne": {
+                "name": "Leistungsmittelung Rampe nach Leistungsreduktion"
+            },
+            "poff_enable": {
+                "name": "P(f) aktivieren"
+            },
+            "poff_holdpoweronfrequencydecrease": {
+                "name": "P(f) Leistung bei Frequenzabfall halten"
+            },
+            "poff_increaseenable": {
+                "name": "P(f) Erhöhung aktivieren"
+            },
+            "pofu_enable": {
+                "name": "P(U) aktivieren"
+            },
+            "pofu_holdpoweronvoltagedecrease": {
+                "name": "P(U) Leistung bei Spannungsabfall halten"
+            },
+            "reactivepower_qofup_holdonvoltagereturn": {
+                "name": "Blindleistung QOfUP bei Spannungsrückkehr halten"
+            },
+            "shadow_management_dc_string_1": {
+                "name": "Schattenmanagement DC-String 1"
+            },
+            "shadow_management_dc_string_2": {
+                "name": "Schattenmanagement DC-String 2"
+            },
+            "shadow_management_dc_string_3": {
+                "name": "Schattenmanagement DC-String 3"
+            },
+            "shadow_management_dc_string_4": {
+                "name": "Schattenmanagement DC-String 4"
+            },
+            "shadow_management_dc_string_5": {
+                "name": "Schattenmanagement DC-String 5"
+            },
+            "shadow_management_dc_string_6": {
+                "name": "Schattenmanagement DC-String 6"
+            }
+        },
+        "text": {
+            "legacy_cleanup_confirmation_code": {
+                "name": "Bestätigungscode für Legacy-Bereinigung"
+            }
+        }
+    },
+    "services": {
+        "adopt_legacy_entity_ids": {
+            "name": "Legacy-Entitäts-IDs übernehmen",
+            "description": "Bindet Legacy-Entitäten/-Geräte von kostal_plenticore neu an einen kostal_kore-Konfigurationseintrag. Führe zuerst einen Probelauf durch. Der Anwendungsmodus ist durch einen dreistufigen Bestätigungsablauf abgesichert: (1) Aufruf mit dry_run=false, um einen Code zu erzeugen, (2) erneuter Aufruf mit dem Code zum Scharfschalten, (3) Aufruf mit final_confirm=true zum Ausführen.",
+            "fields": {
+                "target_entry_id": {
+                    "name": "ID des Ziel-Konfigurationseintrags",
+                    "description": "Eintrags-ID des kostal_kore-Konfigurationseintrags. Optional, wenn nur einer existiert."
+                },
+                "source_entry_id": {
+                    "name": "ID des Legacy-Quell-Konfigurationseintrags",
+                    "description": "Optionale ID des Legacy-Eintrags von kostal_plenticore. Nur erforderlich, wenn mehrere Legacy-Einträge existieren."
+                },
+                "dry_run": {
+                    "name": "Probelauf",
+                    "description": "Nur Vorschau (keine Änderungen). Standardmäßig true."
+                },
+                "confirmation_code": {
+                    "name": "Bestätigungscode",
+                    "description": "Code, der in der persistenten Benachrichtigung für den abgesicherten Anwendungsmodus angezeigt wird."
+                },
+                "final_confirm": {
+                    "name": "Endgültige Bestätigung",
+                    "description": "Beim dritten Aufruf auf true setzen, um den abgesicherten Anwendungsmodus auszuführen."
+                }
+            }
+        },
+        "copy_legacy_history": {
+            "name": "Legacy-Verlauf kopieren/zusammenführen",
+            "description": "Erweitertes Kopieren/Zusammenführen des Recorder-Verlaufs von alten Entitäts-IDs auf neue. Ein vorheriger Probelauf wird empfohlen. Der Anwendungsmodus ist durch einen dreistufigen Bestätigungsablauf abgesichert: (1) Aufruf mit dry_run=false, um einen Code zu erzeugen, (2) erneuter Aufruf mit dem Code zum Scharfschalten, (3) Aufruf mit final_confirm=true zum Ausführen.",
+            "fields": {
+                "target_entry_id": {
+                    "name": "ID des Ziel-Konfigurationseintrags",
+                    "description": "Eintrags-ID des kostal_kore-Konfigurationseintrags. Optional, wenn nur einer existiert."
+                },
+                "source_entry_id": {
+                    "name": "ID des Legacy-Quell-Konfigurationseintrags",
+                    "description": "Optionale ID des Legacy-Eintrags von kostal_plenticore, die zur automatischen Erkennung von Paaren verwendet wird."
+                },
+                "include_auto_map": {
+                    "name": "Automatische Zuordnung einbeziehen",
+                    "description": "Alt/Neu-Paare automatisch anhand doppelter eindeutiger IDs erkennen."
+                },
+                "entity_map": {
+                    "name": "Manuelle Zuordnung",
+                    "description": "Optionale Liste manueller Paare aus alter/neuer Entitäts-ID, die beim Kopieren/Zusammenführen einbezogen werden. Jeder Eintrag muss die Schlüssel 'old_entity_id' und 'new_entity_id' enthalten."
+                },
+                "dry_run": {
+                    "name": "Probelauf",
+                    "description": "Nur Vorschau (keine Datenbankänderungen). Standardmäßig true."
+                },
+                "confirmation_code": {
+                    "name": "Bestätigungscode",
+                    "description": "Code, der in der persistenten Benachrichtigung für den abgesicherten Anwendungsmodus angezeigt wird."
+                },
+                "final_confirm": {
+                    "name": "Endgültige Bestätigung",
+                    "description": "Beim dritten Aufruf auf true setzen, um den abgesicherten Anwendungsmodus auszuführen."
+                }
+            }
+        },
+        "scan_orphan_history": {
+            "name": "Verwaisten Recorder-Verlauf durchsuchen",
+            "description": "Rein lesende Suche: findet entity_ids in der Recorder-Datenbank, die von der entfernten Legacy-Integration kostal_plenticore stammen, aber keine aktuelle Bindung in der Entitätsregistrierung haben. Erstellt eine persistente Benachrichtigung mit vorgeschlagenen Zuordnungen zu aktuellen kostal_kore-Entitäten. Schreibt niemals in die Datenbank."
+        },
+        "export_debug_bundle": {
+            "name": "Debug-Paket exportieren",
+            "description": "Erstellt einen vollständigen Diagnose-Snapshot (Modbus-/REST-Daten, Schreibprotokoll, Zustandsübersicht, Scheduler-Statistiken, Proxy-Status) und schreibt ihn nach kostal_kore_debug/kore_debug_<entry>_<timestamp>.json im Home Assistant-Konfigurationsverzeichnis (nicht www). Nur für Administratoren. Gibt signierte, eine Stunde gültige Download-URLs sowie Fehler als optionale Antwortdaten der Aktion zurück und erstellt eine persistente Benachrichtigung mit den Dateinamen. Die Dateien werden nach 24 Stunden gelöscht. Passwörter, Servicecodes und namentlich festgelegte sensible Felder werden vor dem Schreiben der Datei geschwärzt. Der normale Diagnose-Download der Integration enthält außerdem zwischengespeicherte Messwerte und Details zur REST-Abfrage."
+        },
+        "apply_orphan_history_mapping": {
+            "name": "Zuordnung für verwaisten Verlauf anwenden",
+            "description": "Führt verwaiste Recorder-Zeilen anhand einer vom Benutzer angegebenen Zuordnung mit aktuellen kostal_kore-Entitäten zusammen. Standardmäßig als Probelauf. Zielentitäten müssen auf der kostal_kore-Plattform registriert sein; der Schutz vor Einheitenkonflikten der Migrations-Engine gilt weiterhin.",
+            "fields": {
+                "mapping": {
+                    "name": "Zuordnung alt → neu",
+                    "description": "Dictionary, das jede verwaiste entity_id (altes Plenticore) einer aktuellen kostal_kore-entity_id zuordnet."
+                },
+                "dry_run": {
+                    "name": "Probelauf",
+                    "description": "Nur Vorschau (keine Datenbankänderungen). Standardmäßig true."
+                }
+            }
+        },
+        "communication_diagnostics": {
+            "name": "Kommunikationsdiagnose",
+            "description": "Liest den lokalen Kommunikationszustand und die Proxy-Zähler aus, ohne Geräteanfragen oder Schreibvorgänge."
+        }
+    }
+}

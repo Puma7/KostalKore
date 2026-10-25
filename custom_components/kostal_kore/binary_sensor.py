@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_MODBUS_ENABLED, DOMAIN, AddConfigEntryEntitiesCallback
 from .coordinator import PlenticoreConfigEntry
+from .naming import async_translated_adder
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up health warning binary sensors."""
+    async_add_entities = await async_translated_adder(hass, "binary_sensor", async_add_entities)
     if not entry.options.get(CONF_MODBUS_ENABLED, False):
         return
 

@@ -22,6 +22,7 @@ from .const import AddConfigEntryEntitiesCallback
 from .const_ids import STRING_FEATURE_TEMPLATE, ModuleId, SettingId, string_feature_id
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import ensure_installer_access, parse_modbus_exception
+from .naming import async_translated_adder
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -610,7 +611,7 @@ class AdvancedWriteArmSwitch(SwitchEntity):
 
     _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
-    _attr_name = "Arm Advanced Controls"
+    _english_name = "Arm Advanced Controls"
     _attr_icon = "mdi:shield-key-outline"
     _attr_entity_registry_enabled_default = False
 
@@ -667,6 +668,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add kostal plenticore Switch."""
+    async_add_entities = await async_translated_adder(hass, "switch", async_add_entities)
     _LOGGER.info("Switch platform: Starting setup")
     plenticore = entry.runtime_data
 
@@ -1032,7 +1034,7 @@ class PlenticoreDataSwitch(
         self._name = name
         self._is_on = description.is_on
         self._attr_has_entity_name = True
-        self._attr_name = name
+        self._english_name = name
         self._attr_translation_key = _normalize_translation_key(description.key)
         self.on_value = description.on_value
         self.on_label = description.on_label
@@ -1144,7 +1146,7 @@ class PlenticoreShadowMgmtSwitch(
             if isinstance(self.entity_description.name, str)
             else ""
         )
-        self._attr_name = shadow_name
+        self._english_name = shadow_name
         self._attr_unique_id = (
             f"{entry_id}_{self.MODULE_ID}_{self.SHADOW_DATA_ID}_{dc_string}"
         )

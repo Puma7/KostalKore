@@ -41,7 +41,7 @@ def entity_unique_id(entity: object) -> str:
         uid = getattr(entity, "_attr_unique_id", None)
     if uid is not None:
         return str(uid)
-    name = getattr(entity, "name", None) or getattr(entity, "_attr_name", "?")
+    name = getattr(entity, "name", None) or getattr(entity, "_english_name", "?")
     return f"<no-uid:{name}>"
 
 

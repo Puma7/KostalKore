@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 256" width="760" height="256">
+  <title>KOSTAL KORE</title>
+  <defs>
+    <linearGradient id="hex" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1565C0"/>
+      <stop offset="1" stop-color="#0B3D7A"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 12 L228.5 70 L228.5 186 L128 244 L27.5 186 L27.5 70 Z" fill="url(#hex)"/>
+  <g stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" opacity="0.92">
+    <line x1="128" y1="128" x2="128" y2="62"/>
+    <line x1="128" y1="128" x2="71" y2="161"/>
+    <line x1="128" y1="128" x2="185" y2="161"/>
+  </g>
+  <circle cx="128" cy="62" r="22" fill="#FFB300"/>
+  <rect x="52" y="146" width="38" height="30" rx="6" fill="#FFFFFF"/>
+  <rect x="90" y="155" width="5" height="12" rx="1.5" fill="#FFFFFF"/>
+  <path d="M163 163 L185 143 L207 163 Z" fill="#FFFFFF"/>
+  <rect x="170" y="160" width="30" height="22" rx="3" fill="#FFFFFF"/>
+  <circle cx="128" cy="128" r="16" fill="#FFFFFF"/>
+  <circle cx="128" cy="128" r="7" fill="#1565C0"/>
+
+  <text x="276" y="150" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="128" font-weight="700" letter-spacing="6" fill="#0B3D7A">KORE</text>
+  <text x="280" y="200" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="30" fill="#455A64">for Home Assistant</text>
+</svg>
