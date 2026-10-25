@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -68,7 +68,15 @@ async def test_current_owner_keeps_one_current_limit_alive():
         await item._run_keepalive()
     # The keepalive re-writes the current command; it is not a new one.
     item.coordinator.async_write_register.assert_awaited_once_with(
-        REG_G3_MAX_CHARGE, 5000, record_command=False)
+        REG_G3_MAX_CHARGE, 5000, record_command=False, precondition=ANY)
+    # A client retry is abandoned once a newer command or a reconnect superseded it.
+    precondition = item.coordinator.async_write_register.await_args.kwargs["precondition"]
+    assert precondition()
+    item.coordinator.command_revision = lambda name: 2
+    assert not precondition()
+    item.coordinator.command_revision = lambda name: 1
+    item.coordinator.client.connection_generation = 2
+    assert not precondition()
 
 
 @pytest.mark.asyncio

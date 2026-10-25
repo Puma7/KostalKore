@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -298,7 +298,7 @@ async def test_modbus_number_entity_paths() -> None:
     ):
         await entity._run_keepalive()
     coord.async_write_register.assert_awaited_once_with(
-        mod.REG_G3_MAX_CHARGE, 111, record_command=False)
+        mod.REG_G3_MAX_CHARGE, 111, record_command=False, precondition=ANY)
 
     entity._keepalive_value = 222
     coord.async_write_register = AsyncMock(side_effect=mod.ModbusClientError("bad"))

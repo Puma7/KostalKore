@@ -625,8 +625,15 @@ class ModbusNumberEntity(
                 try:
                     # Same command on the same connection (checked above): do
                     # not count it as a new one, the entity outcome still holds.
+                    # A client retry must not restore this value once another
+                    # command or a reconnect has superseded it.
+                    revision = self.coordinator.command_revision(self._register.name)
                     await self.coordinator.async_write_register(
                         self._register, self._keepalive_value, record_command=False,
+                        precondition=lambda: (
+                            self.coordinator.client.connection_generation == self._keepalive_generation
+                            and self.coordinator.command_revision(self._register.name) == revision
+                        ),
                     )
                     _LOGGER.debug(
                         "G3 keepalive: re-wrote %s = %s",
