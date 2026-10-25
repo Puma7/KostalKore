@@ -12,6 +12,7 @@ from typing import Any, Final, cast
 
 from aiohttp.client_exceptions import ClientError
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -99,6 +100,13 @@ MODBUS_DIAGNOSTIC_SENSORS: Final[tuple[tuple[str, str, str | None], ...]] = (
     ("pm_l3_apparent", "Power Meter L3 Apparent Power (Modbus)", "VA"),
     ("pssb_fuse_state", "PSSB Fuse State (Modbus)", None),
     ("battery_ready_flag", "Battery Ready Flag (Modbus)", None),
+)
+# Inverter battery energy counters (Wh). 1046 counts on the battery (DC) side;
+# 1054 is documented as the AC charge energy from the grid. Over a night with
+# no PV their deltas give the grid-charge conversion efficiency.
+MODBUS_ENERGY_SENSORS: Final[tuple[tuple[str, str], ...]] = (
+    ("total_dc_charge", "Battery DC Charge Energy Total (Modbus)"),
+    ("total_ac_charge_grid", "Battery AC Charge Energy from Grid Total (Modbus)"),
 )
 KSEM_DIAGNOSTIC_SENSORS: Final[tuple[tuple[str, str, str | None], ...]] = (
     ("active_power_import_w", "KSEM Active Power Import", UnitOfPower.WATT),
@@ -1830,7 +1838,7 @@ async def async_setup_entry(
 
     modbus_coordinator = entry_store.get("modbus_coordinator") if entry_store else None
     if modbus_coordinator is not None:
-        modbus_diag_entities = [
+        modbus_diag_entities: list[SensorEntity] = [
             ModbusDiagnosticSensor(
                 modbus_coordinator,
                 entry.entry_id,
@@ -1841,6 +1849,13 @@ async def async_setup_entry(
             )
             for key, name, unit in MODBUS_DIAGNOSTIC_SENSORS
         ]
+        modbus_diag_entities.extend(
+            ModbusEnergySensor(
+                modbus_coordinator, entry.entry_id, plenticore.device_info,
+                key=key, name=name,
+            )
+            for key, name in MODBUS_ENERGY_SENSORS
+        )
         log_entity_batch(
             entry_title=entry.title,
             platform="sensor",
@@ -2465,6 +2480,65 @@ class ModbusDiagnosticSensor(
         if value is None:
             return None
         return cast(StateType, value)
+
+
+class ModbusEnergySensor(
+    CoordinatorEntity[ModbusDataUpdateCoordinator], RestoreSensor
+):
+    """Lifetime energy counter read from a Modbus register (Wh → kWh).
+
+    A counter never runs backwards. A 0 or lower reading (e.g. a read fault
+    during an inverter-internal error) would look like a meter reset to the
+    statistics and double-count the whole total, so the last good value is
+    kept instead. That value survives a restart, so a low first reading after
+    a reload is not accepted either.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 2
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: ModbusDataUpdateCoordinator,
+        entry_id: str,
+        device_info: DeviceInfo,
+        *,
+        key: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry_id}_modbus_energy_{key}"
+        self._attr_device_info = device_info
+        self._last_kwh: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_sensor_data()
+        if last is None:
+            return
+        try:
+            restored = float(last.native_value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(restored) and restored > 0:
+            self._last_kwh = max(restored, self._last_kwh or 0.0)
+
+    @property
+    def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
+        data = self.coordinator.data
+        raw = data.get(self._key) if data is not None else None
+        try:
+            kwh = float(raw) / 1000 if raw is not None else math.nan
+        except (TypeError, ValueError):
+            kwh = math.nan
+        if math.isfinite(kwh) and kwh > 0 and (self._last_kwh is None or kwh >= self._last_kwh):
+            self._last_kwh = kwh
+        return self._last_kwh
 
 
 class KsemDiagnosticSensor(

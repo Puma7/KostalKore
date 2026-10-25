@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,11 +21,14 @@ def entity():
     result._keepalive_value, result._keepalive_generation = 5000, 1
     result._keepalive_incidents = 0
     result._keepalive_task = None
+    result._last_command = None
+    result._ignored_baseline = None
     result._get_keepalive_interval = lambda: 1
     result.coordinator = SimpleNamespace(
         client=SimpleNamespace(connected=True, connection_generation=1), last_update_success=True,
         slow_poll_stale=False, communication=SimpleNamespace(faults=(), incidents=0),
         last_commanded=lambda name: 5000, async_write_register=AsyncMock(),
+        command_revision=lambda name: 1,
     )
     return result
 
@@ -58,13 +61,23 @@ async def test_lost_lease_prevents_stale_keepalive_writes(failure):
 async def test_current_owner_keeps_one_current_limit_alive():
     item = entity()
 
-    async def accepted(*args):
+    async def accepted(*args, **kwargs):
         item._keepalive_value = None
 
     item.coordinator.async_write_register.side_effect = accepted
     with patch("custom_components.kostal_kore.modbus_number.asyncio.sleep", AsyncMock()):
         await item._run_keepalive()
-    item.coordinator.async_write_register.assert_awaited_once_with(REG_G3_MAX_CHARGE, 5000)
+    # The keepalive re-writes the current command; it is not a new one.
+    item.coordinator.async_write_register.assert_awaited_once_with(
+        REG_G3_MAX_CHARGE, 5000, record_command=False, precondition=ANY)
+    # A client retry is abandoned once a newer command or a reconnect superseded it.
+    precondition = item.coordinator.async_write_register.await_args.kwargs["precondition"]
+    assert precondition()
+    item.coordinator.command_revision = lambda name: 2
+    assert not precondition()
+    item.coordinator.command_revision = lambda name: 1
+    item.coordinator.client.connection_generation = 2
+    assert not precondition()
 
 
 @pytest.mark.asyncio

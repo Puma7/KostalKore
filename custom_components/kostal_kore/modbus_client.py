@@ -126,6 +126,37 @@ class ModbusClientError(Exception):
     """Base error for Modbus client operations."""
 
 
+READBACK_ABOVE_COMMAND: Final[str] = "above_command"
+READBACK_BELOW_COMMAND: Final[str] = "below_command"
+READBACK_UNREADABLE: Final[str] = "unreadable"
+
+
+class ReadbackUnconfirmedError(ModbusClientError):
+    """The inverter acknowledged a write, but reading it back did not confirm it.
+
+    ``outcome`` tells a caller what was read instead, without parsing the
+    message: ``above_command`` (e.g. a forced charge lifted REG 1038 to the
+    inverter maximum), ``below_command`` (e.g. an effective BMS limit under
+    the command) or ``unreadable`` (no trustworthy read-back). ``observed`` is
+    the last value read, ``None`` when unreadable.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        register: str,
+        commanded: float,
+        observed: float | None,
+        outcome: str,
+    ) -> None:
+        super().__init__(message)
+        self.register = register
+        self.commanded = commanded
+        self.observed = observed
+        self.outcome = outcome
+
+
 class ModbusConnectionError(ModbusClientError):
     """Raised when the Modbus TCP connection fails."""
 

@@ -606,6 +606,7 @@ def test_modbus_coordinator_write_hook_logs_ok(monkeypatch):
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
+    coord._command_revision = {}
 
     from custom_components.kostal_kore.modbus_registers import Access
     reg = MagicMock()
@@ -667,6 +668,7 @@ def test_modbus_coordinator_write_register_honors_audit_source():
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
+    coord._command_revision = {}
 
     reg = MagicMock()
     reg.access = Access.RW
@@ -727,6 +729,7 @@ def test_modbus_coordinator_write_by_address_logs_ok():
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
+    coord._command_revision = {}
 
     asyncio.get_event_loop().run_until_complete(
         coord.async_write_by_address(1034, 80, audit_source="proxy_fc06")

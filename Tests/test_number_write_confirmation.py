@@ -49,6 +49,7 @@ async def test_confirmed_readable_limit_succeeds():
 ])
 async def test_an_ignored_single_step_is_not_confirmation(register, requested, observed):
     coord = _coord()
+    coord.last_commanded = MagicMock(return_value=observed)  # still the old command
     e = entity(coord)
     e._register = register
     coord.client.read_register = AsyncMock(return_value=observed)
@@ -170,6 +171,7 @@ async def test_read_only_command_is_not_reported_as_success():
 @pytest.mark.parametrize("cyclic", [False, True])
 async def test_newer_refresh_must_still_confirm_the_requested_limit(feedback, cyclic):
     coord = _coord()
+    coord.last_commanded = MagicMock(return_value=1900)  # 1900 is the old command
     coord.client.read_register = AsyncMock(return_value=2000)
     e = entity(coord)
     if cyclic:

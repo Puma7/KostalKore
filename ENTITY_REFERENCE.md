@@ -140,11 +140,11 @@ kann sein Wert unbekannt sein, da KORE diesen Sollwert nicht zyklisch ausliest.
 | `total_home_grid` | 112 | Wh | Gesamter Hausverbrauch aus Netz (kumulativ). |
 | `total_home_pv` | 114 | Wh | Gesamter Hausverbrauch aus PV (kumulativ). |
 | `total_home_consumption` | 118 | Wh | Gesamter Hausverbrauch aus allen Quellen (Batterie + Netz + PV). |
-| `total_dc_charge` | 1046 | Wh | Gesamte DC-seitige Ladeenergie (PV → Batterie). |
+| `total_dc_charge` | 1046 | Wh | Gesamte DC-seitige Ladeenergie in die Batterie (aus PV und Netz). Sensor `Battery DC Charge Energy Total (Modbus)` in kWh. |
 | `total_dc_discharge` | 1048 | Wh | Gesamte DC-seitige Entladeenergie (Batterie → Inverter). |
 | `total_ac_charge` | 1050 | Wh | Gesamte AC-seitige Ladeenergie (Netz/PV → Batterie, AC-gemessen). |
 | `total_ac_discharge` | 1052 | Wh | Gesamte AC-seitige Entladeenergie (Batterie → Netz). |
-| `total_ac_charge_grid` | 1054 | Wh | Gesamte Ladeenergie aus dem Netz (Netzladung). |
+| `total_ac_charge_grid` | 1054 | Wh | Laut KOSTAL-Doku die AC-seitige Ladeenergie aus dem Netz (*Total AC charge energy (grid to battery)*). Sensor `Battery AC Charge Energy from Grid Total (Modbus)` in kWh. In einer Nacht ohne PV ergeben ΔREG 1046 / ΔREG 1054 den Wirkungsgrad der Netzladung. Dass 1054 wirklich die AC-Seite ist, ist noch nicht gegen einen Zähler bestätigt (HV9). |
 | `total_dc_pv_energy` | 1056 | Wh | Gesamte DC-Energie aller PV-Eingänge (Summe PV1+PV2+PV3). |
 | `total_dc_pv1` | 1058 | Wh | Gesamte DC-Energie von PV-String 1. |
 | `total_dc_pv2` | 1060 | Wh | Gesamte DC-Energie von PV-String 2. |
@@ -170,8 +170,8 @@ kann sein Wert unbekannt sein, da KORE diesen Sollwert nicht zyklisch ausliest.
 | Entity | Register | Einheit | Bereich | Beschreibung |
 |---|---|---|---|---|
 | **Battery Charge Power (Modbus)** | 1034 | W | -MaxPower..+MaxPower | DC-seitige Batterie-Ladeleistung. **Negativ = Laden**, positiv = Entladen. Beispiel: -5000 = Laden mit 5kW. Erfordert "Extern über Protokoll (Modbus TCP)" im Inverter-WebUI. |
-| **Battery Max Charge Limit (Modbus)** | 1038 | W | 0..MaxPower | Maximale Ladeleistung der Batterie begrenzen. Wert wird vom BMS-Limit (battery_max_charge_hw) nach oben begrenzt. |
-| **Battery Max Discharge Limit (Modbus)** | 1040 | W | 0..MaxPower | Maximale Entladeleistung begrenzen. 0 = Entladung deaktiviert. |
+| **Battery Max Charge Limit (Modbus)** | 1038 | W | 0..MaxPower | Maximale Ladeleistung der Batterie begrenzen. Wert wird vom BMS-Limit (battery_max_charge_hw) nach oben begrenzt. **Gelesen wird auf einem G3 das wirksame Limit, nicht der Befehl** (Nacht 24./25.10.2026): 1000 W liest sich als 997,9–999,9 W; **Battery Manual Charge** (Zwangsladung) hebt es auf das Wechselrichter-Maximum (~21,4 kW); bei abgeschalteter Ladung liest es 0; kurz vor Vollladung senkt das BMS es (245 W, 195 W); ein angehobenes Limit holt die Anzeige erst nach einiger Zeit ein. Der Zustand der Entity ist deshalb nicht der letzte Befehl. Attribute: `last_commanded_value`, `last_command_outcome` (`confirmed`, `limited`, `above_command`, `below_command`, `unreadable`, `invalidated`), `last_command_readback`. Liest es **unter** dem Befehl, gilt der Befehl als angewendet und vom BMS begrenzt (`limited`, HV8). Nur wenn es darüber liest (Zwangsladung), nicht lesbar ist oder ein angehobenes Limit noch den vorigen Befehl liest (ignoriert), wirft der Schreibvorgang `ReadbackUnconfirmedError` mit `outcome`, `commanded` und `observed`. |
+| **Battery Max Discharge Limit (Modbus)** | 1040 | W | 0..MaxPower | Maximale Entladeleistung begrenzen. 0 = Entladung deaktiviert. Gelesen wird wie bei 1038 das wirksame Limit: kurz vor leerer Batterie senkt das BMS es; ein Wert unter dem Befehl gilt als angewendet (`limited`). |
 | **Battery Min SoC (Modbus)** | 1042 | % | 5..100 | Minimaler Ladezustand. Batterie wird nicht unter diesen Wert entladen. 5% Minimum zum Schutz vor Tiefentladung. |
 | **Battery Max SoC (Modbus)** | 1044 | % | 5..100 | Maximaler Ladezustand. Batterie wird nicht über diesen Wert geladen. |
 | **Active Power Setpoint (Modbus)** | 533 | % | 1..100 | **Einspeisebegrenzung / Wirkleistungsbegrenzung** des Wechselrichter-**Ausgangs** (Kostal-natives Äquivalent zu SunSpec Model 123 `WMaxLimPct`). **100% = keine Begrenzung** (volle Einspeisung), <100% drosselt die AC-Ausgangsleistung. **Minimum 1%** — echtes 0% (Null-Einspeisung) ist hier nicht erreichbar; dafür REST `ActivePower:ExtCtrlP:P`=0 oder ein Watt-Limit nutzen. **Flüchtig**: der Wechselrichter verwirft den Wert bei Neustart/Reset und geht auf volle Leistung zurück (fail-open, kein Keepalive nötig). Nicht mit dem *Grid Feed-In Optimizer* verwechseln (der begrenzt die Batterie**ladung** via Reg 1038, nicht den Ausgang) und nicht mit dem §14a-**Import**-Limit (`Inverter:ActivePowerConsumLimitation`). Attribute: `curtailment_active`, `at_full_power`. Gültig auf G3 ab FW 3.04.01. |

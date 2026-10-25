@@ -147,6 +147,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # generation is unchanged — a reconnect may mean the inverter reset and
         # discarded its volatile setpoints (see last_commanded()).
         self._last_commanded: dict[str, tuple[float, int]] = {}
+        self._command_revision: dict[str, int] = {}
         # Observations are separate from optimistic command/entity state. A
         # retained slow value or successful write never refreshes this cache.
         self._proxy_observations: dict[str, tuple[Any, float, int]] = {}
@@ -262,6 +263,14 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return value
 
+    def command_revision(self, name: str) -> int:
+        """Count of commands recorded for a register on any write path.
+
+        Two writes of the same value are different commands; this tells them
+        apart where ``last_commanded`` cannot.
+        """
+        return self._command_revision.get(name, 0)
+
     def _record_commanded(self, name: str, value: Any) -> None:
         """Cache a successfully-written value tagged with the current connection
         generation; non-numeric writes are dropped.
@@ -271,6 +280,7 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         receives ``int(80.5) == 80``), so a fractional command must not be
         reported back as the un-truncated value the inverter never applied.
         """
+        self._command_revision[name] = self._command_revision.get(name, 0) + 1
         try:
             fval = float(value)
         except (TypeError, ValueError):
@@ -658,12 +668,15 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         audit_source: str = "modbus_coord",
         precondition: Callable[[], bool] | None = None,
+        record_command: bool = True,
     ) -> None:
         """Write a value to a control register with safety validation.
 
         audit_source lets callers (MQTT bridge, proxy) tag the event so the
         write-audit log distinguishes origin paths. precondition is checked
         before every client retry (see KostalModbusClient.write_register).
+        record_command=False is for a re-write of the command already
+        recorded (the G3 keepalive): it is not a new command.
         """
         if register.access != Access.RW:
             raise ValueError(f"Register {register.name} is read-only")
@@ -682,7 +695,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if register in CONTROL_READBACK_REGISTERS:
                 # The next refresh must read the device, not retain the old limit.
                 self._slow_tick = 5
-            self._record_commanded(register.name, value)
+            if record_command:
+                self._record_commanded(register.name, value)
             _LOGGER.info(
                 "Wrote %s = %s to inverter via Modbus", register.name, value
             )

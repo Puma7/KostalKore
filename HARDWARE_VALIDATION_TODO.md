@@ -75,6 +75,25 @@ against your FW 3.06.10 G3.
   extracted hostname value (not the raw settings dict, so no `{"Hostname":…}` names), and the slow
   settings read at setup is timeout-protected (`get_hostname_id` via `asyncio.wait_for`).
 
+- **HV8 — What do 1038 (and 1040) return when read on a G3?** Night 24/25 Oct 2026: 1038
+  read 21 460 W right after `Battery:ManualCharge` = 1, 0 W after it was switched off, 245/195 W
+  near full charge and 52.6 W a few seconds after restoring 12 540 W (which then read back a
+  minute later). That fits "the limit in effect" (min of command, BMS limit; lifted by a forced
+  charge), not the stored command. Confirm with the WebUI and the BMS max-charge register, and check
+  1040 the same way. → Decides whether a read below the command may count as applied (today it
+  fails with `outcome = below_command`) and how long KORE should wait after lifting a limit.
+  **Answered 2026-10-25 (owner, G3):** yes — the BMS lowers the charge limit as the battery
+  fills and the discharge limit as it empties, so 1038/1040 read min(command, BMS limit). A read
+  below the command now counts as applied (`limited`); a raised limit that still reads the
+  previous command still fails as ignored. Still open: whether the G3 cyclic limits 1280/1282
+  read back the same way (they keep exact confirmation), and how long the read lags a raise.
+- **HV9 — Which battery charge counters are AC and which are DC?** `Grid2Bat_P` tracks `Battery
+  Power` within 1-2 % during night charging, so it is DC. Compare over one night without PV:
+  REG 1054 (`total_ac_charge_grid`), REG 1050 (`total_ac_charge`), REG 1046 (`total_dc_charge`),
+  REST `Statistic:EnergyChargeGrid:Total` and the grid meter import minus home consumption. →
+  Decides whether `Total Grid Consumption` should use the AC-side counter so it includes the
+  conversion loss.
+
 ---
 
 ## Deferred work items
