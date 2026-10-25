@@ -58,6 +58,10 @@ Assistant). For a real Home Assistant with an inverter emulator, see the lab in
   `translations/en.json` (services come from `services.yaml`), then add the
   German text to `translations/de.json`. The tests fail if a language misses a
   key or a placeholder.
+- Some entities carry a fixed `translation_key` (from their description or
+  built from the API key). The sync script keeps the text of such a key as it
+  is, so when you rename one of these entities, also change its entry in
+  `strings.json` and in every `translations/*.json`.
 - To add a language, copy `translations/en.json` to `translations/<code>.json`
   and translate the values; keep the keys and the `{placeholders}`.
 - Developer notes (`docs/development/`) are English only.
@@ -96,7 +100,10 @@ deutsch (`docs/de/`) mit gleichen Dateinamen, ebenso `README.md` und
 `README.de.md`. Ändere beide oder nenne im Pull Request, welche Übersetzung noch
 fehlt. Entitätsnamen stehen englisch im Code; nach dem Anlegen oder Umbenennen
 einer Entität `python scripts/sync_translations.py --write` ausführen und den
-deutschen Text in `translations/de.json` ergänzen. Für eine neue Sprache
+deutschen Text in `translations/de.json` ergänzen. Hat die Entität einen festen
+`translation_key` (aus ihrer Beschreibung oder aus dem API-Schlüssel gebildet),
+behält das Sync-Skript dessen Text bei; beim Umbenennen dann den Eintrag in
+`strings.json` und in allen `translations/*.json` mit ändern. Für eine neue Sprache
 `translations/en.json` nach `translations/<code>.json` kopieren und die Werte
 übersetzen; Schlüssel und `{Platzhalter}` bleiben gleich. Die Tests schlagen
 fehl, wenn einer Sprache ein Schlüssel oder Platzhalter fehlt.

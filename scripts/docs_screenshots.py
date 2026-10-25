@@ -45,7 +45,7 @@ def save(png: bytes, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = Image.open(io.BytesIO(png))
     image.save(path, optimize=True)
-    print(f"wrote {path.relative_to(REPO)}")
+    print(f"wrote {path.relative_to(REPO) if path.is_relative_to(REPO) else path}")
 
 
 class Shooter:
@@ -91,55 +91,63 @@ async def main() -> None:
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(executable_path=args.chromium)
-        original: tuple[str, Any] | None = None
-        for lang in args.lang:
-            context = await browser.new_context(
-                viewport={"width": WIDTH, "height": 900}, device_scale_factor=1.5, color_scheme="light",
-                locale=LOCALES[lang], timezone_id="Europe/Berlin")
-            await context.add_init_script(
-                f"localStorage.setItem('hassTokens', {json.dumps(json.dumps(tokens))});"
-                "localStorage.setItem('dockedSidebar', '\"docked\"');"
-                f"localStorage.setItem('selectedLanguage', '\"{lang}\"');" + HELPERS)
-            page = await context.new_page()
-            shooter = Shooter(page, base, args.out / lang)
-            await shooter.goto("/config/integrations/dashboard", 1000)
-            entry = next(e for e in await shooter.ws({"type": "config_entries/get", "domain": DOMAIN}))
-            if original is None:
-                original = ((await shooter.ws({"type": "get_config"}))["language"],
-                            (await shooter.ws({"type": "frontend/get_user_data", "key": "language"}))["value"])
-            await shooter.set_language(lang, entry["entry_id"])
+        original: tuple[str, Any, str] | None = None
+        try:
+            for lang in args.lang:
+                context = await browser.new_context(
+                    viewport={"width": WIDTH, "height": 900}, device_scale_factor=1.5, color_scheme="light",
+                    locale=LOCALES[lang], timezone_id="Europe/Berlin")
+                await context.add_init_script(
+                    f"localStorage.setItem('hassTokens', {json.dumps(json.dumps(tokens))});"
+                    "localStorage.setItem('dockedSidebar', '\"docked\"');"
+                    f"localStorage.setItem('selectedLanguage', '\"{lang}\"');" + HELPERS)
+                page = await context.new_page()
+                shooter = Shooter(page, base, args.out / lang)
+                await shooter.goto("/config/integrations/dashboard", 1000)
+                entry = next(e for e in await shooter.ws({"type": "config_entries/get", "domain": DOMAIN}))
+                if original is None:
+                    original = ((await shooter.ws({"type": "get_config"}))["language"],
+                                (await shooter.ws({"type": "frontend/get_user_data", "key": "language"}))["value"],
+                                entry["entry_id"])
+                await shooter.set_language(lang, entry["entry_id"])
 
-            await shooter.goto(f"/config/integrations/integration/{DOMAIN}")
-            await shooter.shot("integration", 560)
+                await shooter.goto(f"/config/integrations/integration/{DOMAIN}")
+                await shooter.shot("integration", 560)
 
-            devices = [d for d in await shooter.ws({"type": "config/device_registry/list"})
-                       if entry["entry_id"] in d["config_entries"]]
-            device = max(devices, key=lambda d: d.get("name_by_user") is None and d.get("model") is not None)
-            await shooter.goto(f"/config/devices/device/{device['id']}", 4000)
-            await shooter.shot("device", 900)
+                devices = [d for d in await shooter.ws({"type": "config/device_registry/list"})
+                           if entry["entry_id"] in d["config_entries"]]
+                device = max(devices, key=lambda d: d.get("name_by_user") is None and d.get("model") is not None)
+                await shooter.goto(f"/config/devices/device/{device['id']}", 4000)
+                await shooter.shot("device", 900)
 
-            registry = await shooter.ws({"type": "config/entity_registry/list"})
-            limit = next((e["entity_id"] for e in registry if e["platform"] == DOMAIN
-                          and e["entity_id"].endswith("battery_max_charge_limit_modbus")), None)
-            if limit:
-                await page.evaluate("""(id) => document.querySelector('home-assistant').dispatchEvent(
-                    new CustomEvent('hass-more-info', {detail: {entityId: id}, bubbles: true, composed: true}))""", limit)
-                await page.wait_for_timeout(2500)
-                await shooter.shot("battery-limit", 900)
-            await context.close()
+                registry = await shooter.ws({"type": "config/entity_registry/list"})
+                limit = next((e["entity_id"] for e in registry if e["platform"] == DOMAIN
+                              and e["entity_id"].endswith("battery_max_charge_limit_modbus")), None)
+                if limit:
+                    await page.evaluate("""(id) => document.querySelector('home-assistant').dispatchEvent(
+                        new CustomEvent('hass-more-info', {detail: {entityId: id}, bubbles: true, composed: true}))""", limit)
+                    await page.wait_for_timeout(2500)
+                    await shooter.shot("battery-limit", 900)
+                await context.close()
+        finally:
+            if original is not None:  # leave the instance as it was found, also after an error
+                await restore(browser, base, tokens, args.out, original)
+            await browser.close()
 
-        if original is not None:  # leave the instance as it was found
-            context = await browser.new_context()
-            await context.add_init_script(f"localStorage.setItem('hassTokens', {json.dumps(json.dumps(tokens))});" + HELPERS)
-            page = await context.new_page()
-            shooter = Shooter(page, base, args.out)
-            await shooter.goto("/config/integrations/dashboard", 1000)
-            core_language, user_language = original
-            await shooter.ws({"type": "config/core/update", "language": core_language})
-            if isinstance(user_language, dict):
-                await shooter.ws({"type": "frontend/set_user_data", "key": "language", "value": user_language})
-        await browser.close()
 
+async def restore(browser: Any, base: str, tokens: dict[str, Any], out: Path,
+                  original: tuple[str, Any, str]) -> None:
+    """Set the server and user language back and reload the entry under it."""
+    core_language, user_language, entry_id = original
+    context = await browser.new_context()
+    await context.add_init_script(f"localStorage.setItem('hassTokens', {json.dumps(json.dumps(tokens))});" + HELPERS)
+    shooter = Shooter(await context.new_page(), base, out)
+    await shooter.goto("/config/integrations/dashboard", 1000)
+    await shooter.ws({"type": "frontend/set_user_data", "key": "language", "value": user_language})
+    await shooter.ws({"type": "config/core/update", "language": core_language})
+    await shooter.page.evaluate(
+        "(id) => __hass().callApi('POST', `config/config_entries/entry/${id}/reload`)", entry_id)
+    await context.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
