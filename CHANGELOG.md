@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Docs: `Grid to Battery Power` (`Grid2Bat_P`) is the battery's DC power split
+  by source, not the AC power drawn from the grid (it tracks `Battery Power`
+  within 1-2 % during night charging). `Total Grid Consumption` is therefore
+  likely to miss the grid-charge conversion loss; documented, not yet changed
+  (HARDWARE_VALIDATION_TODO HV9).
+
 ### Fixed
 - Modbus power-limit commands (e.g. REG 1038) failed as "Readback is
   unconfirmed" although the inverter applied them: a G3 reads 1000 W back as
@@ -76,6 +83,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export allowlisted cached inverter firmware, battery management mode and
   finite numeric battery-control settings with per-field freshness. Exporting
   does not change control settings or add polling demand.
+- An unconfirmed Modbus limit write now raises `ReadbackUnconfirmedError`
+  (still a `ModbusClientError`, message unchanged at the start) with
+  `commanded`, `observed` and `outcome` (`above_command`, `below_command`,
+  `unreadable`). Callers can tell a limit lifted by a forced charge from an
+  effective limit below the command without parsing the message. The log
+  line names the direction too (Puma7/KostalKore#87).
+- Modbus number entities expose `last_commanded_value` and, for a write made
+  through the entity, `last_command_outcome` and `last_command_readback`. On a
+  G3 the state of `Battery Max Charge Limit (Modbus)` (REG 1038) is the limit
+  in effect, not the command: a forced charge (Battery Manual Charge) lifts it
+  to the inverter maximum (~21.4 kW), the BMS lowers it near full charge, and
+  it reads 0 while charging is off.
+- Sensors `Battery DC Charge Energy Total (Modbus)` (REG 1046) and `Battery AC
+  Charge Energy from Grid Total (Modbus)` (REG 1054), in kWh with
+  `total_increasing`. A 0 or lower reading keeps the last total, so a read
+  fault cannot look like a meter reset.
 
 ### Fixed
 - Keep safety state/icon property reads side-effect free. One active alert no

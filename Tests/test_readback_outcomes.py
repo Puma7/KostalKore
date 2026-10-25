@@ -1,0 +1,138 @@
+"""REG 1038 reads the limit in effect, not the command (Puma7/KostalKore#87)."""
+
+from __future__ import annotations
+
+import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from custom_components.kostal_kore import modbus_number as mod
+from custom_components.kostal_kore import sensor as sensor_mod
+from custom_components.kostal_kore.modbus_client import ModbusClientError, ReadbackUnconfirmedError
+from Tests.test_wave9_modbus_number_coverage import _coord, _device_info
+
+
+def _limit_entity(coord, register=mod.REG_BAT_MAX_CHARGE_LIMIT):
+    entity = mod.ModbusNumberEntity(
+        coordinator=coord, register=register, name="Limit", icon="mdi:battery",
+        min_value=0, max_value=12540, step=100, unit="W", device_class=None,
+        entity_category=None, entry_id="night", device_info=_device_info(),
+    )
+    # The coordinator records every command; the fixture mirrors that.
+    coord._commanded = None
+    coord.async_write_register = AsyncMock(
+        side_effect=lambda _reg, value: setattr(coord, "_commanded", value))
+    coord.last_commanded = MagicMock(side_effect=lambda _name: coord._commanded)
+    return entity
+
+
+# Read-backs from the night of 24/25 October 2026.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("written", "observed", "outcome"), [
+    (1000, 21460.23046875, mod.READBACK_ABOVE_COMMAND),    # Battery Manual Charge on
+    (1000, 0.0, mod.READBACK_BELOW_COMMAND),               # ManualCharge off again
+    (1000, 244.8936004638672, mod.READBACK_BELOW_COMMAND),  # BMS near full charge
+    (12540, 52.64067840576172, mod.READBACK_BELOW_COMMAND),  # restore, limit not yet lifted
+])
+async def test_unconfirmed_readback_says_which_way_it_is_off(written, observed, outcome, caplog) -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=observed)
+    entity = _limit_entity(coord)
+    with caplog.at_level(logging.WARNING), pytest.raises(ReadbackUnconfirmedError) as err:
+        await entity.async_set_native_value(written)
+    assert isinstance(err.value, ModbusClientError)
+    assert str(err.value).startswith("Readback is unconfirmed for bat_max_charge_limit")
+    assert (err.value.register, err.value.commanded, err.value.observed, err.value.outcome) == (
+        "bat_max_charge_limit", written, observed, outcome)
+    assert mod._READBACK_HINTS[outcome] in caplog.text
+    assert entity.extra_state_attributes == {
+        "last_commanded_value": written,
+        "last_command_outcome": outcome,
+        "last_command_readback": observed,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unreadable_readback_is_its_own_outcome() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(side_effect=ModbusClientError("Illegal address"))
+    entity = _limit_entity(coord)
+    with pytest.raises(ReadbackUnconfirmedError) as err:
+        await entity.async_set_native_value(1000)
+    assert (err.value.observed, err.value.outcome) == (None, mod.READBACK_UNREADABLE)
+    assert "read n/a" in str(err.value)
+    assert entity.extra_state_attributes["last_command_outcome"] == mod.READBACK_UNREADABLE
+
+
+@pytest.mark.asyncio
+async def test_cyclic_limit_raises_the_typed_error_too() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=0.0)
+    entity = _limit_entity(coord, register=mod.REG_G3_MAX_CHARGE)
+    with pytest.raises(ReadbackUnconfirmedError, match="keepalive was not started") as err:
+        await entity.async_set_native_value(1000)
+    assert err.value.outcome == mod.READBACK_BELOW_COMMAND
+
+
+@pytest.mark.asyncio
+async def test_confirmed_and_invalidated_commands_are_reported() -> None:
+    coord = _coord(data={mod.REG_BAT_MAX_CHARGE_LIMIT.name: 999.0})
+    coord.client.read_register = AsyncMock(return_value=999.0)
+    entity = _limit_entity(coord)
+    assert entity.extra_state_attributes is None  # nothing commanded yet
+    await entity.async_set_native_value(1000)
+    assert entity.extra_state_attributes == {
+        "last_commanded_value": 1000,
+        "last_command_outcome": mod.COMMAND_CONFIRMED,
+        "last_command_readback": 999.0,
+    }
+
+    async def drop_link():
+        coord.client.connected = False
+
+    coord.async_refresh = AsyncMock(side_effect=drop_link)
+    with pytest.raises(ModbusClientError, match="invalidated during refresh"):
+        await entity.async_set_native_value(1000)
+    assert entity.extra_state_attributes["last_command_outcome"] == mod.COMMAND_INVALIDATED
+
+
+@pytest.mark.asyncio
+async def test_outcome_is_hidden_once_another_path_commands_a_new_value() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=0.0)
+    entity = _limit_entity(coord)
+    with pytest.raises(ReadbackUnconfirmedError):
+        await entity.async_set_native_value(1000)
+    coord._commanded = 2000.0  # e.g. a proxy or MQTT write after the entity write
+    assert entity.extra_state_attributes == {"last_commanded_value": 2000.0}
+
+
+# ---------------------------------------------------------------------------
+# 1046 / 1054 as energy sensors
+# ---------------------------------------------------------------------------
+
+
+def test_energy_counters_are_registered_for_1046_and_1054() -> None:
+    assert {key for key, _ in sensor_mod.MODBUS_ENERGY_SENSORS} == {
+        "total_dc_charge", "total_ac_charge_grid"}
+
+
+def test_energy_counter_converts_and_never_runs_backwards() -> None:
+    coord = SimpleNamespace(data=None)
+    sensor = sensor_mod.ModbusEnergySensor(
+        coord, "entry", {"identifiers": {("kostal_kore", "abc")}},
+        key="total_ac_charge_grid", name="AC charge")
+    assert sensor.unique_id == "entry_modbus_energy_total_ac_charge_grid"
+    assert sensor.native_value is None
+    coord.data = {}
+    assert sensor.native_value is None
+    coord.data = {"total_ac_charge_grid": 1_234_567.0}
+    assert sensor.native_value == pytest.approx(1234.567)
+    # Read faults and a lower reading keep the last good total.
+    for glitch in (0.0, -5.0, float("nan"), "bad", None, 1_000_000.0):
+        coord.data = {"total_ac_charge_grid": glitch}
+        assert sensor.native_value == pytest.approx(1234.567)
+    coord.data = {"total_ac_charge_grid": 1_235_000.0}
+    assert sensor.native_value == pytest.approx(1235.0)

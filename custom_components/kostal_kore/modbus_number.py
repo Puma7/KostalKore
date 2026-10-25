@@ -29,7 +29,13 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .modbus_client import ModbusClientError  # noqa: F401
+from .modbus_client import (  # noqa: F401
+    READBACK_ABOVE_COMMAND,
+    READBACK_BELOW_COMMAND,
+    READBACK_UNREADABLE,
+    ModbusClientError,
+    ReadbackUnconfirmedError,
+)
 from .modbus_coordinator import SLOW_GROUPS, ModbusDataUpdateCoordinator
 from .modbus_registers import (
     CONTROL_READBACK_REGISTERS,
@@ -63,6 +69,17 @@ READBACK_RETRY_SECONDS: Final[float] = 0.2
 # but stay below half an input step so an ignored one-step command still fails.
 READBACK_POWER_REL_TOL: Final[float] = 0.005
 READBACK_POWER_MIN_ABS_TOL_W: Final[float] = 5.0
+
+# Outcome of the last command written through the entity (state attribute).
+COMMAND_CONFIRMED: Final[str] = "confirmed"
+COMMAND_INVALIDATED: Final[str] = "invalidated"
+# Why a power limit may read back off the command (log hint). On a G3, REG
+# 1038 reads the limit in effect: a forced charge (Battery Manual Charge)
+# lifts it to the inverter maximum, the BMS lowers it near full charge.
+_READBACK_HINTS: Final[dict[str, str]] = {
+    READBACK_ABOVE_COMMAND: "reads above the command, e.g. lifted by a forced charge",
+    READBACK_BELOW_COMMAND: "reads below the command, e.g. an effective BMS limit",
+}
 
 G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_G3_MAX_CHARGE.name,
@@ -321,6 +338,8 @@ class ModbusNumberEntity(
         self._keepalive_value: float | None = None
         self._keepalive_generation: int | None = None
         self._keepalive_incidents = 0
+        # (commanded value, outcome, last read-back) of the last entity write.
+        self._last_command: tuple[float, str, float | None] | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -372,7 +391,7 @@ class ModbusNumberEntity(
         across an inverter reset).
         """
         if self._register.name != CURTAILMENT_REGISTER_NAME:
-            return None
+            return self._command_attributes()
         val = self.native_value
         return {
             "role": "feed_in_curtailment",
@@ -385,6 +404,23 @@ class ModbusNumberEntity(
             "zero_export_via_this_entity": False,
             "volatile_resets_to_full_power": True,
         }
+
+    def _command_attributes(self) -> dict[str, Any] | None:
+        """Expose the last commanded value next to the value read back.
+
+        The entity state is what the inverter reports, which for REG 1038 on
+        a G3 is the limit in effect, not the command. The outcome and the
+        read-back belong to the last write through this entity and are only
+        shown while that write is still the last command on any path.
+        """
+        commanded = self.coordinator.last_commanded(self._register.name)
+        if commanded is None:
+            return None
+        attrs: dict[str, Any] = {"last_commanded_value": commanded}
+        if self._last_command is not None and self._last_command[0] == commanded:
+            attrs["last_command_outcome"] = self._last_command[1]
+            attrs["last_command_readback"] = self._last_command[2]
+        return attrs
 
     async def async_set_native_value(self, value: float) -> None:
         """Write a new value to the Modbus register with safety validation."""
@@ -423,6 +459,7 @@ class ModbusNumberEntity(
 
         verified = False
         read_failed = False
+        observed: float | None = None
         if self._register.name != CURTAILMENT_REGISTER_NAME:
             for attempt in range(READBACK_ATTEMPTS):
                 if attempt:
@@ -442,8 +479,9 @@ class ModbusNumberEntity(
                         break
                     if attempt == READBACK_ATTEMPTS - 1:
                         _LOGGER.warning(
-                            "Read-back mismatch for %s: wrote %s, read %s",
+                            "Read-back mismatch for %s: wrote %s, read %s (%s)",
                             self._register.name, value, readback,
+                            _READBACK_HINTS[self._readback_outcome(observed, value)],
                         )
                 except Exception:
                     _LOGGER.debug("Read-back verification failed for %s", self._register.name)
@@ -451,20 +489,35 @@ class ModbusNumberEntity(
                     # do not multiply terminal failures or suppression strikes.
                     read_failed = True
                     break
+            if read_failed:
+                observed = None
 
+        outcome = self._readback_outcome(observed, value)
         if self._register.name in G3_CYCLIC_REGISTERS and not verified:
+            self._last_command = (value, outcome, observed)
             notify_control_lease_lost(getattr(self, "hass", None),
                                       getattr(self.coordinator, "_communication_entry_id", ""),
                                       control=f"modbus_{self._register.name}")
-            raise ModbusClientError("Cyclic limit readback is unconfirmed; keepalive was not started")
+            raise ReadbackUnconfirmedError(
+                "Cyclic limit readback is unconfirmed; keepalive was not started",
+                register=self._register.name, commanded=value,
+                observed=observed, outcome=outcome,
+            )
 
         if not verified and self._register.name != CURTAILMENT_REGISTER_NAME:
             # A transport acknowledgement does not establish that the inverter
             # accepted the limit. Publish a device refresh, then fail the call so
             # controllers cannot treat an ignored command as an applied limit.
+            # The outcome tells them whether the limit reads higher or lower.
+            self._last_command = (value, outcome, observed)
             if not read_failed:
                 await self.coordinator.async_request_refresh()
-            raise ModbusClientError(f"Readback is unconfirmed for {self._register.name}")
+            raise ReadbackUnconfirmedError(
+                f"Readback is unconfirmed for {self._register.name} "
+                f"(wrote {value:g}, read {'n/a' if observed is None else f'{observed:g}'}: {outcome})",
+                register=self._register.name, commanded=value,
+                observed=observed, outcome=outcome,
+            )
 
         # A debounced request may return before the actual poll. Monitored
         # controls need the completed poll and its per-register fresh cache.
@@ -487,17 +540,26 @@ class ModbusNumberEntity(
         if (self.coordinator.client.connection_generation != write_generation
                 or not self.coordinator.client.connected
                 or not self.coordinator.last_update_success or not refresh_confirmed):
+            self._last_command = (value, COMMAND_INVALIDATED, observed)
             if self._register.name in G3_CYCLIC_REGISTERS:
                 notify_control_lease_lost(getattr(self, "hass", None),
                                           getattr(self.coordinator, "_communication_entry_id", ""),
                                           control=f"modbus_{self._register.name}")
             raise ModbusClientError("Control confirmation was invalidated during refresh")
 
+        self._last_command = (value, COMMAND_CONFIRMED, observed)
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),
                                        getattr(self.coordinator, "_communication_entry_id", ""),
                                        control=f"modbus_{self._register.name}")
+
+    @staticmethod
+    def _readback_outcome(observed: float | None, value: float) -> str:
+        """Classify an unconfirmed read-back relative to the command."""
+        if observed is None:
+            return READBACK_UNREADABLE
+        return READBACK_ABOVE_COMMAND if observed > value else READBACK_BELOW_COMMAND
 
     def _readback_matches(self, observed: float, value: float) -> bool:
         """Return True if a read-back confirms the commanded value."""

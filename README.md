@@ -45,7 +45,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
 - **Grid Information**: Grid frequency, power factor, and grid connection status
 
 ### 🧮 **Calculated Sensors (New)**
-- **Total Grid Consumption**: Smart calculation of `Grid to Home + Grid to Battery`
+- **Total Grid Consumption**: Smart calculation of `Grid to Home + Grid to Battery`. The matching power sensor `Grid to Battery Power` (`Grid2Bat_P`) is measured on the battery's **DC** side, so this sum probably misses the grid-charge conversion loss (~5–8 % of the charge energy; unconfirmed, see `HARDWARE_VALIDATION_TODO.md` HV9). `Battery AC Charge Energy from Grid Total (Modbus)` (REG 1054) is the inverter's own AC-side counter.
 - **Total Battery Discharge**: Comprehensive `Battery to Home + Battery to Grid` tracking
 - **Battery Efficiency**: Real-time efficiency monitoring (`Output / Input`) in %
 - **Dashboard Ready**: Fully compatible with Home Assistant Energy Dashboard
@@ -68,6 +68,7 @@ With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, ac
   - `number.<device>_grid_feed_in_limit`
 - Control logic runs periodically and writes Modbus register `1038` (`bat_max_charge_limit`) so battery charging absorbs PV surplus above the configured feed-in cap.
 - Turning the switch OFF restores normal charging limits.
+- On a G3, reading register `1038` returns the limit **in effect**, not the last command: **Battery Manual Charge** is a forced charge that lifts it to the inverter maximum, the BMS lowers it near full charge, and it reads 0 while charging is off. The number entity's `last_commanded_value` attribute holds the command; an unconfirmed write raises `ReadbackUnconfirmedError` whose `outcome` says whether the limit reads above or below it.
 - Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations, **evcc `batteryMode`**, or the optimizer), or they can conflict. evcc's `kostal-plenticore-gen2` template (`batteryMode`) cyclically writes registers `1034`/`1038`/`1040` — the same registers KORE controls — so use **one** controller per battery. KORE rejects competing external writes with Modbus exception `0x06` while an internal controller is active.
 
 ### 🔻 Feed-In Curtailment / Wirkleistungsbegrenzung (Active Power Setpoint)
@@ -440,7 +441,7 @@ Use **Total**-Sensoren (`state_class: total_increasing`) for das HA Energy Dashb
 
 - Immer **Total**-Sensoren verwenden (nicht Day/Month/Year), da `total_increasing` keine Resets erzeugt.
 - `Energy to Grid Total` enthält **PV- und Batterie-Einspeisung** kombiniert.
-- `Total Grid Consumption Total` enthält **Netzbezug für Haus und Batterie** kombiniert.
+- `Total Grid Consumption Total` enthält **Netzbezug für Haus und Batterie** kombiniert. `Grid to Battery Power` ist die DC-Seite der Batterie; die Wandlungsverluste der Netzladung sind darin vermutlich nicht enthalten (HV9).
 - Nach Einrichtung kann es bis zu 2 Stunden dauern, bis Daten im Dashboard erscheinen.
 
 ## Debugging

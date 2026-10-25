@@ -68,6 +68,7 @@ async def test_sensor_setup_uses_modbus_dc_count_and_adds_optional_groups(hass) 
     with (
         patch.object(sensor_mod, "SENSOR_PROCESS_DATA", []),
         patch.object(sensor_mod, "MODBUS_DIAGNOSTIC_SENSORS", (("modbus_key", "Modbus Key", None),)),
+        patch.object(sensor_mod, "MODBUS_ENERGY_SENSORS", (("energy_key", "Energy Key"),)),
         patch.object(sensor_mod, "KSEM_DIAGNOSTIC_SENSORS", (("ksem_key", "Ksem Key", None),)),
         patch.object(sensor_mod, "generate_dc_sensor_descriptions", return_value=[]),
         patch.object(sensor_mod, "generate_pv_energy_sensor_descriptions", return_value=[]),
@@ -83,7 +84,8 @@ async def test_sensor_setup_uses_modbus_dc_count_and_adds_optional_groups(hass) 
     process_ctor.assert_called_once()
     assert process_ctor.call_args.args[4].seconds == sensor_mod.REST_PROCESS_POLL_SECONDS_WITH_MODBUS
     assert any(isinstance(entity, PreferredGridPowerSensor) for entity in added)
-    assert len(added) == 12
+    assert sum(isinstance(entity, sensor_mod.ModbusEnergySensor) for entity in added) == 1
+    assert len(added) == 13
 
 
 @pytest.mark.asyncio

@@ -140,11 +140,11 @@ kann sein Wert unbekannt sein, da KORE diesen Sollwert nicht zyklisch ausliest.
 | `total_home_grid` | 112 | Wh | Gesamter Hausverbrauch aus Netz (kumulativ). |
 | `total_home_pv` | 114 | Wh | Gesamter Hausverbrauch aus PV (kumulativ). |
 | `total_home_consumption` | 118 | Wh | Gesamter Hausverbrauch aus allen Quellen (Batterie + Netz + PV). |
-| `total_dc_charge` | 1046 | Wh | Gesamte DC-seitige Ladeenergie (PV → Batterie). |
+| `total_dc_charge` | 1046 | Wh | Gesamte DC-seitige Ladeenergie in die Batterie (aus PV und Netz). Sensor `Battery DC Charge Energy Total (Modbus)` in kWh. |
 | `total_dc_discharge` | 1048 | Wh | Gesamte DC-seitige Entladeenergie (Batterie → Inverter). |
 | `total_ac_charge` | 1050 | Wh | Gesamte AC-seitige Ladeenergie (Netz/PV → Batterie, AC-gemessen). |
 | `total_ac_discharge` | 1052 | Wh | Gesamte AC-seitige Entladeenergie (Batterie → Netz). |
-| `total_ac_charge_grid` | 1054 | Wh | Gesamte Ladeenergie aus dem Netz (Netzladung). |
+| `total_ac_charge_grid` | 1054 | Wh | Laut KOSTAL-Doku die AC-seitige Ladeenergie aus dem Netz (*Total AC charge energy (grid to battery)*). Sensor `Battery AC Charge Energy from Grid Total (Modbus)` in kWh. In einer Nacht ohne PV ergeben ΔREG 1046 / ΔREG 1054 den Wirkungsgrad der Netzladung. Dass 1054 wirklich die AC-Seite ist, ist noch nicht gegen einen Zähler bestätigt (HV9). |
 | `total_dc_pv_energy` | 1056 | Wh | Gesamte DC-Energie aller PV-Eingänge (Summe PV1+PV2+PV3). |
 | `total_dc_pv1` | 1058 | Wh | Gesamte DC-Energie von PV-String 1. |
 | `total_dc_pv2` | 1060 | Wh | Gesamte DC-Energie von PV-String 2. |
@@ -170,7 +170,7 @@ kann sein Wert unbekannt sein, da KORE diesen Sollwert nicht zyklisch ausliest.
 | Entity | Register | Einheit | Bereich | Beschreibung |
 |---|---|---|---|---|
 | **Battery Charge Power (Modbus)** | 1034 | W | -MaxPower..+MaxPower | DC-seitige Batterie-Ladeleistung. **Negativ = Laden**, positiv = Entladen. Beispiel: -5000 = Laden mit 5kW. Erfordert "Extern über Protokoll (Modbus TCP)" im Inverter-WebUI. |
-| **Battery Max Charge Limit (Modbus)** | 1038 | W | 0..MaxPower | Maximale Ladeleistung der Batterie begrenzen. Wert wird vom BMS-Limit (battery_max_charge_hw) nach oben begrenzt. |
+| **Battery Max Charge Limit (Modbus)** | 1038 | W | 0..MaxPower | Maximale Ladeleistung der Batterie begrenzen. Wert wird vom BMS-Limit (battery_max_charge_hw) nach oben begrenzt. **Gelesen wird auf einem G3 das wirksame Limit, nicht der Befehl** (Nacht 24./25.10.2026): 1000 W liest sich als 997,9–999,9 W; **Battery Manual Charge** (Zwangsladung) hebt es auf das Wechselrichter-Maximum (~21,4 kW); bei abgeschalteter Ladung liest es 0; kurz vor Vollladung senkt das BMS es (245 W, 195 W); ein angehobenes Limit holt die Anzeige erst nach einiger Zeit ein. Der Zustand der Entity ist deshalb nicht der letzte Befehl. Attribute: `last_commanded_value`, `last_command_outcome` (`confirmed`, `above_command`, `below_command`, `unreadable`, `invalidated`), `last_command_readback`. Ein unbestätigter Schreibvorgang wirft `ReadbackUnconfirmedError` mit `outcome`, `commanded` und `observed`. |
 | **Battery Max Discharge Limit (Modbus)** | 1040 | W | 0..MaxPower | Maximale Entladeleistung begrenzen. 0 = Entladung deaktiviert. |
 | **Battery Min SoC (Modbus)** | 1042 | % | 5..100 | Minimaler Ladezustand. Batterie wird nicht unter diesen Wert entladen. 5% Minimum zum Schutz vor Tiefentladung. |
 | **Battery Max SoC (Modbus)** | 1044 | % | 5..100 | Maximaler Ladezustand. Batterie wird nicht über diesen Wert geladen. |
