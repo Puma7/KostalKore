@@ -32,6 +32,7 @@ def _coord(
     coord.hass = SimpleNamespace()
     coord.async_add_listener = MagicMock(return_value=lambda: None)
     coord.last_commanded = MagicMock(return_value=None)
+    coord.command_revision = MagicMock(return_value=0)
     return coord
 
 

@@ -497,7 +497,7 @@ class ModbusNumberEntity(
 
         outcome = self._readback_outcome(observed, value)
         if self._register.name in G3_CYCLIC_REGISTERS and not verified:
-            self._last_command = (revision, outcome, observed)
+            self._record_last_command(revision, outcome, observed)
             notify_control_lease_lost(getattr(self, "hass", None),
                                       getattr(self.coordinator, "_communication_entry_id", ""),
                                       control=f"modbus_{self._register.name}")
@@ -512,7 +512,7 @@ class ModbusNumberEntity(
             # accepted the limit. Publish a device refresh, then fail the call so
             # controllers cannot treat an ignored command as an applied limit.
             # The outcome tells them whether the limit reads higher or lower.
-            self._last_command = (revision, outcome, observed)
+            self._record_last_command(revision, outcome, observed)
             if not read_failed:
                 await self.coordinator.async_request_refresh()
             raise ReadbackUnconfirmedError(
@@ -543,19 +543,24 @@ class ModbusNumberEntity(
         if (self.coordinator.client.connection_generation != write_generation
                 or not self.coordinator.client.connected
                 or not self.coordinator.last_update_success or not refresh_confirmed):
-            self._last_command = (revision, COMMAND_INVALIDATED, observed)
+            self._record_last_command(revision, COMMAND_INVALIDATED, observed)
             if self._register.name in G3_CYCLIC_REGISTERS:
                 notify_control_lease_lost(getattr(self, "hass", None),
                                           getattr(self.coordinator, "_communication_entry_id", ""),
                                           control=f"modbus_{self._register.name}")
             raise ModbusClientError("Control confirmation was invalidated during refresh")
 
-        self._last_command = (revision, COMMAND_CONFIRMED, observed)
+        self._record_last_command(revision, COMMAND_CONFIRMED, observed)
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),
                                        getattr(self.coordinator, "_communication_entry_id", ""),
                                        control=f"modbus_{self._register.name}")
+
+    def _record_last_command(self, revision: int, outcome: str, observed: float | None) -> None:
+        """Remember a write's outcome unless a newer write already finished first."""
+        if self._last_command is None or revision >= self._last_command[0]:
+            self._last_command = (revision, outcome, observed)
 
     @staticmethod
     def _readback_outcome(observed: float | None, value: float) -> str:

@@ -193,3 +193,17 @@ async def test_energy_counter_restores_its_total_after_a_reload(restored, expect
     ):
         await sensor.async_added_to_hass()
     assert sensor.native_value == pytest.approx(expected)
+
+
+def test_an_older_write_finishing_late_keeps_the_newer_outcome() -> None:
+    coord = _coord()
+    entity = _limit_entity(coord)
+    _command(coord, 1000)  # revision 1: older write
+    _command(coord, 2000)  # revision 2: newer write, finishes first
+    entity._record_last_command(2, mod.COMMAND_CONFIRMED, 1999.0)
+    entity._record_last_command(1, mod.READBACK_BELOW_COMMAND, 0.0)
+    assert entity.extra_state_attributes == {
+        "last_commanded_value": 2000,
+        "last_command_outcome": mod.COMMAND_CONFIRMED,
+        "last_command_readback": 1999.0,
+    }
