@@ -1,5 +1,7 @@
 # Diagnostic reports
 
+**English** · [Deutsch](../de/diagnostics.md)
+
 Prefer Home Assistant's integration diagnostic download: **Settings → Devices &
 services → Kostal KORE → entry menu → Download diagnostics**. From 3.0.8 this also
 includes `data.runtime`: cached Modbus readings with their word order and stale

@@ -32,8 +32,9 @@ CI (`.github/workflows/ci.yml`) runs the test + mypy job on a Python matrix: **3
 
 ### Notes
 - This is not a standalone application. It is a Home Assistant plugin tested entirely via pytest with mocked HA internals.
-- **Battery-control coexistence**: KORE is single-inverter and drives the battery over Modbus (REG 1034/1038, G3 1280/1282) with a 15s keepalive, arbitrated only against itself and external Modbus clients — NOT against the inverter's own firmware control. Native Smart AC Charge (default-on since FW 3.05), native scheduling/dynamic-tariff modes, MDC battery control (FW 3.06.10+), and EEBus can all fight KORE. Items needing real-hardware validation before further coexistence work are tracked in `HARDWARE_VALIDATION_TODO.md`.
+- **Battery-control coexistence**: KORE is single-inverter and drives the battery over Modbus (REG 1034/1038, G3 1280/1282) with a 15s keepalive, arbitrated only against itself and external Modbus clients — NOT against the inverter's own firmware control. Native Smart AC Charge (default-on since FW 3.05), native scheduling/dynamic-tariff modes, MDC battery control (FW 3.06.10+), and EEBus can all fight KORE. Items needing real-hardware validation before further coexistence work are tracked in `docs/development/HARDWARE_VALIDATION_TODO.md`.
 - No GUI, no dev server, no build step. The "hello world" is running the test suite successfully.
 - `main` is the default branch; all work lands via pull requests into `main` and releases are tagged from it. (`develop` is historical/stale — do not target it.)
 - `pymodbus>=3.6` is listed in `manifest.json` but not in `requirements_test.txt`; the update script installs it separately.
 - System package `python3.12-venv` is required on Ubuntu (not pre-installed on cloud VMs).
+- **Documentation layout**: user docs are bilingual with identical file names in `docs/en/` and `docs/de/` (plus `README.md` / `README.de.md`); change both languages together. Developer notes live in `docs/development/` (English only). KOSTAL's own manuals are linked, not copied into the repository.

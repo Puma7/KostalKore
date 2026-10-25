@@ -6,7 +6,7 @@ require facts that can only be confirmed on a real inverter** (a register/REST v
 a behavior, or an address that is not in any public doc KORE has). Each item lists the
 exact hardware question that unblocks it.
 
-The [firmware compatibility note](docs/FIRMWARE_COMPATIBILITY.md) records the
+The [firmware compatibility note](../en/firmware-compatibility.md) records the
 documented 1024 correction and the backward-compatible 588 expansion. KORE does
 not select a new writer or change every model's register width on update.
 Before implementing either extension, validate generation, complete firmware

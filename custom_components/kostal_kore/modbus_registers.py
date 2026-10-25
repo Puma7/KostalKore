@@ -162,7 +162,7 @@ REG_BATTERY_VOLTAGE = ModbusRegister(216, "battery_voltage", "Battery voltage", 
 # Register 588 stays UINT16/count=1 for cross-generation compatibility. G3
 # 3.07.03.27419 reintroduces a UINT32 form while explicitly retaining UINT16
 # reads. Do not switch older/unknown models to a two-register read globally.
-# See docs/FIRMWARE_COMPATIBILITY.md before adding a gated extended reader.
+# See docs/en/firmware-compatibility.md before adding a gated extended reader.
 REG_BATTERY_TYPE = ModbusRegister(588, "battery_type", "Battery Type", DataType.UINT16, 1, Access.RO, RegisterGroup.BATTERY)
 REG_BATTERY_WORK_CAPACITY = ModbusRegister(1068, "battery_work_capacity", "Battery work capacity", DataType.FLOAT32, 2, Access.RO, RegisterGroup.BATTERY, "Wh")
 REG_BATTERY_SERIAL = ModbusRegister(1070, "battery_serial", "Battery serial number", DataType.UINT32, 2, Access.RO, RegisterGroup.BATTERY)

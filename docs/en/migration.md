@@ -1,16 +1,17 @@
 # Complete migration manual (English): `kostal_plenticore` → `kostal_kore`
 
+**English** · [Deutsch](../de/migration.md)
+
 This guide documents **every** migration path in KOSTAL KORE — from simple device-page buttons to advanced **Developer Tools → Services**. It is written for beginners, advanced users, and professionals.
 
 **Quick links**
 
 | Document | Language | Content |
 |----------|----------|---------|
-| [MIGRATION_LEITFADEN.md](MIGRATION_LEITFADEN.md) | Deutsch | Vollständiger Leitfaden |
+| [migration.md (Deutsch)](../de/migration.md) | Deutsch | Vollständiger Leitfaden |
 | This guide | English | Full guide |
-| [migration_orphan_history.md](migration_orphan_history.md) | Deutsch | Profile “long-time KORE, never migrated” |
-| [../migration.md](../migration.md) | English | Compact step-by-step |
-| [../MIGRATION_ARCHITECTURE.md](../MIGRATION_ARCHITECTURE.md) | English | Technical limits / architecture |
+| [orphan-history.md](orphan-history.md) | English | Profile “long-time KORE, never migrated” |
+| [MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md) | English | Technical limits / architecture |
 
 ---
 
@@ -65,7 +66,7 @@ UI field help comes from `custom_components/kostal_kore/services.yaml`.
 
 ## 3. Path A: Device-page buttons (beginners)
 
-See [MIGRATION_LEITFADEN.md](MIGRATION_LEITFADEN.md) §3 for the same flow in German (screenshots/navigation labels may match your HA language).
+See the [German guide](../de/migration.md) §3 for the same flow in German (screenshots/navigation labels may match your HA language).
 
 **Summary**
 
@@ -116,19 +117,19 @@ For users who **never** had a legacy config entry but still have `kostal_plentic
 2. `kostal_kore.apply_orphan_history_mapping` with `dry_run: true`
 3. Apply with `dry_run: false`
 
-Details (German): [migration_orphan_history.md](migration_orphan_history.md).
+Details: [orphan-history.md](orphan-history.md).
 
 ---
 
 ## 6. Troubleshooting & FAQ
 
-See [MIGRATION_LEITFADEN.md](MIGRATION_LEITFADEN.md) §8–9 for the full tables (German). Common items:
+See the [German guide](../de/migration.md) §8–9 for the full tables (German). Common items:
 
 - **No legacy entry** → restore backup or use orphan path.
 - **0 entities migrated** → enable legacy integration; check unique_id format in logs.
 - **Automation entity IDs** → update manually after migration.
 
-Technical architecture notes: [MIGRATION_ARCHITECTURE.md](../MIGRATION_ARCHITECTURE.md).
+Technical architecture notes: [MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md).
 
 ---
 

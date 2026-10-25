@@ -1,624 +1,183 @@
 # KOSTAL KORE for Home Assistant
 
-> Powered by **KOSTAL KISS OS 2.0**
->
-> **Stable release.** Production-ready and tested on real hardware.  
-> Please report issues and attach diagnostics: <https://github.com/Puma7/Kostal/issues>
+**English** · [Deutsch](README.de.md)
 
-KOSTAL KORE is a custom Home Assistant integration for monitoring and controlling Kostal Plenticore inverters using local interfaces (REST + optional Modbus tooling).
+[![CI](https://github.com/Puma7/KostalKore/actions/workflows/ci.yml/badge.svg)](https://github.com/Puma7/KostalKore/actions/workflows/ci.yml)
+[![HACS](https://img.shields.io/badge/HACS-custom-orange.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
+[![Release](https://img.shields.io/github/v/release/Puma7/KostalKore)](https://github.com/Puma7/KostalKore/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![KOSTAL KORE plugin logo](docs/assets/kostal_kore_logo.svg)
+A custom Home Assistant integration for **KOSTAL PLENTICORE** inverters. It reads
+the inverter over its local REST API and, optionally, over Modbus TCP. With
+Modbus it can also set battery charge/discharge limits and share the inverter's
+single Modbus connection with other systems such as evcc.
 
-## Credits & Transparency
+> **Independent project.** KOSTAL KORE is a community project. It is not made,
+> endorsed or supported by KOSTAL Solar Electric GmbH. "KOSTAL" and
+> "PLENTICORE" are trademarks of their owners and are used here only to name
+> the hardware this integration talks to.
 
-- **Thank you to the original author**: This project builds on years of groundwork by `@stegm`, especially the foundational `pykoplenti` repository: <https://github.com/stegm/pykoplenti>.
-- **Why this exists as a separate line**: Scope and architecture changed heavily over time, so a clean merge back into the original repository was not feasible.
-- **Stability disclosure**: This integration is heavily vibe-coded and is **not considered 100% stable**.
-- **Real-world usage disclaimer**: It runs in `@Puma7`'s own setup (Kostal Plenticore G3 L 20kW), but that does **not** guarantee identical behavior on all hardware, firmware, or regional setups.
-- **AI disclosure**: Large parts of this codebase were generated with **Claude Opus** and **OpenAI Codex**.
-- **Human validation**: Manual checks were performed by `@Puma7`.
+## Status: what is tested, and what is not
 
-## Overview
+Please read this before you install it, especially before you enable battery
+control.
 
-This integration provides comprehensive monitoring and control capabilities for Kostal Plenticore solar inverters, allowing you to:
-- Monitor real-time power production and consumption
-- Track energy generation statistics
-- Control inverter settings and operating modes
-- Access detailed inverter status and diagnostic information
+| | |
+|---|---|
+| **Tested on real hardware** | One installation: the maintainer's PLENTICORE G3 L 20 kW with battery, running every day. |
+| **Tested automatically** | About 1,350 tests against a mocked Home Assistant on Python 3.12 and 3.14, plus runs in a real Home Assistant instance against an inverter emulator (the [Inverter Charge Night](https://github.com/Puma7/InverterChargeNight) lab). Neither replaces your hardware. |
+| **Untested** | PLENTICORE G1/G2, PLENTICORE MP G3, other power classes, other batteries and other firmware versions. They use the same interfaces and may work. Reports are welcome. |
+| **Not supported** | Several inverters in one entry, Multi Device Control (MDC, firmware 3.06.10+), and running KORE's battery control at the same time as the inverter's own battery features (see [Battery control](#battery-control)). |
 
-### Why KOSTAL KORE?
-KOSTAL KORE transforms your inverter from a simple energy source into a controllable automation node for Home Assistant.  
-With KISS OS 2.0 architecture goals, KORE focuses on stable control channels, actionable diagnostics and practical interoperability for advanced setups.
+Large parts of the code were written with AI assistants (Claude, OpenAI Codex)
+and reviewed by the maintainer. Questions about the inverter that are still
+open are listed in
+[docs/development/HARDWARE_VALIDATION_TODO.md](docs/development/HARDWARE_VALIDATION_TODO.md).
 
-## Features
+The integration comes without warranty (MIT license). Battery control writes to
+your inverter. Check its effect on your own system.
 
-### 🚀 KORE Launch Gadgets
-- **KORE FlowBridge**: Optional Modbus proxy + MQTT bridge for EVCC, Wallbox and automation stacks.
-- **KORE Safety Sentinel**: Early-warning diagnostics for isolation, thermal and grid anomalies.
-- **KORE GridGuard**: Grid feed-in optimization and battery control helpers with inverter-aware limits.
-- **KORE Insight Pack**: Health, degradation and longevity entities prepared for dashboarding.
+## What it does
 
-### 📊 **Sensors**
-- **Power Monitoring**: Real-time AC/DC power measurements, voltage, current
-- **Energy Tracking**: Daily, monthly, and total energy production statistics
-- **Inverter Status**: Operating state, temperature, and health indicators
-- **Grid Information**: Grid frequency, power factor, and grid connection status
+**Monitoring (REST, no extra setup)**
+- PV, battery, grid and home power; DC string values; phase values.
+- Energy statistics per day, month, year and total, ready for the Home Assistant
+  Energy dashboard ([guide](docs/en/energy-dashboard.md)).
+- Inverter state, inverter events and the settings the inverter exposes over
+  REST. Changing settings is limited to an allowlist; some settings need the
+  installer service code.
+- Calculated sensors such as *Total Grid Consumption* and battery efficiency.
+  They are sums or ratios of inverter counters and inherit their accuracy.
 
-### 🧮 **Calculated Sensors (New)**
-- **Total Grid Consumption**: Smart calculation of `Grid to Home + Grid to Battery`. The matching power sensor `Grid to Battery Power` (`Grid2Bat_P`) is measured on the battery's **DC** side, so this sum probably misses the grid-charge conversion loss (~5–8 % of the charge energy; unconfirmed, see `HARDWARE_VALIDATION_TODO.md` HV9). `Battery AC Charge Energy from Grid Total (Modbus)` (REG 1054) is the inverter's own AC-side counter.
-- **Total Battery Discharge**: Comprehensive `Battery to Home + Battery to Grid` tracking
-- **Battery Efficiency**: Real-time efficiency monitoring (`Output / Input`) in %
-- **Dashboard Ready**: Fully compatible with Home Assistant Energy Dashboard
-- **Battery SoH (Calculated)**: Capacity-ratio State-of-Health derived from Modbus telemetry — independent of the inverter's own SoH register. Baseline self-calibrates to the highest observed work-capacity. Available from the first data point.
-- **Battery SoH 5-Year Projection**: OLS linear regression of battery capacity vs discharge throughput, extrapolated 5 years. Requires ≥ 30 samples over ≥ 30 days before reporting (prevents early noise from looking authoritative). Both sensors are `EntityCategory.DIAGNOSTIC`.
+**Optional: Modbus TCP**
+- Faster polling of power values, and values that REST does not provide
+  (e.g. isolation resistance).
+- Battery limits: *Battery Max Charge Limit (Modbus)* (register 1038),
+  *Battery Max Discharge Limit (Modbus)* (1040), the G3 cyclic limits
+  (1280/1282, kept alive automatically) and the active power setpoint (533).
+  Writes to the limits are read back; a limit the inverter did not apply raises
+  an error instead of being reported as done. Register 533 is write-only: its
+  entity shows the last command, which is not confirmed by the inverter.
+- Built-in controllers that use these limits: a battery target-SoC controller,
+  *Block Battery Charging* and the *Grid Feed-In Optimizer*.
+- A **Modbus proxy**, so evcc or another client can share KORE's single
+  connection to the inverter, and an **MQTT bridge** that publishes values and
+  accepts selected commands ([guide](docs/en/modbus-proxy-mqtt.md)).
+- An optional KOSTAL Smart Energy Meter (KSEM) as a separate Modbus source.
 
-### 🎛️ **Controls**
-- **Number Entities**: Adjustable power limits and installer settings
-- **Select Entities**: Operating mode selection (e.g., battery management modes)
-- **Switch Entities**: Enable/disable various inverter functions
-- **G3 Battery Limitation**: Max charge/discharge power limits are re-applied cyclically to keep them active (per vendor requirement)
-- **High-impact write safety**: Advanced REST writes are allowlisted and can require temporary arming + installer access
-- **REST/Modbus split**: Battery charge/discharge setpoint control is intentionally Modbus-only
-- **Entity Naming**: Entities now use device-based naming for a cleaner UI (see `custom_components/kostal_kore/QUICK_REFERENCE.md` for full lists)
+**Diagnostics**
+- Home Assistant diagnostics download, communication health per channel, repair
+  issues for missing installer access and similar problems
+  ([guide](docs/en/diagnostics.md)).
+- Health, degradation and battery state-of-health sensors. These are estimates
+  derived from inverter data, not measurements.
+- Safety warnings (isolation resistance, temperatures, DC strings). These are
+  software heuristics on inverter data. They are **not** a certified safety
+  device and do not replace an arc-fault detector, a residual-current device or
+  a smoke detector.
 
-### ⚡ Grid Feed-In Optimizer (KORE GridGuard)
-- Requires Modbus.
-- Uses:
-  - `switch.<device>_grid_feed_in_optimizer`
-  - `number.<device>_grid_feed_in_limit`
-- Control logic runs periodically and writes Modbus register `1038` (`bat_max_charge_limit`) so battery charging absorbs PV surplus above the configured feed-in cap.
-- Turning the switch OFF restores normal charging limits.
-- On a G3, reading register `1038` returns the limit **in effect**, not the last command: **Battery Manual Charge** is a forced charge that lifts it to the inverter maximum, the BMS lowers it near full charge, and it reads 0 while charging is off; `1040` (discharge) is lowered the same way near empty. The number entity's `last_commanded_value` attribute holds the command. A read below the command counts as applied (`last_command_outcome = limited`); a read above it (forced charge), an unreadable one, or a raised limit that still reads the previous command raises `ReadbackUnconfirmedError` with that `outcome`.
-- Do not run multiple controllers that write register `1038` at the same time (e.g. external scripts/automations, **evcc `batteryMode`**, or the optimizer), or they can conflict. evcc's `kostal-plenticore-gen2` template (`batteryMode`) cyclically writes registers `1034`/`1038`/`1040` — the same registers KORE controls — so use **one** controller per battery. KORE rejects competing external writes with Modbus exception `0x06` while an internal controller is active.
+**Migration** from Home Assistant's built-in `kostal_plenticore` integration,
+including entity IDs and history ([guide](docs/en/migration.md)).
 
-### 🔻 Feed-In Curtailment / Wirkleistungsbegrenzung (Active Power Setpoint)
-- Requires Modbus. Uses the **Active Power Setpoint (Modbus)** number entity (register `533`) — the inverter's active-power **output** limit in percent, the Kostal-native equivalent of SunSpec model 123 `WMaxLimPct`.
-- **100% = uncurtailed** (full feed-in); values below 100% throttle the inverter's AC output. Setting it back to 100% releases the limit.
-- **Minimum 1%.** True 0% / zero-export is *not* reachable via this register — use the REST setting `ActivePower:ExtCtrlP:P`=0 or a watt-based cap (`Inverter:ActivePowerLimitation`) instead.
-- **Volatile:** the inverter discards the setpoint on power-on/reset and returns to full power (fail-open), so no keepalive is needed.
-- This is **not** the Grid Feed-In Optimizer above: the optimizer caps grid export *indirectly* by limiting battery charging (register `1038`); this control throttles the inverter's AC output *directly*. It is also distinct from the §14a EnWG **import** limit (`Inverter:ActivePowerConsumLimitation`).
-- The entity uses the same read-only gate as the battery controls: writable when register `1080` == `0x02` (**"External via Modbus"**), or when `1080` == `0x00` and a read probe succeeds, and it stays writable when `1080` is unavailable; other modes make it read-only. Whether output curtailment *should* be gated behind battery mode at all is an open hardware question (see `HARDWARE_VALIDATION_TODO.md` HV6).
-- evcc's PR #31487 adds the same capability to *its* Gen2 meter template via SunSpec model 123 (registers `40217`/`40221`); KORE already covers this on G3 through register `533`, so that PR needs nothing ported here — see `HARDWARE_VALIDATION_TODO.md` HV6 for the open validation points.
+## Requirements
 
-### 🔧 **Diagnostics**
-- Comprehensive diagnostic data for troubleshooting
-- Redacted sensitive information for privacy
-- Integration version and API status information
-
-## Supported Devices
-
-- Kostal Plenticore Solar Inverters
-- Compatible with firmware versions supporting local API access
-- Requires network connectivity to the inverter
-
-## Worldwide Compatibility & Safety
-
-- **Inverter-size aware limits**: Control paths now derive limits from inverter capabilities (no fixed 20 kW restore values).
-- **Generation-aware operation**: Designed for G1/G2/G3 variants with dynamic topology handling.
-- **Grid profile adaptation**: Diagnostics and safety checks adapt to detected **50/60 Hz** and **120/230 V** profiles.
-- **Secure defaults**: The optional Modbus proxy defaults to `127.0.0.1` to avoid accidental LAN exposure.
-
-## Prerequisites
-
-### Hardware Requirements
-- Kostal Plenticore inverter with network connectivity
-- Local network access to the inverter's web interface
-
-### Software Requirements
-- Home Assistant 2024.12 or newer
-- Python package: `pykoplenti==1.5.0` (automatically installed)
-
-### Network Requirements
-- Inverter must be accessible on your local network
-- TCP port 80 (HTTP) must be open to the inverter
-- No firewall blocking between Home Assistant and inverter
+- Home Assistant 2024.12 or newer.
+- A PLENTICORE inverter reachable from Home Assistant on the local network
+  (HTTP, port 80). The password of the inverter's web interface.
+- Optional: the installer **service code**, for settings that the inverter
+  reserves for installers.
+- For Modbus: *Modbus TCP* enabled on the inverter (default port 1502,
+  unit ID 71). For battery control, the inverter's battery management must be
+  set to *External via protocol (Modbus TCP)*.
 
 ## Installation
 
-### Method 1: HACS (Recommended)
-1. Open HACS in Home Assistant
-2. Navigate to Integrations
-3. Open the menu (top right) and select **Custom repositories**
-4. Add repository URL: `https://github.com/Puma7/KostalKore`
-5. Category: **Integration**
-6. Install **KOSTAL KORE**
-7. Restart Home Assistant
+**HACS (recommended)**
+1. In HACS, open the menu (top right) → **Custom repositories**.
+2. Add `https://github.com/Puma7/KostalKore`, category **Integration**.
+3. Install **KOSTAL KORE** and restart Home Assistant.
 
-### Method 2: Manual Installation
-1. Copy `custom_components/kostal_kore` to `config/custom_components/kostal_kore`
-2. Restart Home Assistant
-3. The integration will be available for configuration
+**Manual**
+1. Copy `custom_components/kostal_kore` to `<config>/custom_components/kostal_kore`.
+2. Restart Home Assistant.
 
-## Migration from `kostal_plenticore` plugin (two-step flow)
+## Setup
 
-If you previously used the `kostal_plenticore` integration:
+1. **Settings → Devices & services → Add integration → KOSTAL KORE.**
+2. Enter the host (leave it empty to try discovery on the local network), the
+   password and, if you have it, the service code. Discovery is best effort and
+   often fails across VLANs or firewalls; entering the IP address always works.
+3. In the second step, choose whether to enable Modbus TCP, the MQTT bridge and
+   the Modbus proxy. The wizard tests the Modbus connection and shows the
+   detected access role (user or installer) and whether writes are possible.
 
-1. Install and set up `KOSTAL KORE` first (new entry in Home Assistant).
-2. Open the KOSTAL KORE device and click **Import Legacy Plenticore Data**.
-3. KORE imports old config/options and migrates entity/device registry mappings, but keeps the legacy entry for safety/testing.
-4. After your validation period, click **Finalize Legacy Cleanup** to remove old legacy artifacts and the old config entry.
+Later, **Configure** changes the Modbus, MQTT, proxy and KSEM options. Host,
+password and service code are changed with **Reconfigure** in the entry's menu.
 
-This split flow lets you migrate first, test in production for a few weeks, and only then finalize cleanup.
+## Battery control
 
-Detailed guides:
+KORE controls the battery over Modbus and only coordinates with itself and
+with clients that use its proxy. It does **not** coordinate with control logic
+running inside the inverter. Use **one** controller per battery:
 
-| Document | Audience |
-|----------|----------|
-| [docs/MIGRATION_LEITFADEN.md](docs/MIGRATION_LEITFADEN.md) | **Complete guide (DE)** — buttons, services, orphan history, checklists |
-| [docs/MIGRATION_COMPLETE_EN.md](docs/MIGRATION_COMPLETE_EN.md) | **Complete guide (EN)** |
-| [migration.md](migration.md) | Short step-by-step (EN) |
+- Switch off the inverter's own battery features while KORE controls the
+  battery: *Smart AC Charge* (on by default since firmware 3.05), time-controlled
+  or dynamic-tariff charging, and EEBus control.
+- Do not let evcc's `batteryMode` (template `kostal-plenticore-gen2`) or your
+  own automations write registers 1034/1038/1040 at the same time. While a KORE
+  controller owns a register, KORE rejects competing writes through its proxy.
+- An active §14a EnWG import limit also throttles grid charging.
 
-**Two ways to migrate:** (1) **Device page** — buttons *Import Legacy Plenticore Data* / *Finalize Legacy Cleanup* (beginners). (2) **Developer Tools → Services** — `adopt_legacy_entity_ids`, `copy_legacy_history` (pros, dry-run). The import **button** also merges config/options; the **adopt** service does not — see the full guides before picking a path.
+On a G3, register 1038 reads back the limit **in effect**, not the last command.
+The BMS lowers it as the battery fills (and 1040 as it empties), and *Battery
+Manual Charge* lifts it to the inverter maximum. KORE therefore accepts a read
+below the command as applied (`last_command_outcome = limited`). Details:
+[entity reference](docs/en/entities.md).
 
-Orphan recorder history (long-time KORE users without legacy entry): [docs/migration_orphan_history.md](docs/migration_orphan_history.md).
+## Documentation
 
-## Development
-
-### Branches
-- `main` is the default branch: all work lands via pull requests into `main`,
-  and releases are tagged from it.
-- `develop` is a historical branch (stale since early 2026) and no longer used.
-
-### Release Notes
-See `RELEASE_NOTES.md` for the latest release highlights.
-See `ALPHA_RELEASE_CHECKLIST.md` for HACS and security readiness details.
-
-### Documentation map
-- `README.md`: User-facing install/setup/operations overview.
-- `docs/MIGRATION_LEITFADEN.md` / `docs/MIGRATION_COMPLETE_EN.md`: Full migration paths (UI + services + orphan).
-- `migration.md`: Compact step-by-step migration (EN).
-- `docs/migration_orphan_history.md`: Orphan recorder history (DE).
-- `MIGRATION_ARCHITECTURE.md`: Technical migration limits (maintainers).
-- `PROXY_SETUP.md`: Modbus proxy + MQTT bridge integration examples (evcc/iobroker).
-- `ENTITY_REFERENCE.md`: Entity/register and threshold reference.
-- `LEARNINGS.md`: Consolidated implementation learnings and policy decisions.
-- `custom_components/kostal_kore/QUICK_REFERENCE.md`: Fast maintainer cheat sheet.
-- `custom_components/kostal_kore/AI_DOCUMENTATION.md`: AI-assistant context for repository internals.
-- `CHANGELOG.md` + `RELEASE_NOTES.md`: Change history and release communication.
-
-## Configuration
-
-### Initial Setup
-1. In Home Assistant, go to **Settings > Devices & Services**
-2. Click **+ Add Integration**
-3. Search for "KOSTAL KORE"
-4. Enter the required information:
-   - **Host**: Optional. Leave empty for auto-discovery or enter IP/hostname manually
-   - **Password**: Inverter web interface password
-   - **Service Code**: Optional for installer-level features
-5. In step 2 of the wizard, directly enable:
-   - Modbus TCP
-   - MQTT Bridge
-   - Modbus Proxy
-6. The wizard shows detected access role (user vs installer) and whether write access is enabled
-
-### Configuration Parameters
-- **Host**: Optional. If empty, setup tries local-network auto-discovery first
-- **Password**: Password for accessing the inverter's web interface
-- **Service Code**: Optional service code. Actual write permissions are validated from detected account role.
-
-### Auto-discovery reality check
-- Auto-discovery is **best-effort**, not guaranteed.
-- It works well on flat local networks where Home Assistant can reach the inverter.
-- It can fail in segmented networks (VLAN/firewall/routing constraints).
-- Manual host/IP entry is always supported and remains the reliable fallback.
-
-### REST vs Modbus write model (important)
-- REST writes are supported for selected allowlisted settings (with safety checks).
-- Battery charge/discharge control setpoints are intentionally **Modbus-only**.
-- If you need deterministic charge/discharge control, enable Modbus and use Modbus-backed entities.
-
-### Optional: External KSEM (Kostal Smart Energy Meter)
-
-If you have a KSEM at the grid connection point, you can enable an additional
-Modbus-TCP source to read the meter directly (independent of the inverter's
-own grid measurement). Configure under **Options**:
-
-- `ksem_enabled` — turn on the KSEM source
-- `ksem_host` — KSEM IP/hostname (leave empty to reuse the inverter host)
-- `ksem_port` — Modbus TCP port (default `502`)
-- `ksem_unit_id` — Modbus unit id (default `71`)
-
-When enabled, KSEM-sourced grid power, frequency, power factor, per-phase
-voltages and per-phase active power become available as additional sensors.
-
-> **Note:** if home-consumption / autarky / own-consumption / grid-feed-in
-> values stay at `0`, the inverter itself is likely not talking to the energy
-> meter (stand-alone mode) — see the Troubleshooting section. That is an
-> inverter commissioning issue, independent of this optional KSEM source.
-
-## Data Update
-
-The integration uses Home Assistant's `DataUpdateCoordinator` to fetch data from the inverter at regular intervals:
-
-| Data Type | Update Interval (REST only) | Description |
-|-----------|----------------|-------------|
-| Process Data (sensors) | 10 seconds | Real-time power, voltage, current measurements |
-| Settings Data (numbers/switches) | 30 seconds | Battery limits, operating modes, switch states |
-| Select Data (selects) | 30 seconds | Charging/usage mode selections |
-
-When Modbus is enabled, the platforms (sensor/number/switch/select) reduce
-their REST polling — Modbus polls fast registers every ~5 s and settings/selects
-fall back to ~90 s so the inverter is not double-polled. The Modbus coordinator
-itself runs the 5 s loop independently.
-
-- All API calls are serialised by the coordinator to avoid overloading the inverter.
-- Settings data implements a last-result fallback for transient 503 errors (TTL-bounded).
-- Failed API calls are automatically retried on the next coordinator cycle.
-
-## Known Limitations
-
-- **Auto-discovery is best-effort**: The wizard scans likely local IPv4 hosts when host is empty. If discovery fails, enter inverter host/IP manually.
-- **Battery charge/discharge control via REST is blocked by design**: these controls are exposed via Modbus only for deterministic behavior.
-- **DC string count**: The number of DC inputs (PV strings) is detected automatically on first setup. Changes require re-adding the integration.
-- **Firmware dependency**: Some advanced settings (G3 battery controls, external control registers) are only available on specific firmware versions.
-- **Installer access**: Certain controls require the installer/service code. Without it, these entities remain disabled.
-- **Single inverter per entry**: Each config entry manages exactly one inverter. Multiple inverters require separate config entries. **Multi Device Control (MDC, firmware 3.06.10+)** — where one host inverter aggregates and controls up to two client inverters — is **not supported**; on an MDC host, KORE's battery control may conflict with the inverter's own MDC battery control.
-- **One battery controller at a time**: Do not run KORE's Modbus battery control (SoC controller, charge block, grid feed-in optimizer) at the same time as the inverter's own native battery features — **Smart AC Charge** (default-on since firmware 3.05), **time-controlled / dynamic-tariff charging**, or **EEBus (LPP/LPC)** control. Both sides write the same battery registers and will fight; disable the native feature when using KORE's control (KORE logs a warning if it detects the battery moving against its setpoint). The §14a EnWG import limit (`Inverter:ActivePowerConsumLimitation`) will also silently throttle grid-charging when active.
-- **API rate limits**: The inverter's local API has limited concurrency. The integration serialises all API calls to avoid overloading.
-- **Battery entities**: Battery-related sensors only appear when a compatible battery system is connected and detected by the inverter.
-
-## Integration Architecture
-
-### File Structure
-```
-custom_components/kostal_kore/
-├── __init__.py          # Integration entry point and setup
-├── manifest.json        # Integration metadata and dependencies
-├── config_flow.py       # Configuration flow and user interface
-├── const.py            # Constants and configuration keys
-├── coordinator.py       # API client and data coordination
-├── sensor.py           # Power and energy sensors
-├── number.py           # Numeric controls and settings
-├── select.py           # Dropdown selections for modes
-├── switch.py           # Toggle controls for functions
-├── helper.py           # Utility functions and data formatters
-├── diagnostics.py      # Diagnostic data collection
-└── strings.json        # Localization strings
-```
-
-### Key Components
-
-#### **coordinator.py**
-- Manages API communication with the inverter
-- Handles data updates and caching
-- Provides device information and connection management
-- Implements multiple coordinator types for different data sources
-
-#### **sensor.py**
-- Defines all sensor entities for monitoring
-- Includes power, energy, voltage, current, and status sensors
-- Implements proper device classes and units
-- Handles data formatting and state management
-
-#### **config_flow.py**
-- Provides user-friendly setup interface
-- Validates connection credentials
-- Handles reconfiguration of existing entries
-- Implements error handling and user feedback
-
-## Available Entities
-
-### Power & Energy Sensors
-- `Inverter AC Power`: Current AC power output (W)
-- `Inverter DC Power`: Current DC power input (W)
-- `Total Energy Produced`: Lifetime energy production (kWh)
-- `Daily Energy Produced`: Today's energy production (kWh)
-- `Grid Frequency`: Current grid frequency (Hz)
-
-### Status Sensors
-- `Inverter State`: Current operating state
-- `Inverter Temperature`: Internal temperature (°C)
-- `Battery Level`: Battery charge level (%) [if applicable]
-
-### Control Entities
-- `Power Limit`: Maximum power output setting
-- `Operating Mode`: Inverter operating mode selection
-- `Battery Management`: Battery charging/discharging controls
-
-## Inverter States
-
-The integration provides human-readable inverter states:
-
-| State Code | Description |
-|------------|-------------|
-| 0 | Off |
-| 1 | Initializing |
-| 2 | Insulation Measurement |
-| 3 | Grid Check |
-| 4 | Startup |
-| 6 | Feeding In |
-| 7 | Throttled |
-| 8 | External Switch Off |
-| 9 | Update |
-| 10 | Standby |
-| 11 | Grid Synchronization |
-| 12 | Grid Pre-Check |
-| 13 | Grid Switch Off |
-| 14 | Overheating |
-
-## Troubleshooting
-
-### Connection Issues
-1. **Cannot Connect**: Verify the inverter's IP address and network connectivity
-2. **Invalid Auth**: Check the password for the inverter's web interface
-3. **Timeout Error**: Ensure the inverter is responsive and not in maintenance mode
-
-### Data Not Updating
-1. Check the inverter's API status in the web interface
-2. Verify network stability between Home Assistant and inverter
-3. Review Home Assistant logs for API errors
-
-### Installer Access Required
-1. If Home Assistant shows an "Installer access required" repair issue, reconfigure the integration with the service code
-2. Advanced battery controls will remain blocked until the service code is provided
-
-### Performance Issues
-1. Reduce polling frequency if experiencing slow response
-2. Check network bandwidth and latency to the inverter
-3. Monitor Home Assistant system resources
-
-### Isolation Resistance shows `unknown`
-1. In KORE, isolation resistance is sourced from Modbus register `120` (`isolation_resistance`), not REST.
-2. `unknown` means no valid Modbus value was read yet (startup, transient disconnects, or unsupported register on current model/firmware).
-3. When Modbus returns **65,535,000 Ω** during PV production, Kostal uses that as an **off-scale high** reading (WR UI shows about **65.5 MΩ**). KORE records it for trends; see attributes `modbus_off_scale_high` and `kostal_display_mohm`. At night the same raw value means “no measurement” and is not recorded.
-4. Check logs for:
-   - `Connection lost reading isolation_resistance`
-   - `Illegal data address`
-4. Verify Modbus is enabled on inverter and integration settings (host/port/unit-id) are correct.
-
-### Energy statistics warnings in the log (benign)
-You may occasionally see recorder warnings like *"Entity … has state class `total_increasing`, but its state is not strictly increasing"* on energy sensors (e.g. *Home Consumption from Grid Day/Month/Year/Total*). These are **harmless**: the inverter sometimes corrects a cumulative energy counter slightly downward (e.g. 5.1 → 5.0 kWh), and Home Assistant simply discards that single sample — the long-term statistics stay consistent. KORE deliberately keeps `total_increasing` for these counters (it is the correct state class for values that reset per period, so the Energy dashboard handles the daily/monthly reset correctly); switching to `total` would break that reset handling. The related *"state is negative"* variant is already suppressed by KORE — a negative energy reading is mapped to *unavailable* for one tick instead of a negative value (see `format_energy`). No action needed. (Matches the upstream `kostal_plenticore` behaviour in home-assistant/core#174543.)
-
-### Home consumption / autarky / own-consumption values stuck at 0
-If the KSEM-dependent sensors — home consumption, autarky, own-consumption rate, grid feed-in energy, energy-manager state — all report `0` or unavailable, the inverter is most likely **not communicating with the energy meter (KSEM)** and running in a kind of stand-alone mode. This is a wiring/commissioning issue on the inverter side, not a KORE bug (the entities are created correctly but the inverter has no consumption data to report). Have the meter link checked by your installer. (Same root cause as upstream `kostal_plenticore` home-assistant/core#166779.)
-
-## Example Automations
-
-### Limit Battery Charge Power (G3)
-```yaml
-service: number.set_value
-target:
-  entity_id: number.scb_battery_max_charge_power_g3
-data:
-  value: 10000
-```
-
-### Set Battery Charging / Usage Mode
-```yaml
-service: select.select_option
-target:
-  entity_id: select.scb_battery_charging_usage_mode
-data:
-  option: Battery:SmartBatteryControl:Enable
-```
-
-## Energy Dashboard Configuration
-
-Use **Total**-Sensoren (`state_class: total_increasing`) for das HA Energy Dashboard — diese zählen stetig hoch und erzeugen keine Sprünge bei Tageswechsel.
-
-### Stromnetz
-
-| Dashboard-Feld | Entity | Formel |
+| Topic | English | Deutsch |
 |---|---|---|
-| **Netzbezug** (Grid Consumption) | `Total Grid Consumption Total` | EnergyHomeGrid + EnergyChargeGrid |
-| **Netzeinspeisung** (Grid Return) | `Energy to Grid Total` | Yield − EnergyHomeBat − EnergyHomePv |
-| **Netzleistung** (Grid Power) | `Grid Power` | Echtzeit-Leistungsmessung (W) |
+| Entities, registers and attributes | [entities.md](docs/en/entities.md) | [entities.md](docs/de/entities.md) |
+| Modbus proxy and MQTT bridge (evcc, ioBroker) | [modbus-proxy-mqtt.md](docs/en/modbus-proxy-mqtt.md) | [modbus-proxy-mqtt.md](docs/de/modbus-proxy-mqtt.md) |
+| Energy dashboard | [energy-dashboard.md](docs/en/energy-dashboard.md) | [energy-dashboard.md](docs/de/energy-dashboard.md) |
+| Troubleshooting | [troubleshooting.md](docs/en/troubleshooting.md) | [troubleshooting.md](docs/de/troubleshooting.md) |
+| Diagnostics download | [diagnostics.md](docs/en/diagnostics.md) | [diagnostics.md](docs/de/diagnostics.md) |
+| Communication failures | [communication-failures.md](docs/en/communication-failures.md) | [communication-failures.md](docs/de/communication-failures.md) |
+| Firmware compatibility | [firmware-compatibility.md](docs/en/firmware-compatibility.md) | [firmware-compatibility.md](docs/de/firmware-compatibility.md) |
+| Migration from `kostal_plenticore` | [migration.md](docs/en/migration.md) | [migration.md](docs/de/migration.md) |
+| Orphaned recorder history | [orphan-history.md](docs/en/orphan-history.md) | [orphan-history.md](docs/de/orphan-history.md) |
 
-### PV-Module
+KOSTAL's own documents (manuals, event list, the
+[Modbus protocol description](https://www.kostal-solar-electric.com/fileadmin/downloadcenter/kse/BA/Protokollbeschreibung/BA_KOSTAL_Interface_MODBUS-TCP_SunSpec_with_Control.pdf))
+are available on [kostal-solar-electric.com](https://www.kostal-solar-electric.com/).
+Developer notes are in [docs/development/](docs/development/), changes in
+[CHANGELOG.md](CHANGELOG.md).
 
-| Dashboard-Feld | Entity | Hinweis |
-|---|---|---|
-| **PV-Erzeugung** String 1 | `Energy PV1 Total` | Pro DC-String einzeln |
-| **PV-Erzeugung** String 2 | `Energy PV2 Total` | |
-| **PV-Erzeugung** String 3 | `Energy PV3 Total` | Nur wenn 3. String vorhanden |
+## Getting help
 
-> **Tipp:** Alternativ `Energy Yield Total` für die Gesamt-PV-Erzeugung (alle Strings kombiniert).
-
-### Batteriesystem
-
-| Dashboard-Feld | Entity | Formel |
-|---|---|---|
-| **In Batterie geladen** (Charge) | `Battery Charge Total Total` | EnergyChargePv + EnergyChargeGrid |
-| **Aus Batterie entladen** (Discharge) | `Battery Discharge Total Total` | EnergyHomeBat + EnergyDischargeGrid |
-| **Batterieleistung** (Power) | `Battery Power` | Echtzeit charge/discharge (W) |
-
-### Einrichtung Schritt für Schritt
-
-1. **Einstellungen → Dashboards → Energie**
-2. **Stromnetz:**
-   - Netzbezug → `Total Grid Consumption Total`
-   - Netzeinspeisung → `Energy to Grid Total`
-   - Netzleistung → `Grid Power`
-3. **PV-Module:**
-   - PV-Erzeugung hinzufügen → `Energy PV1 Total`, `Energy PV2 Total` (pro String)
-4. **Batteriesystem:**
-   - In Batterie geladen → `Battery Charge Total Total`
-   - Aus Batterie entladen → `Battery Discharge Total Total`
-   - Batterieleistung → `Battery Power`
-
-### Wichtige Hinweise
-
-- Immer **Total**-Sensoren verwenden (nicht Day/Month/Year), da `total_increasing` keine Resets erzeugt.
-- `Energy to Grid Total` enthält **PV- und Batterie-Einspeisung** kombiniert.
-- `Total Grid Consumption Total` enthält **Netzbezug für Haus und Batterie** kombiniert. `Grid to Battery Power` ist die DC-Seite der Batterie; die Wandlungsverluste der Netzladung sind darin vermutlich nicht enthalten (HV9).
-- Nach Einrichtung kann es bis zu 2 Stunden dauern, bis Daten im Dashboard erscheinen.
-
-## Debugging
-
-Enable debug logging to troubleshoot issues:
+Open an [issue](https://github.com/Puma7/KostalKore/issues) and attach the
+diagnostics download. Please state the model and generation (e.g. G3 L 20 kW),
+the inverter firmware, the battery and whether Modbus is enabled. To log in
+detail:
 
 ```yaml
 logger:
-  default: info
   logs:
-    pykoplenti: debug
     custom_components.kostal_kore: debug
+    pykoplenti: debug
 ```
-
-## Security Considerations
-
-- The integration stores the inverter password in Home Assistant's configuration
-- Use a strong, unique password for your inverter
-- Ensure your local network is secure
-- Consider network segmentation for sensitive devices
-- The Modbus proxy bind default is `127.0.0.1`; only expose it to LAN if strictly required
-- Installer/service code is required for advanced battery control write paths
-- Advanced REST controls are restricted by explicit allowlist + temporary arming window for high-impact settings
-
-## API Documentation
-
-This integration uses the Kostal Plenticore local API. For detailed API information:
-
-### Technical Specifications
-- **Protocol**: MODBUS-TCP with SunSpec Standard Compliance
-- **Default Port**: TCP 1502 (MODBUS) and TCP 80 (Web API)
-- **Default Unit-ID**: 71 (modifiable)
-- **Data Models**: SunSpec Modbus models for solar inverters
-- **Control Functions**: Advanced inverter control via MODBUS registers
-
-### Supported Inverter Models
-- **PIKO/PLENTICORE G1**: UI 01.30+
-- **PLENTICORE G2**: SW 02.15.xxxxx+
-- **PLENTICORE G3**: SW 3.06.00.xxxxx+
-- **PLENTICORE MP G3**: SW 3.06.00.xxxxx+
-
-### SunSpec Models Implemented
-- **Model 1**: Common Model (Address 40003)
-- **Model 103**: Three Phase Inverter (Address 40071)
-- **Model 113**: Three Phase Inverter, float (Address 40123)
-- **Model 120**: Nameplate (Address 40185)
-- **Model 123**: Immediate Controls (Address 40213)
-- **Model 160**: Multiple MPPT (Address 40239)
-- **Model 2031**: Wye-Connect Three Phase (abcn) Meter (Address 40309)
-- **Model 802**: Battery Base Model (Address 40416)
-- **Model 65535**: End Model (Address 40480)
-
-### Key MODBUS Registers
-#### **Device Information**
-- **Address 2**: MODBUS Enable (R/W)
-- **Address 4**: MODBUS Unit-ID (R/W)
-- **Address 14**: Inverter serial number (RO)
-- **Address 38**: Inverter state (RO)
-- **Address 56**: Overall software version (RO)
-
-#### **Power Measurements**
-- **Address 100**: Total DC power (W)
-- **Address 172**: Total AC active power (W)
-- **Address 252**: Total active power (powermeter) (W)
-- **Addresses 258-286**: DC1-DC3 current, power, voltage
-- **Addresses 320-326**: Total, daily, yearly, monthly yield (Wh)
-
-#### **Battery Data**
-- **Address 514**: Battery actual SOC (%)
-- **Address 210**: Act. state of charge (%)
-- **Address 214**: Battery temperature (°C)
-- **Address 216**: Battery voltage (V)
-- **Address 200**: Battery gross capacity (Ah)
-
-#### **Control Registers**
-- **Address 533**: Active Power Setpoint (%) (R/W)
-- **Address 583**: Reactive Power Setpoint (%) (R/W)
-- **Address 585**: Delta-cos φ Setpoint (R/W)
-- **Address 1024**: Write-only signed/scaled AC battery setpoint (not enabled by KORE); **1025**: read-only scale factor. See [firmware compatibility](docs/FIRMWARE_COMPATIBILITY.md) for the documented G3 fix and current control-path policy.
-- **Addresses 1026-1044**: Read/write battery setpoints and limits, subject to model/firmware support.
-
-### Data Formats
-- **U16**: Unsigned 16-bit integer (1 register)
-- **U32**: Unsigned 32-bit integer (2 registers)
-- **S16**: Signed 16-bit integer (1 register)
-- **S32**: Signed 32-bit integer (2 registers)
-- **Float**: IEEE 754 floating point (2 registers)
-- **String**: Character data (variable length)
-
-### MODBUS Function Codes
-- **0x03**: Read Holding Registers
-- **0x06**: Write Single Register
-- **0x10**: Write Multiple Registers
-
-### Inverter States
-The inverter supports the following operational states:
-- **0**: Off
-- **1**: Init
-- **2**: IsoMEas (Insulation Measurement)
-- **3**: GridCheck
-- **4**: StartUp
-- **6**: FeedIn
-- **7**: Throttled
-- **8**: ExtSwitchOff
-- **9**: Update
-- **10**: Standby
-- **11**: GridSync
-- **12**: GridPreCheck
-- **13**: GridSwitchOff
-- **14**: Overheating
-- **15**: Shutdown
-- **16**: ImproperDcVoltage
-- **17**: ESB (Emergency Shutdown)
-- **18**: Unknown
-
-### Energy Manager States
-Internal energy flow management states:
-- **0x00**: Idle
-- **0x02**: Emergency Battery Charge
-- **0x08**: Winter Mode Step 1
-- **0x10**: Winter Mode Step 2
-
-### Battery Types Supported
-The integration supports various battery manufacturers:
-- **0x0002**: PIKO Battery Li
-- **0x0004**: BYD
-- **0x0008**: BMZ
-- **0x0010**: AXIstorage Li SH
-- **0x0040**: LG
-- **0x0200**: Pyontech Force H
-- **0x0400**: AXIstorage Li SV
-- **0x1000**: Dyness Tower / TowerPro
-- **0x2000**: VARTA.wall
-- **0x4000**: ZYC
-
-### Documentation Reference
-- Refer to the `BA_KOSTAL_Interface_MODBUS-TCP_SunSpec_with_Control.pdf` for complete register mapping
-- The API follows SunSpec standards for Modbus-TCP communication
-- Additional control functions may require installer-level access and service code
-
-### Integration Implementation
-- This integration uses the `pykoplenti` library which abstracts REST-API MODBUS-TCP communication
-- Direct MODBUS access available for advanced users
-- All SunSpec standard data points are exposed through Home Assistant entities
 
 ## Contributing
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+See [CONTRIBUTING.md](CONTRIBUTING.md). Translations are welcome: the user
+interface strings live in `custom_components/kostal_kore/translations/`.
 
-## Version History
+## Credits and license
 
-- **Current**: see [GitHub Releases](https://github.com/Puma7/KostalKore/releases) — the authoritative version is `manifest.json`
-- **Compatibility**: Home Assistant 2024.12+
-- **API Support**: Kostal Plenticore local API
-- **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for full history
+KORE builds on [pykoplenti](https://github.com/stegm/pykoplenti) by `@stegm` and
+on the `kostal_plenticore` integration in Home Assistant Core. It became a
+separate project because its scope and architecture moved too far apart to
+merge back.
 
-## Support
-
-For issues and questions:
-1. Check the troubleshooting section above
-2. Review Home Assistant logs for error messages
-3. Open an issue: <https://github.com/Puma7/Kostal/issues>
-4. Provide diagnostic data when reporting issues
-
-### Feedback
-- This is a stable release. Production use is supported; monitor after upgrading and report anything unexpected.
-- Please include model generation (G1/G2/G3), inverter power class (e.g. 1kW, 3kW, 5kW, 20kW), and grid profile (50/60 Hz) in bug reports.
-
-## License
-
-MIT License. See [`LICENSE`](LICENSE).
-
----
-
-**Note**: This integration communicates directly with your Kostal inverter over the local network. Ensure your network configuration maintains security and reliability for optimal performance.
+MIT license, see [LICENSE](LICENSE).

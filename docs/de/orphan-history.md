@@ -1,6 +1,8 @@
 # Orphan-History-Migration
 
-> Gesamtübersicht aller Migrationswege (Buttons, Services, Profile): [MIGRATION_LEITFADEN.md](MIGRATION_LEITFADEN.md) · [MIGRATION_COMPLETE_EN.md](MIGRATION_COMPLETE_EN.md)
+[English](../en/orphan-history.md) · **Deutsch**
+
+> Gesamtübersicht aller Migrationswege (Buttons, Services, Profile): [migration.md](migration.md) · [English](../en/migration.md)
 
 ## Wann brauche ich das?
 
@@ -14,7 +16,7 @@ Wenn du gerade frisch von `kostal_plenticore` migriert hast, brauchst du diese S
 
 ## Was passiert dabei (kurz)
 
-Es werden **keine Rohdaten gelöscht**. Die alten `StatesMeta`- und `StatisticsMeta`-Zeilen werden auf die aktuellen kostal_kore-Entitäten umgehängt. Bei Konflikten (z.B. unterschiedliche Einheiten oder doppelte Statistik-Quellen) wird der jeweilige Merge übersprungen statt überschrieben.
+Es wird **kein Zustandsverlauf gelöscht**. Die alten `StatesMeta`- und `StatisticsMeta`-Zeilen werden auf die aktuellen kostal_kore-Entitäten umgehängt. Hat das Ziel schon eine Statistikzeile mit derselben Startzeit wie eine Legacy-Zeile, ersetzt die Legacy-Zeile sie. Bei Konflikten (z.B. unterschiedliche Einheiten oder doppelte Statistik-Quellen) wird der jeweilige Merge übersprungen.
 
 ## Schritt 1 — Backup
 
@@ -39,7 +41,7 @@ Prüfe die Vorschläge. `Similarity = 1.00` bedeutet einen exakten Suffix-Match;
 
 ## Schritt 3 — Dry-Run
 
-Stelle dein Mapping zusammen und rufe den Apply-Service mit `dry_run: true` auf:
+Stelle dein Mapping zusammen und rufe den Apply-Service mit `dry_run: true` auf. Der Service braucht einen Home-Assistant-Administrator, auch für den Dry-Run:
 
 ```yaml
 service: kostal_kore.apply_orphan_history_mapping
@@ -50,7 +52,7 @@ data:
     sensor.kostal_plenticore_battery_soc: sensor.kore_battery_soc
 ```
 
-Eine zweite persistente Benachrichtigung zeigt dir, wie viele Zeilen verschoben würden und welche Mappings übersprungen werden (z.B. weil das Ziel keine kostal_kore-Entity ist oder die Einheiten nicht passen).
+Eine zweite persistente Benachrichtigung listet die abgelehnten Mappings (z.B. weil das Ziel keine kostal_kore-Entity ist oder die Einheiten nicht passen). Der Dry-Run zählt keine Zeilen; wie viele Zeilen verschoben wurden, steht nach dem Apply ohne `dry_run` in der Meldung.
 
 ## Schritt 4 — Apply
 
