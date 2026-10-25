@@ -33,7 +33,10 @@ mit `Battery AC Charge Energy from Grid Total (Modbus)` (Register 1054).
 | Solarproduktion, String 2 | `Energy PV2 Total` | |
 | Solarproduktion, String 3 | `Energy PV3 Total` | Nur mit drittem String |
 
-Alternativ `Energy Yield Total` für alle Strings zusammen.
+Nimm `Energy Yield Total` nicht als Solarproduktion, wenn eine Batterie
+angeschlossen ist: Der Zähler erfasst den AC-Ertrag des Wechselrichters, der
+auch Energie aus der Batterie enthält; die Batterieentladung würde so doppelt
+gezählt.
 
 ## Batteriespeicher
 

@@ -32,7 +32,9 @@ not yet confirmed, see
 | Solar production, string 2 | `Energy PV2 Total` | |
 | Solar production, string 3 | `Energy PV3 Total` | Only with a third string |
 
-Alternatively, use `Energy Yield Total` for all strings combined.
+Do not use `Energy Yield Total` as solar production when a battery is
+installed: it counts the inverter's AC yield, which includes energy that came
+from the battery, so battery discharge would be counted twice.
 
 ## Home battery storage
 
