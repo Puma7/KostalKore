@@ -72,6 +72,7 @@ READBACK_POWER_MIN_ABS_TOL_W: Final[float] = 5.0
 
 # Outcome of the last command written through the entity (state attribute).
 COMMAND_CONFIRMED: Final[str] = "confirmed"
+COMMAND_LIMITED: Final[str] = "limited"
 COMMAND_INVALIDATED: Final[str] = "invalidated"
 # Why a power limit may read back off the command (log hint). On a G3, REG
 # 1038 reads the limit in effect: a forced charge (Battery Manual Charge)
@@ -80,6 +81,13 @@ _READBACK_HINTS: Final[dict[str, str]] = {
     READBACK_ABOVE_COMMAND: "reads above the command, e.g. lifted by a forced charge",
     READBACK_BELOW_COMMAND: "reads below the command, e.g. an effective BMS limit",
 }
+# REG 1038/1040 read min(command, BMS limit): the BMS lowers the charge limit
+# as the battery fills and the discharge limit as it empties (HV8). A read
+# below the command is therefore the command applied, limited by the BMS.
+EFFECTIVE_LIMIT_REGISTERS: Final[frozenset[str]] = frozenset({
+    REG_BAT_MAX_CHARGE_LIMIT.name,
+    REG_BAT_MAX_DISCHARGE_LIMIT.name,
+})
 
 G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_G3_MAX_CHARGE.name,
@@ -456,11 +464,13 @@ class ModbusNumberEntity(
         # setpoint read it back through native_value / the attributes.
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._cancel_keepalive()
+        previous = self.coordinator.last_commanded(self._register.name)
         await self.coordinator.async_write_register(self._register, value)
         write_generation = self.coordinator.client.connection_generation
         revision = self.coordinator.command_revision(self._register.name)
 
         verified = False
+        limited = False
         read_failed = False
         observed: float | None = None
         if self._register.name != CURTAILMENT_REGISTER_NAME:
@@ -480,7 +490,14 @@ class ModbusNumberEntity(
                     verified = self._readback_matches(observed, value)
                     if verified:
                         break
-                    if attempt == READBACK_ATTEMPTS - 1:
+                    if attempt == READBACK_ATTEMPTS - 1 and self._readback_limited(observed, value, previous):
+                        limited = True
+                        _LOGGER.info(
+                            "%s applied: wrote %s, the inverter currently allows %s "
+                            "(limit in effect, e.g. BMS taper near full or empty)",
+                            self._register.name, value, readback,
+                        )
+                    elif attempt == READBACK_ATTEMPTS - 1:
                         _LOGGER.warning(
                             "Read-back mismatch for %s: wrote %s, read %s (%s)",
                             self._register.name, value, readback,
@@ -507,7 +524,7 @@ class ModbusNumberEntity(
                 observed=observed, outcome=outcome,
             )
 
-        if not verified and self._register.name != CURTAILMENT_REGISTER_NAME:
+        if not verified and not limited and self._register.name != CURTAILMENT_REGISTER_NAME:
             # A transport acknowledgement does not establish that the inverter
             # accepted the limit. Publish a device refresh, then fail the call so
             # controllers cannot treat an ignored command as an applied limit.
@@ -531,9 +548,9 @@ class ModbusNumberEntity(
             try:
                 newest_value = self.coordinator.proxy_cache_data.get(self._register.name)
                 newest = float(newest_value) if newest_value is not None else math.nan
-                refresh_confirmed = math.isfinite(newest) and self._readback_matches(
-                    newest, value
-                )
+                matched = math.isfinite(newest) and self._readback_matches(newest, value)
+                limited = not matched and self._readback_limited(newest, value, previous)
+                refresh_confirmed = matched or limited
             except (TypeError, ValueError):
                 refresh_confirmed = False
             retained = getattr(self.coordinator.client, "retained_quality_addresses", set())
@@ -550,7 +567,7 @@ class ModbusNumberEntity(
                                           control=f"modbus_{self._register.name}")
             raise ModbusClientError("Control confirmation was invalidated during refresh")
 
-        self._record_last_command(revision, COMMAND_CONFIRMED, observed)
+        self._record_last_command(revision, COMMAND_LIMITED if limited else COMMAND_CONFIRMED, observed)
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),
@@ -568,6 +585,16 @@ class ModbusNumberEntity(
         if observed is None:
             return READBACK_UNREADABLE
         return READBACK_ABOVE_COMMAND if observed > value else READBACK_BELOW_COMMAND
+
+    def _readback_limited(self, observed: float, value: float, previous: float | None) -> bool:
+        """Return True if a read below the command is the BMS-limited command.
+
+        A raised limit that still reads the previous command was ignored, not
+        limited: the BMS limit does not happen to sit on the old command.
+        """
+        if self._register.name not in EFFECTIVE_LIMIT_REGISTERS or not 0 <= observed < value:
+            return False
+        return previous is None or previous >= value or not self._readback_matches(observed, previous)
 
     def _readback_matches(self, observed: float, value: float) -> bool:
         """Return True if a read-back confirms the commanded value."""

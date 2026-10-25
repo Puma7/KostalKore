@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
+
 ### Changed
+- A Modbus write to `Battery Max Charge Limit` / `Battery Max Discharge Limit`
+  (REG 1038 / 1040) that reads back **below** the command now counts as
+  applied (`last_command_outcome = limited`) instead of failing as "Readback is
+  unconfirmed": both registers read the limit in effect, and the BMS lowers
+  the charge limit as the battery fills and the discharge limit as it empties
+  (HV8, confirmed on the user's G3). It still fails when the limit reads above
+  the command (forced charge), cannot be read, or a raised limit still reads
+  the previous command (ignored). The G3 cyclic limits (1280/1282) are
+  unchanged (Puma7/KostalKore#87).
 - Docs: `Grid to Battery Power` (`Grid2Bat_P`) is the battery's DC power split
   by source, not the AC power drawn from the grid (it tracks `Battery Power`
   within 1-2 % during night charging). `Total Grid Consumption` is therefore
@@ -15,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (HARDWARE_VALIDATION_TODO HV9).
 
 ### Fixed
+- The REST `Battery SoC` (`devices:local:battery` `SoC`) no longer drops to
+  0 % during the nightly inverter internal error around 03:10: a 0 right after
+  a real SoC keeps the last value for up to two polls (logged at INFO), and a
+  0 that persists is passed on (Puma7/KostalKore#85).
 - Modbus power-limit commands (e.g. REG 1038) failed as "Readback is
   unconfirmed" although the inverter applied them: a G3 reads 1000 W back as
   997.9-999.9 W (current x battery voltage) and the check required an exact
@@ -80,13 +95,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arguments and escapes control characters in printed inverter responses.
 
 ### Added
+- Release check (`.github/workflows/release-version.yml`): a pushed `v*` tag
+  or a published release fails when the tag does not match the manifest
+  version at that commit, as happened with v3.0.3 (manifest 3.0.5) and v3.0.15
+  (manifest 3.0.13). Published tags are left as they are
+  (Puma7/KostalKore#67).
 - Export allowlisted cached inverter firmware, battery management mode and
   finite numeric battery-control settings with per-field freshness. Exporting
   does not change control settings or add polling demand.
 - An unconfirmed Modbus limit write now raises `ReadbackUnconfirmedError`
   (still a `ModbusClientError`, message unchanged at the start) with
   `commanded`, `observed` and `outcome` (`above_command`, `below_command`,
-  `unreadable`). Callers can tell a limit lifted by a forced charge from an
+  `unreadable`; `below_command` for 1038/1040 only when a raised limit still
+  reads the previous command). Callers can tell a limit lifted by a forced charge from an
   effective limit below the command without parsing the message. The log
   line names the direction too (Puma7/KostalKore#87).
 - Modbus number entities expose `last_commanded_value` and, for a write made

@@ -82,6 +82,11 @@ against your FW 3.06.10 G3.
   charge), not the stored command. Confirm with the WebUI and the BMS max-charge register, and check
   1040 the same way. → Decides whether a read below the command may count as applied (today it
   fails with `outcome = below_command`) and how long KORE should wait after lifting a limit.
+  **Answered 2026-10-25 (owner, G3):** yes — the BMS lowers the charge limit as the battery
+  fills and the discharge limit as it empties, so 1038/1040 read min(command, BMS limit). A read
+  below the command now counts as applied (`limited`); a raised limit that still reads the
+  previous command still fails as ignored. Still open: whether the G3 cyclic limits 1280/1282
+  read back the same way (they keep exact confirmation), and how long the read lags a raise.
 - **HV9 — Which battery charge counters are AC and which are DC?** `Grid2Bat_P` tracks `Battery
   Power` within 1-2 % during night charging, so it is DC. Compare over one night without PV:
   REG 1054 (`total_ac_charge_grid`), REG 1050 (`total_ac_charge`), REG 1046 (`total_dc_charge`),

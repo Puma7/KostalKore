@@ -38,28 +38,78 @@ def _command(coord, value):
 
 # Read-backs from the night of 24/25 October 2026.
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("written", "observed", "outcome"), [
-    (1000, 21460.23046875, mod.READBACK_ABOVE_COMMAND),    # Battery Manual Charge on
-    (1000, 0.0, mod.READBACK_BELOW_COMMAND),               # ManualCharge off again
-    (1000, 244.8936004638672, mod.READBACK_BELOW_COMMAND),  # BMS near full charge
-    (12540, 52.64067840576172, mod.READBACK_BELOW_COMMAND),  # restore, limit not yet lifted
-])
-async def test_unconfirmed_readback_says_which_way_it_is_off(written, observed, outcome, caplog) -> None:
+async def test_a_limit_lifted_by_a_forced_charge_is_unconfirmed(caplog) -> None:
     coord = _coord()
-    coord.client.read_register = AsyncMock(return_value=observed)
+    coord.client.read_register = AsyncMock(return_value=21460.23046875)  # Battery Manual Charge on
     entity = _limit_entity(coord)
     with caplog.at_level(logging.WARNING), pytest.raises(ReadbackUnconfirmedError) as err:
-        await entity.async_set_native_value(written)
+        await entity.async_set_native_value(1000)
     assert isinstance(err.value, ModbusClientError)
     assert str(err.value).startswith("Readback is unconfirmed for bat_max_charge_limit")
     assert (err.value.register, err.value.commanded, err.value.observed, err.value.outcome) == (
-        "bat_max_charge_limit", written, observed, outcome)
-    assert mod._READBACK_HINTS[outcome] in caplog.text
+        "bat_max_charge_limit", 1000, 21460.23046875, mod.READBACK_ABOVE_COMMAND)
+    assert mod._READBACK_HINTS[mod.READBACK_ABOVE_COMMAND] in caplog.text
+    assert entity.extra_state_attributes == {
+        "last_commanded_value": 1000,
+        "last_command_outcome": mod.READBACK_ABOVE_COMMAND,
+        "last_command_readback": 21460.23046875,
+    }
+
+
+# The BMS lowers the charge limit as the battery fills and the discharge
+# limit as it empties (HV8): a read below the command is the command applied.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("register", [mod.REG_BAT_MAX_CHARGE_LIMIT, mod.REG_BAT_MAX_DISCHARGE_LIMIT])
+@pytest.mark.parametrize(("previous", "written", "observed"), [
+    (None, 1000, 0.0),                   # ManualCharge off again
+    (1000, 1000, 244.8936004638672),     # BMS near full charge
+    (1000, 12540, 52.64067840576172),    # restore, limit not yet lifted
+])
+async def test_a_bms_limited_read_is_an_applied_command(register, previous, written, observed, caplog) -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=observed)
+    entity = _limit_entity(coord, register=register)
+    coord._commanded = previous
+    coord.data = {register.name: observed}
+    with caplog.at_level(logging.INFO):
+        await entity.async_set_native_value(written)
+    assert "currently allows" in caplog.text
+    assert "Read-back mismatch" not in caplog.text
     assert entity.extra_state_attributes == {
         "last_commanded_value": written,
-        "last_command_outcome": outcome,
+        "last_command_outcome": mod.COMMAND_LIMITED,
         "last_command_readback": observed,
     }
+
+
+@pytest.mark.asyncio
+async def test_a_limited_first_read_is_confirmed_by_a_matching_refresh() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=245.0)
+    entity = _limit_entity(coord)
+    coord.data = {mod.REG_BAT_MAX_CHARGE_LIMIT.name: 999.0}
+    await entity.async_set_native_value(1000)
+    assert entity.extra_state_attributes["last_command_outcome"] == mod.COMMAND_CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_a_raised_limit_that_reads_the_old_command_was_ignored() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=1000.0)
+    entity = _limit_entity(coord)
+    coord._commanded = 1000
+    with pytest.raises(ReadbackUnconfirmedError) as err:
+        await entity.async_set_native_value(12540)
+    assert err.value.outcome == mod.READBACK_BELOW_COMMAND
+
+
+def test_only_1038_and_1040_read_the_limit_in_effect() -> None:
+    soc = _limit_entity(_coord(), register=mod.REG_BAT_MIN_SOC)
+    assert not soc._readback_limited(70.0, 80.0, None)
+    limit = _limit_entity(_coord())
+    assert not limit._readback_limited(-1.0, 1000.0, None)
+    assert not limit._readback_limited(1001.0, 1000.0, None)
+    assert limit._readback_limited(500.0, 1000.0, 2000.0)  # lowered, not raised
 
 
 @pytest.mark.asyncio
@@ -109,7 +159,7 @@ async def test_confirmed_and_invalidated_commands_are_reported() -> None:
 @pytest.mark.asyncio
 async def test_outcome_is_hidden_once_another_path_commands_a_new_value() -> None:
     coord = _coord()
-    coord.client.read_register = AsyncMock(return_value=0.0)
+    coord.client.read_register = AsyncMock(return_value=21460.0)
     entity = _limit_entity(coord)
     with pytest.raises(ReadbackUnconfirmedError):
         await entity.async_set_native_value(1000)
@@ -120,7 +170,7 @@ async def test_outcome_is_hidden_once_another_path_commands_a_new_value() -> Non
 @pytest.mark.asyncio
 async def test_a_later_write_of_the_same_value_hides_the_old_outcome() -> None:
     coord = _coord()
-    coord.client.read_register = AsyncMock(return_value=0.0)
+    coord.client.read_register = AsyncMock(return_value=21460.0)
     entity = _limit_entity(coord)
     with pytest.raises(ReadbackUnconfirmedError):
         await entity.async_set_native_value(1000)

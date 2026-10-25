@@ -927,6 +927,14 @@ class AdaptivePollingCoordinatorMixin:
         )
 
 
+# During the nightly G3 "Server device failure" (~03:10) the REST API answers
+# the battery SoC with 0 for a poll or two (Puma7/KostalKore#85). A battery
+# cannot drop from a real SoC to exactly 0 within one poll, so such a 0 keeps
+# the last value; one that persists for longer than this is passed on.
+_REST_BATTERY_MODULE: Final[str] = "devices:local:battery"
+REST_SOC_MAX_CONSECUTIVE_ZERO_DROPS: Final[int] = 2
+
+
 class ProcessDataUpdateCoordinator(
     AdaptivePollingCoordinatorMixin,
     PlenticoreUpdateCoordinator[Mapping[str, Mapping[str, str]]],
@@ -966,6 +974,27 @@ class ProcessDataUpdateCoordinator(
         self.communication_stale = requested and not self._communication_roundtrip_ok
         await self._report_rest_result(not self.communication_stale)
         return result
+
+    def _held_soc_for_zero(self, module_id: str, values: Mapping[str, str]) -> str | None:
+        """Return the last SoC to hold when the REST battery SoC reads 0 after a real one."""
+        if module_id != _REST_BATTERY_MODULE or "SoC" not in values:
+            return None
+        last_text = self._last_result.get(module_id, {}).get("SoC")
+        try:
+            soc = float(values["SoC"])
+            last = float(last_text) if last_text is not None else math.nan
+        except ValueError:
+            return None
+        drops: int = getattr(self, "_soc_zero_drops", 0)
+        if soc != 0 or not last > 0 or drops >= REST_SOC_MAX_CONSECUTIVE_ZERO_DROPS:
+            self._soc_zero_drops = 0 if soc != 0 else drops
+            return None
+        self._soc_zero_drops = drops + 1
+        _LOGGER.info(
+            "Inverter answered battery SoC 0 %% right after %s %%; keeping the last value "
+            "(read fault, e.g. the nightly inverter internal error)", last_text,
+        )
+        return last_text
 
     async def _async_fetch_process_data(self) -> dict[str, dict[str, str]]:
         client = self._plenticore.client
@@ -1092,9 +1121,14 @@ class ProcessDataUpdateCoordinator(
                     result[module_id][process_data_id] = _process_value_text(module_data[process_data_id].value)
                 except (AttributeError, TypeError, KeyError, ValueError):
                     failed_fields.append(process_data_id)
+            held_soc = self._held_soc_for_zero(module_id, result[module_id])
 
             # Snapshot fresh fields BEFORE backfill so _last_result stays stale-free. // GEÄNDERT
             fresh_result[module_id] = dict(result[module_id])
+            if held_soc is not None:
+                # Held, not fresh: the cache keeps the last real SoC.
+                del fresh_result[module_id]["SoC"]
+                result[module_id]["SoC"] = held_soc
             self.fresh_fields.update((module_id, key) for key in fresh_result[module_id])
 
             if failed_fields:

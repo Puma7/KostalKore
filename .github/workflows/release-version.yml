@@ -1,0 +1,40 @@
+name: Release version check
+
+# A release tag must name the version HACS installs: v3.0.3 shipped manifest
+# 3.0.5 and v3.0.15 shipped 3.0.13 (Puma7/KostalKore#67). This fails the tag
+# or release run so a mismatch is seen at once; tags are never rewritten.
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published, edited]
+
+concurrency:
+  group: release-version-${{ github.event.release.tag_name || github.ref_name }}
+
+# Least-privilege token: the check only reads the tagged manifest.
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Compare tag and manifest version
+        env:
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("custom_components/kostal_kore/manifest.json"))["version"])')
+          case "$TAG" in
+            "v$version" | "v$version"-*)
+              echo "Tag $TAG matches manifest version $version" ;;
+            *)
+              echo "::error::Tag $TAG does not match manifest version $version. Bump custom_components/kostal_kore/manifest.json to the release version on main first, then tag that commit v<version>."
+              exit 1 ;;
+          esac

@@ -43,14 +43,13 @@ async def test_power_limit_readback_drift_confirms_the_write(observed) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("requested", "observed"), [
-    (1000, 51.49608612060547),   # the inverter really held ~51 W from 23:31 on
-    (1000, 141.90097045898438),
-    (2000, 1900),                # an ignored one-step command
-    (1000, 1006),                # beyond 0.5 % / 5 W
+@pytest.mark.parametrize(("previous", "requested", "observed"), [
+    (1900, 2000, 1900),          # an ignored one-step command keeps the old one
+    (None, 1000, 1006),          # beyond 0.5 % / 5 W
 ])
-async def test_power_limit_readback_still_rejects_real_mismatches(requested, observed) -> None:
+async def test_power_limit_readback_still_rejects_real_mismatches(previous, requested, observed) -> None:
     coord = _coord()
+    coord.last_commanded = MagicMock(return_value=previous)
     coord.client.read_register = AsyncMock(return_value=observed)
     with pytest.raises(mod.ModbusClientError, match="unconfirmed"):
         await _limit_entity(coord).async_set_native_value(requested)
@@ -242,3 +241,46 @@ async def test_only_suspect_zeros_are_held_back_from_the_proxy(hass) -> None:
     # No device failure in this poll: the zero is real and now published.
     assert data["grid_frequency"] == 0.0
     assert coordinator.proxy_cache_data["grid_frequency"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# REST battery SoC 0 % during the 03:10 inverter fault
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rest_soc_zero_after_a_real_soc_is_held(hass, caplog) -> None:
+    import logging
+    from types import SimpleNamespace
+
+    from Tests.test_bug_regression import _make_process_coord
+
+    proc = _make_process_coord(hass, {"devices:local:battery": ["SoC", "P"]})
+    answers = iter(["21", "0", "0", "0", "0", "22", "0"])
+
+    async def fetch(_request):
+        return {"devices:local:battery": {
+            "SoC": SimpleNamespace(value=next(answers)), "P": SimpleNamespace(value="-500")}}
+
+    proc._plenticore._client.get_process_data_values = fetch
+    with caplog.at_level(logging.INFO):
+        socs = [(await proc._async_update_data())["devices:local:battery"]["SoC"] for _ in range(7)]
+    # Two polls are held; a 0 that persists is passed on, and a later 0 after a
+    # real SoC is held again.
+    assert socs == ["21", "21", "21", "0", "0", "22", "22"]
+    assert caplog.text.count("keeping the last value") == 3
+    assert ("devices:local:battery", "SoC") not in proc.fresh_fields
+    assert proc._last_result["devices:local:battery"]["SoC"] == "22"
+    assert proc.communication_stale is False
+
+
+def test_rest_soc_hold_ignores_other_modules_and_text() -> None:
+    from custom_components.kostal_kore.coordinator import ProcessDataUpdateCoordinator
+
+    proc = ProcessDataUpdateCoordinator.__new__(ProcessDataUpdateCoordinator)
+    proc._last_result = {"devices:local:battery": {"SoC": "21"}}
+    assert proc._held_soc_for_zero("devices:local", {"SoC": "0"}) is None
+    assert proc._held_soc_for_zero("devices:local:battery", {"P": "0"}) is None
+    assert proc._held_soc_for_zero("devices:local:battery", {"SoC": "n/a"}) is None
+    proc._last_result = {}
+    assert proc._held_soc_for_zero("devices:local:battery", {"SoC": "0"}) is None
