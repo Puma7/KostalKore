@@ -330,7 +330,7 @@ class ModbusNumberEntity(
         super().__init__(coordinator)
         self._register = register
         self._read_only = read_only
-        self._attr_name = name
+        self._english_name = name
         self._attr_icon = icon
         self._attr_native_min_value = min_value
         self._attr_native_max_value = max_value

@@ -168,10 +168,15 @@ logger:
     pykoplenti: debug
 ```
 
+## Languages
+
+The user interface is available in English and German, including entity names.
+Entity IDs stay English in every language, so automations and these docs work
+unchanged. More languages are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Translations are welcome: the user
-interface strings live in `custom_components/kostal_kore/translations/`.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits and license
 

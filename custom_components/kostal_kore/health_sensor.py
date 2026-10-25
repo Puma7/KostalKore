@@ -38,7 +38,7 @@ class HealthScoreSensor(SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Inverter Health Score"
+    _english_name = "Inverter Health Score"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -73,7 +73,7 @@ class HealthLevelSensor(SensorEntity):
     _attr_icon = "mdi:shield-check"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Inverter Health Level"
+    _english_name = "Inverter Health Level"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -107,7 +107,7 @@ class IsolationResistanceSensor(SensorEntity):
     _attr_suggested_display_precision = 0
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Isolation Resistance (Health)"
+    _english_name = "Isolation Resistance (Health)"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -141,7 +141,7 @@ class ControllerTempHealthSensor(SensorEntity):
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Controller Temperature (Health)"
+    _english_name = "Controller Temperature (Health)"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -171,7 +171,7 @@ class BatteryHealthSensor(SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Battery Health (SoH Trend)"
+    _english_name = "Battery Health (SoH Trend)"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -205,7 +205,7 @@ class ErrorRateSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Error Rate (per hour)"
+    _english_name = "Error Rate (per hour)"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -236,7 +236,7 @@ class CommunicationReliabilitySensor(SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Modbus Communication Reliability"
+    _english_name = "Modbus Communication Reliability"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -262,7 +262,7 @@ class DCStringImbalanceSensor(SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "DC String Imbalance"
+    _english_name = "DC String Imbalance"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -298,7 +298,7 @@ class PhaseImbalanceSensor(SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Phase Voltage Imbalance"
+    _english_name = "Phase Voltage Imbalance"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -326,7 +326,7 @@ class InverterStateChangeSensor(SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Inverter State Changes"
+    _english_name = "Inverter State Changes"
 
     def __init__(self, monitor: InverterHealthMonitor, entry_id: str, device_info: DeviceInfo) -> None:
         self._monitor = monitor
@@ -358,7 +358,7 @@ class ModbusRawSensor(SensorEntity):
     ) -> None:
         self._monitor = monitor
         self._tracker_name = tracker_name
-        self._attr_name = name
+        self._english_name = name
         self._attr_icon = icon
         self._attr_native_unit_of_measurement = unit
         self._attr_device_class = device_class

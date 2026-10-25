@@ -24,35 +24,35 @@ _LOGGER: Final = logging.getLogger(__name__)
 _AREA_CONFIG: Final[list[dict[str, str]]] = [
     {
         "area": "dc_solar",
-        "name": "Diagnose: DC Solaranlage",
+        "name": "Diagnosis: DC Solar Array",
         "icon_ok": "mdi:solar-panel",
         "icon_warn": "mdi:solar-panel-large",
         "icon_crit": "mdi:alert",
     },
     {
         "area": "ac_grid",
-        "name": "Diagnose: AC Netzanbindung",
+        "name": "Diagnosis: AC Grid Connection",
         "icon_ok": "mdi:transmission-tower",
         "icon_warn": "mdi:transmission-tower",
         "icon_crit": "mdi:flash-alert",
     },
     {
         "area": "battery",
-        "name": "Diagnose: Batterie",
+        "name": "Diagnosis: Battery",
         "icon_ok": "mdi:battery-check",
         "icon_warn": "mdi:battery-alert-variant-outline",
         "icon_crit": "mdi:battery-alert",
     },
     {
         "area": "inverter",
-        "name": "Diagnose: Wechselrichter",
+        "name": "Diagnosis: Inverter",
         "icon_ok": "mdi:power-plug-outline",
         "icon_warn": "mdi:power-plug-off-outline",
         "icon_crit": "mdi:alert-octagon",
     },
     {
         "area": "safety",
-        "name": "Diagnose: Sicherheit",
+        "name": "Diagnosis: Safety",
         "icon_ok": "mdi:shield-check",
         "icon_warn": "mdi:shield-half-full",
         "icon_crit": "mdi:shield-alert",
@@ -83,7 +83,7 @@ class AreaDiagnosticSensor(SensorEntity):
         self._icon_warn = icon_warn
         self._icon_crit = icon_crit
         self._entry_id = entry_id
-        self._attr_name = name
+        self._english_name = name
         self._attr_unique_id = f"{entry_id}_diag_{area}"
         self._attr_device_info = device_info
         self._last_diagnosis: AreaDiagnosis | None = None

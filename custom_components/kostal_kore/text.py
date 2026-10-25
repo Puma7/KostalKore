@@ -12,6 +12,7 @@ from .const import (
     AddConfigEntryEntitiesCallback,
 )
 from .coordinator import PlenticoreConfigEntry
+from .naming import async_translated_adder
 
 
 class LegacyCleanupConfirmationCodeText(TextEntity):
@@ -19,7 +20,7 @@ class LegacyCleanupConfirmationCodeText(TextEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Legacy Cleanup Confirmation Code"
+    _english_name = "Legacy Cleanup Confirmation Code"
     _attr_icon = "mdi:form-textbox-password"
     _attr_mode = TextMode.PASSWORD
     _attr_native_min = 0
@@ -60,6 +61,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up text entities for the integration."""
+    async_add_entities = await async_translated_adder(hass, "text", async_add_entities)
     entry_store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     entry_store.setdefault(DATA_KEY_LEGACY_CLEANUP_CODE_INPUT, "")
     from .startup_trace import log_entity_batch

@@ -179,10 +179,16 @@ logger:
     pykoplenti: debug
 ```
 
+## Sprachen
+
+Die Oberfläche gibt es auf Englisch und Deutsch, einschließlich der
+Entitätsnamen. Die Entity-IDs bleiben in jeder Sprache englisch, damit
+Automationen und diese Doku unverändert passen. Weitere Sprachen sind
+willkommen: siehe [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Mitmachen
 
-Siehe [CONTRIBUTING.md](CONTRIBUTING.md). Übersetzungen sind willkommen: Die
-Texte der Oberfläche liegen in `custom_components/kostal_kore/translations/`.
+Siehe [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Dank und Lizenz
 

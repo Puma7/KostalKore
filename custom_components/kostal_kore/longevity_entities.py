@@ -19,7 +19,7 @@ class BatteryLongevitySensor(SensorEntity):
     _attr_icon = "mdi:battery-clock"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Batterie Langlebigkeit"
+    _english_name = "Battery Longevity"
 
     def __init__(self, advisor: LongevityAdvisor, entry_id: str, device_info: DeviceInfo) -> None:
         self._advisor = advisor
@@ -51,7 +51,7 @@ class InverterLongevitySensor(SensorEntity):
     _attr_icon = "mdi:timer-cog"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Wechselrichter Langlebigkeit"
+    _english_name = "Inverter Longevity"
 
     def __init__(self, advisor: LongevityAdvisor, entry_id: str, device_info: DeviceInfo) -> None:
         self._advisor = advisor
@@ -81,7 +81,7 @@ class PVLongevitySensor(SensorEntity):
     _attr_icon = "mdi:solar-power-variant"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "PV-Anlage Langlebigkeit"
+    _english_name = "PV System Longevity"
 
     def __init__(self, advisor: LongevityAdvisor, entry_id: str, device_info: DeviceInfo) -> None:
         self._advisor = advisor

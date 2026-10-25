@@ -9,7 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
 
+### Added
+- German user interface (`translations/de.json`): setup and options flows,
+  repair issues, services and all entity names. Entity names are written in
+  English in the code and translated through derived translation keys
+  (`naming.py`); new entities keep **English entity IDs** on every system, so
+  automations and the documentation stay valid. Existing entities keep their
+  IDs; their display names follow the Home Assistant language. Other languages
+  only need a `translations/<code>.json`. `scripts/sync_translations.py` keeps
+  `strings.json`/`en.json` in step with the code, and tests fail when a
+  language misses a key or placeholder.
+
 ### Changed
+- Entities that had German names in the code now have English source names
+  (e.g. *Battery Longevity*, *Diagnosis: Battery*, *Degradation: Battery SoH*)
+  and are translated like all others; unique IDs and existing entity IDs are
+  unchanged. Their state values (e.g. `ok`/`hinweis`/`warnung`/`kritisch`) and
+  advice texts are still German.
 - Documentation: new `README.md` (English) and `README.de.md` (German) that state
   what is tested (one PLENTICORE G3 L 20 kW) and what is not, without the old
   feature marketing. User guides are bilingual under `docs/en/` and `docs/de/`

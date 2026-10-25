@@ -45,6 +45,7 @@ from .helper import (
     parse_modbus_exception,
     requires_installer_service_code,
 )
+from .naming import async_translated_adder
 from .notifications import clear_control_lease_notice, notify_control_lease_lost
 
 _LOGGER = logging.getLogger(__name__)
@@ -1294,6 +1295,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add Kostal Plenticore Number entities."""
+    async_add_entities = await async_translated_adder(hass, "number", async_add_entities)
     plenticore = entry.runtime_data
 
     entities = []
@@ -1610,7 +1612,7 @@ class PlenticoreDataNumber(
             self._attr_unique_id = f"{self.entry_id}_{self.module_id}_{self.data_id}"
             self._attr_has_entity_name = True
             name = description.name if isinstance(description.name, str) else ""
-            self._attr_name = name
+            self._english_name = name
             self._attr_translation_key = _normalize_translation_key(description.key)
             self._attr_mode = NumberMode.BOX
 
@@ -1633,7 +1635,7 @@ class PlenticoreDataNumber(
             _LOGGER.debug(
                 "PlenticoreDataNumber created: unique_id=%s, name=%s",
                 self._attr_unique_id,
-                self._attr_name,
+                self._english_name,
             )
         except Exception as err:
             _LOGGER.error(
@@ -1797,7 +1799,7 @@ class PlenticoreDataNumber(
         await super().async_added_to_hass()
         _LOGGER.debug(
             "Number entity %s registering with coordinator for %s/%s",
-            self._attr_name,
+            self._english_name,
             self.module_id,
             self.data_id,
         )

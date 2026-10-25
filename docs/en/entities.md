@@ -3,6 +3,9 @@
 **English** · [Deutsch](../de/entities.md)
 
 Complete documentation of all entities, values, units and their meaning.
+Entity names are shown in your Home Assistant language (English names below; see the
+[German reference](../de/entities.md) for the German ones). Entity IDs stay English in
+every language.
 Note: The availability of individual entities depends on the inverter generation/firmware and on the access profile (User/Installer).
 
 ---
@@ -263,11 +266,11 @@ and survive HA restarts. The entities are classified under `EntityCategory.DIAGN
 
 | Entity | Values | Description |
 |---|---|---|
-| **Diagnose: DC Solaranlage** | ok / hinweis / warnung / kritisch | Assesses PV strings, MC4 connectors, cable condition. The attribute `action` contains a concrete recommended action in plain text. |
-| **Diagnose: AC Netzanbindung** | ok / hinweis / warnung / kritisch | Assesses phase voltage, frequency, power factor. Recommends contacting the grid operator if necessary. |
-| **Diagnose: Batterie** | ok / hinweis / warnung / kritisch | Assesses temperature, SoH, cycles. On critical: evacuation notice. On notice: installation location recommendation. |
-| **Diagnose: Wechselrichter** | ok / hinweis / warnung / kritisch | Assesses controller temperature, error status, communication. Recommends a ventilation check. |
-| **Diagnose: Sicherheit** | ok / hinweis / warnung / kritisch | Overall safety assessment: isolation, fire risk, cable faults. On critical: immediate action recommended. |
+| **Diagnosis: DC Solar Array** | ok / hinweis / warnung / kritisch | Assesses PV strings, MC4 connectors, cable condition. The attribute `action` contains a concrete recommended action in plain text. |
+| **Diagnosis: AC Grid Connection** | ok / hinweis / warnung / kritisch | Assesses phase voltage, frequency, power factor. Recommends contacting the grid operator if necessary. |
+| **Diagnosis: Battery** | ok / hinweis / warnung / kritisch | Assesses temperature, SoH, cycles. On critical: evacuation notice. On notice: installation location recommendation. |
+| **Diagnosis: Inverter** | ok / hinweis / warnung / kritisch | Assesses controller temperature, error status, communication. Recommends a ventilation check. |
+| **Diagnosis: Safety** | ok / hinweis / warnung / kritisch | Overall safety assessment: isolation, fire risk, cable faults. On critical: immediate action recommended. |
 
 ---
 
@@ -275,9 +278,9 @@ and survive HA restarts. The entities are classified under `EntityCategory.DIAGN
 
 | Entity | Description |
 |---|---|
-| **Batterie Langlebigkeit** | Temperature assessment based on the detected battery chemistry (LFP/NMC). Shows "Optimal", "Akzeptabel" (acceptable), "Erhöht" (elevated) or "Kritisch" (critical). The attribute `tips` contains concrete recommendations for extending service life. The attribute `chemistry` shows the detected chemistry. |
-| **Wechselrichter Langlebigkeit** | Assesses the average and peak temperature of the controller. Gives recommendations on ventilation and mounting location. |
-| **PV-Anlage Langlebigkeit** | Monitors DC string balance and isolation trend. Gives recommendations on module cleaning and cable maintenance. |
+| **Battery Longevity** | Temperature assessment based on the detected battery chemistry (LFP/NMC). Shows "Optimal", "Akzeptabel" (acceptable), "Erhöht" (elevated) or "Kritisch" (critical). The attribute `tips` contains concrete recommendations for extending service life. The attribute `chemistry` shows the detected chemistry. |
+| **Inverter Longevity** | Assesses the average and peak temperature of the controller. Gives recommendations on ventilation and mounting location. |
+| **PV System Longevity** | Monitors DC string balance and isolation trend. Gives recommendations on module cleaning and cable maintenance. |
 
 ---
 

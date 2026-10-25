@@ -3,6 +3,9 @@
 [English](../en/entities.md) · **Deutsch**
 
 Vollständige Dokumentation aller Entities, Werte, Einheiten und deren Bedeutung.
+Home Assistant zeigt die Namen in deiner Sprache an; diese Referenz nennt viele Entitäten
+noch mit ihrem englischen Namen aus dem Code, der auch in der englischen Oberfläche steht.
+Die Entity-IDs bleiben in jeder Sprache englisch.
 Hinweis: Verfügbarkeit einzelner Entities hängt von Inverter-Generation/Firmware sowie Zugriffsprofil (User/Installer) ab.
 
 ---
@@ -264,8 +267,8 @@ eingestuft.
 
 | Entity | Werte | Beschreibung |
 |---|---|---|
-| **Diagnose: DC Solaranlage** | ok / hinweis / warnung / kritisch | Bewertet PV-Strings, MC4-Stecker, Kabelzustand. Attribut `action` enthält konkrete Handlungsempfehlung in Klartext. |
-| **Diagnose: AC Netzanbindung** | ok / hinweis / warnung / kritisch | Bewertet Phasenspannung, Frequenz, Leistungsfaktor. Empfiehlt ggf. Netzversorger zu kontaktieren. |
+| **Diagnose: DC-Solargenerator** | ok / hinweis / warnung / kritisch | Bewertet PV-Strings, MC4-Stecker, Kabelzustand. Attribut `action` enthält konkrete Handlungsempfehlung in Klartext. |
+| **Diagnose: AC-Netzanschluss** | ok / hinweis / warnung / kritisch | Bewertet Phasenspannung, Frequenz, Leistungsfaktor. Empfiehlt ggf. Netzversorger zu kontaktieren. |
 | **Diagnose: Batterie** | ok / hinweis / warnung / kritisch | Bewertet Temperatur, SoH, Zyklen. Bei Kritisch: Evakuierungshinweis. Bei Hinweis: Aufstellort-Empfehlung. |
 | **Diagnose: Wechselrichter** | ok / hinweis / warnung / kritisch | Bewertet Controller-Temperatur, Fehlerstatus, Kommunikation. Empfiehlt Belüftungsprüfung. |
 | **Diagnose: Sicherheit** | ok / hinweis / warnung / kritisch | Gesamtsicherheitsbewertung: Isolation, Brandrisiko, Kabelfehler. Bei Kritisch: sofortiges Handeln empfohlen. |
@@ -276,9 +279,9 @@ eingestuft.
 
 | Entity | Beschreibung |
 |---|---|
-| **Batterie Langlebigkeit** | Temperatur-Bewertung basierend auf erkannter Batteriechemie (LFP/NMC). Zeigt "Optimal", "Akzeptabel", "Erhöht" oder "Kritisch". Attribut `tips` enthält konkrete Empfehlungen zur Lebensdauerverlängerung. Attribut `chemistry` zeigt erkannte Chemie. |
-| **Wechselrichter Langlebigkeit** | Bewertet Durchschnitts- und Spitzentemperatur des Controllers. Gibt Empfehlungen zu Belüftung und Montageort. |
-| **PV-Anlage Langlebigkeit** | Überwacht DC-String-Balance und Isolationstrend. Gibt Empfehlungen zu Modulreinigung und Kabelwartung. |
+| **Batterie-Langlebigkeit** | Temperatur-Bewertung basierend auf erkannter Batteriechemie (LFP/NMC). Zeigt "Optimal", "Akzeptabel", "Erhöht" oder "Kritisch". Attribut `tips` enthält konkrete Empfehlungen zur Lebensdauerverlängerung. Attribut `chemistry` zeigt erkannte Chemie. |
+| **Wechselrichter-Langlebigkeit** | Bewertet Durchschnitts- und Spitzentemperatur des Controllers. Gibt Empfehlungen zu Belüftung und Montageort. |
+| **PV-Anlagen-Langlebigkeit** | Überwacht DC-String-Balance und Isolationstrend. Gibt Empfehlungen zu Modulreinigung und Kabelwartung. |
 
 ---
 

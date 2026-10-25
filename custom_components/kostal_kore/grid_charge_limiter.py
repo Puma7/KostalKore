@@ -53,7 +53,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
     """Switch to enable dynamic battery charge limiting for grid feed-in optimization."""
 
     _attr_has_entity_name = True
-    _attr_name = "Grid Feed-In Optimizer"
+    _english_name = "Grid Feed-In Optimizer"
     _attr_icon = "mdi:transmission-tower-export"
     _attr_entity_category = EntityCategory.CONFIG
 
@@ -307,7 +307,7 @@ class FeedInLimitNumber(NumberEntity):
     """Number entity to configure the grid feed-in limit in watts."""
 
     _attr_has_entity_name = True
-    _attr_name = "Grid Feed-In Limit"
+    _english_name = "Grid Feed-In Limit"
     _attr_icon = "mdi:transmission-tower"
     _attr_native_min_value = 0
     _attr_native_step = 100

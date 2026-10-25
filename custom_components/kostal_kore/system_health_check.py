@@ -63,7 +63,7 @@ class SystemHealthCheckButton(ButtonEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:clipboard-check-outline"
     _attr_has_entity_name = True
-    _attr_name = "Run System Health Check"
+    _english_name = "Run System Health Check"
 
     def __init__(
         self,

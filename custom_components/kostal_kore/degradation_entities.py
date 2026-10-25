@@ -20,14 +20,14 @@ from .degradation_tracker import DegradationTracker, TrackedParameter
 _LOGGER: Final = logging.getLogger(__name__)
 
 _PARAM_CONFIG: Final[list[dict[str, str]]] = [
-    {"key": "isolation", "name": "Degradation: Isolationswiderstand", "icon": "mdi:resistor"},
-    {"key": "battery_soh", "name": "Degradation: Batterie SoH", "icon": "mdi:battery-heart-variant"},
-    {"key": "battery_capacity", "name": "Degradation: Batterie Kapazität", "icon": "mdi:battery-medium"},
-    {"key": "battery_temp", "name": "Degradation: Batterie Temperatur", "icon": "mdi:thermometer"},
-    {"key": "controller_temp", "name": "Degradation: Controller Temperatur", "icon": "mdi:thermometer-lines"},
-    {"key": "dc1_peak", "name": "Degradation: DC1 Spitzenleistung", "icon": "mdi:solar-panel"},
-    {"key": "dc2_peak", "name": "Degradation: DC2 Spitzenleistung", "icon": "mdi:solar-panel"},
-    {"key": "daily_yield", "name": "Degradation: Tagesertrag", "icon": "mdi:chart-line"},
+    {"key": "isolation", "name": "Degradation: Isolation Resistance", "icon": "mdi:resistor"},
+    {"key": "battery_soh", "name": "Degradation: Battery SoH", "icon": "mdi:battery-heart-variant"},
+    {"key": "battery_capacity", "name": "Degradation: Battery Capacity", "icon": "mdi:battery-medium"},
+    {"key": "battery_temp", "name": "Degradation: Battery Temperature", "icon": "mdi:thermometer"},
+    {"key": "controller_temp", "name": "Degradation: Controller Temperature", "icon": "mdi:thermometer-lines"},
+    {"key": "dc1_peak", "name": "Degradation: DC1 Peak Power", "icon": "mdi:solar-panel"},
+    {"key": "dc2_peak", "name": "Degradation: DC2 Peak Power", "icon": "mdi:solar-panel"},
+    {"key": "daily_yield", "name": "Degradation: Daily Yield", "icon": "mdi:chart-line"},
 ]
 
 
@@ -48,7 +48,7 @@ class DegradationSensor(RestoreEntity, SensorEntity):
     ) -> None:
         self._tracker = tracker
         self._param_key = param_key
-        self._attr_name = name
+        self._english_name = name
         self._attr_icon = icon
         self._attr_unique_id = f"{entry_id}_degrad_{param_key}"
         self._attr_device_info = device_info
@@ -131,7 +131,7 @@ class DegradationAlertSensor(SensorEntity):
     _attr_icon = "mdi:trending-down"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Degradation Alerts"
+    _english_name = "Degradation Alerts"
 
     def __init__(self, tracker: DegradationTracker, entry_id: str, device_info: DeviceInfo) -> None:
         self._tracker = tracker

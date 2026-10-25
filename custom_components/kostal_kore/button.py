@@ -22,6 +22,7 @@ from .const import (
 from .coordinator import PlenticoreConfigEntry
 from .helper import async_require_admin, generate_confirmation_code, integration_entry_store
 from .legacy_migration import finalize_legacy_cleanup, migrate_legacy_plenticore_entry
+from .naming import async_translated_adder
 
 _LOGGER: Final = logging.getLogger(__name__)
 LEGACY_CLEANUP_CHALLENGE_TTL_SECONDS: Final[int] = 300
@@ -37,7 +38,7 @@ class LegacyMigrationButton(ButtonEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Import Legacy Plenticore Data"
+    _english_name = "Import Legacy Plenticore Data"
     _attr_icon = "mdi:database-import"
 
     def __init__(self, entry: PlenticoreConfigEntry) -> None:
@@ -156,7 +157,7 @@ class LegacyCleanupButton(ButtonEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
-    _attr_name = "Finalize Legacy Cleanup"
+    _english_name = "Finalize Legacy Cleanup"
     _attr_icon = "mdi:delete-sweep"
 
     def __init__(self, entry: PlenticoreConfigEntry) -> None:
@@ -406,6 +407,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up button entities for the integration."""
+    async_add_entities = await async_translated_adder(hass, "button", async_add_entities)
     entry_store = integration_entry_store(hass, entry.entry_id)
     entry_store.setdefault(
         DATA_KEY_LEGACY_CLEANUP_GUARD,

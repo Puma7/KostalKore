@@ -14,7 +14,7 @@ Shell-History und Prozessliste (für andere lokale Benutzer sichtbar).
 """
 
 import asyncio
-import getpass   # NEU: sichere interaktive Eingabe ohne Shell-History
+import getpass  # NEU: sichere interaktive Eingabe ohne Shell-History
 import sys
 from typing import Optional
 

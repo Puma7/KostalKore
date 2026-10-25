@@ -51,10 +51,15 @@ Assistant). For a real Home Assistant with an inverter emulator, see the lab in
   with the same file names. Change both, or say in the pull request which one
   still needs the translation.
 - `README.md` and `README.de.md` are kept in step the same way.
-- User interface strings live in `custom_components/kostal_kore/strings.json`
-  (source, English) and `translations/<language>.json`. To add a language, copy
-  `translations/en.json` to `translations/<code>.json` and translate the values;
-  keep the keys and the `{placeholders}`.
+- Entity names are written in English in the code (`_english_name` or the
+  entity description's `name`); `naming.py` turns them into translation keys and
+  keeps entity IDs English. After adding or renaming an entity, run
+  `python scripts/sync_translations.py --write` to update `strings.json` and
+  `translations/en.json` (services come from `services.yaml`), then add the
+  German text to `translations/de.json`. The tests fail if a language misses a
+  key or a placeholder.
+- To add a language, copy `translations/en.json` to `translations/<code>.json`
+  and translate the values; keep the keys and the `{placeholders}`.
 - Developer notes (`docs/development/`) are English only.
 
 ---
@@ -89,7 +94,9 @@ in [docs/development/HARDWARE_VALIDATION_TODO.md](docs/development/HARDWARE_VALI
 **Doku und Übersetzungen:** Die Nutzer-Doku gibt es englisch (`docs/en/`) und
 deutsch (`docs/de/`) mit gleichen Dateinamen, ebenso `README.md` und
 `README.de.md`. Ändere beide oder nenne im Pull Request, welche Übersetzung noch
-fehlt. Die Texte der Oberfläche stehen in `custom_components/kostal_kore/strings.json`
-(Quelle, englisch) und `translations/<sprache>.json`. Für eine neue Sprache
+fehlt. Entitätsnamen stehen englisch im Code; nach dem Anlegen oder Umbenennen
+einer Entität `python scripts/sync_translations.py --write` ausführen und den
+deutschen Text in `translations/de.json` ergänzen. Für eine neue Sprache
 `translations/en.json` nach `translations/<code>.json` kopieren und die Werte
-übersetzen; Schlüssel und `{Platzhalter}` bleiben gleich.
+übersetzen; Schlüssel und `{Platzhalter}` bleiben gleich. Die Tests schlagen
+fehl, wenn einer Sprache ein Schlüssel oder Platzhalter fehlt.
