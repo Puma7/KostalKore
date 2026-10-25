@@ -93,8 +93,9 @@ Einrichtung der Integration wird ein Cache mit abweichender Firmware-Signatur
 nicht wiederhergestellt. Das ist eine erneute Ermittlung der Fähigkeiten, keine
 Erlaubnis, automatisch ein anderes Batteriesteuerungsprotokoll auszuwählen.
 
-Für Register 588 bleibt der bisherige Lesezugriff mit UINT16/count=1 mit dem
-dokumentierten alten und neuen Format kompatibel. Ein künftiger erweiterter
+Für Register 588 kann der bisherige Lesezugriff mit UINT16/count=1 das Register
+in beiden dokumentierten Formaten weiterhin lesen, aber Batterietypen, deren Code
+das erweiterte 32-Bit-Format braucht, nicht erkennen. Ein künftiger erweiterter
 Lesezugriff muss auf die geprüfte Generation/Firmware beschränkt und hinsichtlich
 Wortanordnung und Modellzuordnung validiert werden; er darf das Lesen bei
 älteren Geräten nicht stillschweigend ändern.

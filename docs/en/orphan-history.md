@@ -16,7 +16,7 @@ If you have just migrated from `kostal_plenticore`, you do **not** need these se
 
 ## What happens (in short)
 
-**No raw data is deleted.** The old `StatesMeta` and `StatisticsMeta` rows are re-pointed to the current kostal_kore entities. On conflicts (e.g. different units or duplicate statistics sources), the affected merge is skipped instead of overwritten.
+**No state history is deleted.** The old `StatesMeta` and `StatisticsMeta` rows are re-pointed to the current kostal_kore entities. Where the target already has a statistics row with the same start time as a legacy row, the legacy row replaces it. On conflicts (e.g. different units or duplicate statistics sources), the affected merge is skipped.
 
 ## Step 1 — Backup
 
@@ -41,7 +41,7 @@ Check the suggestions. `Similarity = 1.00` means an exact suffix match; you shou
 
 ## Step 3 — Dry run
 
-Put together your mapping and call the apply service with `dry_run: true`:
+Put together your mapping and call the apply service with `dry_run: true`. The service needs a Home Assistant administrator, also for a dry run:
 
 ```yaml
 service: kostal_kore.apply_orphan_history_mapping
@@ -52,7 +52,7 @@ data:
     sensor.kostal_plenticore_battery_soc: sensor.kore_battery_soc
 ```
 
-A second persistent notification shows how many rows would be moved and which mappings are skipped (e.g. because the target is not a kostal_kore entity or the units do not match).
+A second persistent notification lists the mappings that are rejected (e.g. because the target is not a kostal_kore entity or the units do not match). The dry run does not count rows; the number of moved rows is reported after the apply without `dry_run`.
 
 ## Step 4 — Apply
 

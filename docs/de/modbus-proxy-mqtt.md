@@ -34,8 +34,12 @@ keine Custom-Meter-Konfiguration nötig.
 - Modbus in der Integration aktiviert (Einstellungen → Geräte → Kostal → Konfigurieren)
 - **Modbus-Proxy aktiviert** in der gleichen Konfiguration
 - Proxy-Port: Standard 5502 (frei wählbar)
-- Proxy-Bind-Adresse: Standard `127.0.0.1` (empfohlen), nur bei Bedarf auf LAN-IP/`0.0.0.0` setzen
-- Für Batterie-Schreibzugriffe ist ein hinterlegter Installer-/Service-Code erforderlich
+- Proxy-Bind-Adresse: Standard `127.0.0.1` (empfohlen). Modbus TCP kennt keine
+  Client-Authentifizierung: Jeder Client, der den Port erreicht, kann lesen und
+  schreiben. Lass den Proxy auf Loopback oder schütze eine LAN-Adresse mit einer
+  Firewall, die nur vertrauenswürdige Clients durchlässt.
+- Schreibzugriffe auf die Batteriesteuerungs-Register brauchen zusätzlich einen
+  hinterlegten Installer-/Servicecode; diese Prüfung gilt nicht für andere Register.
 
 ### 2. evcc konfigurieren
 
@@ -107,7 +111,11 @@ evcc kann über den Proxy auch Batterie-Register schreiben. Die relevanten Regis
 > Betreibe daher **nicht** gleichzeitig evcc-`batteryMode` **und** einen internen KORE-Controller
 > (SoC-Controller, GridGuard/Grid-Feed-In-Optimizer, Block Battery Charging) – sonst konkurrieren
 > beide um Register 1034/1038 und KORE lehnt die evcc-Writes mit `0x06` (Server Device Busy) ab.
-> Faustregel: **entweder** evcc **oder** ein KORE-Controller steuert die Batterie – nicht beides.
+> Faustregel: Nutze genau **einen** Batterieregler: evcc-`batteryMode`, einen
+> KORE-Controller oder die eigene Batteriesteuerung des Wechselrichters.
+> KORE stimmt sich nicht mit der Steuerung im Wechselrichter ab. Solange KORE oder
+> evcc die Batterie steuert, schalte im Wechselrichter *Smart AC Charge*, zeit- oder
+> tarifgesteuertes Laden und die EEBus-Steuerung ab.
 > Siehe „Write-Arbitration" weiter unten.
 
 **`batteryMode`-Register-Mapping (evcc gen2):**
@@ -231,7 +239,7 @@ kostal_kore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 
 | Topic | Value | Unit | Description |
 |---|---|---|---|
-| `.../proxy/command/battery_charge` | -5000 to +5000 | W | Negative=charge, positive=discharge |
+| `.../proxy/command/battery_charge` | jede endliche Zahl (KORE prüft keinen Bereich; der Wechselrichter begrenzt) | W | Negativ = Laden, positiv = Entladen |
 | `.../proxy/command/battery_min_soc` | 5..100 | % | Minimum state of charge |
 | `.../proxy/command/battery_max_soc` | 5..100 | % | Maximum state of charge |
 
@@ -280,8 +288,8 @@ evcc schreibt REG 1034 ──► Proxy
 **Lösung bei Konflikten:**
 1. SoC-Controller auf 0 setzen (Automatik) → externe Writes wieder möglich
 2. Oder: evcc-Template so konfigurieren, dass es den SoC-Controller via HA-API steuert
-3. Faustregel: **entweder** evcc-`batteryMode` **oder** ein interner KORE-Controller steuert die
-   Batterie – nicht beides gleichzeitig für denselben Wechselrichter.
+3. Faustregel: genau **ein** Regler pro Batterie – evcc-`batteryMode`, ein interner
+   KORE-Controller oder die eigene Batteriesteuerung des Wechselrichters (siehe Hinweis oben).
 
 ## Troubleshooting
 

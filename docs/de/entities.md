@@ -114,7 +114,7 @@ kann sein Wert unbekannt sein, da KORE diesen Sollwert nicht zyklisch ausliest.
 |---|---|---|---|
 | `battery_soc` | 514 | % | Ladezustand (State of Charge) der Batterie. 0% = leer, 100% = voll. |
 | `battery_state_of_charge` | 210 | % | Ladezustand als Float-Wert (genauer als battery_soc). |
-| `battery_temperature` | 214 | °C | Temperatur der Batterie. LFP optimal: <30°C. NMC optimal: <25°C. Warnung ab 45°C. Kritisch ab 55°C. Hohe Temperaturen beschleunigen die Alterung erheblich. |
+| `battery_temperature` | 214 | °C | Temperatur der Batterie. LFP optimal: <30°C. NMC optimal: <25°C. Die Zustandswarnung gilt für jede Chemie ab 45°C, kritisch ab 55°C; die Langlebigkeitsbewertung nutzt chemiespezifische Grenzen (LFP 50/60°C, NMC und unbekannt 45/55°C, siehe unten). Hohe Temperaturen beschleunigen die Alterung erheblich. |
 | `battery_voltage` | 216 | V | Batteriespannung. Abhängig von Chemie und SoC. Bei Pyontech Force H typisch: 600-800V. |
 | `battery_charge_current` | 190 | A | Ladestrom der Batterie. Positiv = Laden. |
 | `battery_actual_current` | 200 | A | Aktueller Lade-/Entladestrom. Positiv = Laden, negativ = Entladen. |

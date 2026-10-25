@@ -27,8 +27,9 @@ logger:
 
 ## Installer access required
 
-If Home Assistant shows the repair issue *Installer access required*, enter the
-service code under **Configure** (or reconfigure the entry). Settings that the
+If Home Assistant shows the repair issue *Installer access required*, add the
+service code with **Reconfigure** in the entry's menu (**Configure** only holds
+the Modbus, MQTT, proxy and KSEM options). Settings that the
 inverter reserves for installers stay read-only until then.
 
 ## Modbus controls are greyed out or read-only

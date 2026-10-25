@@ -29,7 +29,8 @@ logger:
 ## Installateur-Zugang erforderlich
 
 Zeigt Home Assistant den Reparaturhinweis *Installer access required*, trag den
-Servicecode unter **Konfigurieren** ein (oder konfiguriere den Eintrag neu).
+Servicecode über **Neu konfigurieren** im Menü des Eintrags ein
+(**Konfigurieren** enthält nur die Optionen für Modbus, MQTT, Proxy und KSEM).
 Einstellungen, die der Wechselrichter Installateuren vorbehält, bleiben bis
 dahin schreibgeschützt.
 

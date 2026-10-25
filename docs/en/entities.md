@@ -114,7 +114,7 @@ its value can be unknown, because KORE does not read this setpoint cyclically.
 |---|---|---|---|
 | `battery_soc` | 514 | % | State of charge of the battery. 0% = empty, 100% = full. |
 | `battery_state_of_charge` | 210 | % | State of charge as a float value (more precise than battery_soc). |
-| `battery_temperature` | 214 | °C | Temperature of the battery. LFP optimal: <30°C. NMC optimal: <25°C. Warning from 45°C. Critical from 55°C. High temperatures accelerate ageing considerably. |
+| `battery_temperature` | 214 | °C | Temperature of the battery. LFP optimal: <30°C. NMC optimal: <25°C. The health warning applies from 45°C and critical from 55°C for every chemistry; the longevity rating uses chemistry-specific limits (LFP 50/60°C, NMC and unknown 45/55°C, see below). High temperatures accelerate ageing considerably. |
 | `battery_voltage` | 216 | V | Battery voltage. Depends on chemistry and SoC. Typical for Pyontech Force H: 600-800V. |
 | `battery_charge_current` | 190 | A | Charge current of the battery. Positive = charging. |
 | `battery_actual_current` | 200 | A | Current charge/discharge current. Positive = charging, negative = discharging. |

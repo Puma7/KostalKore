@@ -34,8 +34,12 @@ no custom meter configuration needed.
 - Modbus enabled in the integration (Settings → Devices → Kostal → Configure)
 - **Modbus proxy enabled** in the same configuration
 - Proxy port: default 5502 (freely selectable)
-- Proxy bind address: default `127.0.0.1` (recommended); only set it to a LAN IP/`0.0.0.0` if needed
-- Battery write access requires a stored installer/service code
+- Proxy bind address: default `127.0.0.1` (recommended). Modbus TCP has no client
+  authentication: every client that reaches the port can read and write. Keep the
+  proxy on loopback, or protect a LAN address with a firewall that only admits
+  trusted clients.
+- Writes to the battery-control registers additionally require a stored
+  installer/service code; this check does not cover other registers.
 
 ### 2. Configure evcc
 
@@ -106,7 +110,11 @@ evcc can also write battery registers through the proxy. The relevant registers:
 > Therefore, do **not** run evcc `batteryMode` **and** an internal KORE controller
 > (SoC controller, GridGuard/Grid Feed-In Optimizer, Block Battery Charging) at the same time – otherwise
 > both compete for registers 1034/1038 and KORE rejects the evcc writes with `0x06` (Server Device Busy).
-> Rule of thumb: **either** evcc **or** a KORE controller controls the battery – not both.
+> Rule of thumb: use exactly **one** battery controller: evcc `batteryMode`, a KORE
+> controller or the inverter's own battery control.
+> KORE does not coordinate with control logic inside the inverter. While KORE or evcc
+> controls the battery, switch off *Smart AC Charge*, time-controlled or dynamic-tariff
+> charging and EEBus control in the inverter.
 > See "Write arbitration" below.
 
 **`batteryMode` register mapping (evcc gen2):**
@@ -230,7 +238,7 @@ kostal_kore/{SERIAL}/proxy/command/battery_max_soc   → Max SoC (%)
 
 | Topic | Value | Unit | Description |
 |---|---|---|---|
-| `.../proxy/command/battery_charge` | -5000 to +5000 | W | Negative=charge, positive=discharge |
+| `.../proxy/command/battery_charge` | any finite number (KORE applies no range check; the inverter limits it) | W | Negative=charge, positive=discharge |
 | `.../proxy/command/battery_min_soc` | 5..100 | % | Minimum state of charge |
 | `.../proxy/command/battery_max_soc` | 5..100 | % | Maximum state of charge |
 
@@ -279,8 +287,8 @@ evcc writes REG 1034 ────► Proxy
 **Resolving conflicts:**
 1. Set the SoC controller to 0 (automatic) → external writes possible again
 2. Or: configure the evcc template so that it controls the SoC controller via the HA API
-3. Rule of thumb: **either** evcc `batteryMode` **or** an internal KORE controller controls the
-   battery – not both at the same time for the same inverter.
+3. Rule of thumb: exactly **one** controller per battery – evcc `batteryMode`, an internal KORE
+   controller or the inverter's own battery control (see the note above).
 
 ## Troubleshooting
 

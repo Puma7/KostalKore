@@ -80,7 +80,8 @@ firmware string in its signature. During integration setup, a cache with a
 different firmware signature is not restored. This is capability rediscovery,
 not permission to select a different battery-control protocol automatically.
 
-For register 588, the present UINT16/count=1 reader remains compatible with the
-documented old/new formats. A future extended reader must be restricted to the
+For register 588, the present UINT16/count=1 reader can still read the register
+in both documented formats, but it cannot identify battery types whose code
+needs the extended 32-bit format. A future extended reader must be restricted to the
 verified generation/firmware and validated for word layout and model mapping;
 it must not silently change reads for older devices.

@@ -55,8 +55,9 @@ your inverter. Check its effect on your own system.
 - Battery limits: *Battery Max Charge Limit (Modbus)* (register 1038),
   *Battery Max Discharge Limit (Modbus)* (1040), the G3 cyclic limits
   (1280/1282, kept alive automatically) and the active power setpoint (533).
-  Writes through these entities are read back. A write that the inverter did
-  not apply raises an error instead of being reported as done.
+  Writes to the limits are read back; a limit the inverter did not apply raises
+  an error instead of being reported as done. Register 533 is write-only: its
+  entity shows the last command, which is not confirmed by the inverter.
 - Built-in controllers that use these limits: a battery target-SoC controller,
   *Block Battery Charging* and the *Grid Feed-In Optimizer*.
 - A **Modbus proxy**, so evcc or another client can share KORE's single
@@ -110,7 +111,8 @@ including entity IDs and history ([guide](docs/en/migration.md)).
    the Modbus proxy. The wizard tests the Modbus connection and shows the
    detected access role (user or installer) and whether writes are possible.
 
-All of this can be changed later under **Configure**.
+Later, **Configure** changes the Modbus, MQTT, proxy and KSEM options. Host,
+password and service code are changed with **Reconfigure** in the entry's menu.
 
 ## Battery control
 

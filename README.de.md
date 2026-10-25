@@ -57,9 +57,10 @@ schreibt in deinen Wechselrichter. Prüfe ihre Wirkung an deiner eigenen Anlage.
 - Batteriegrenzen: *Battery Max Charge Limit (Modbus)* (Register 1038),
   *Battery Max Discharge Limit (Modbus)* (1040), die zyklischen G3-Grenzen
   (1280/1282, werden automatisch aufrechterhalten) und der
-  Wirkleistungssollwert (533). Schreibvorgänge über diese Entitäten werden
-  zurückgelesen. Hat der Wechselrichter einen Wert nicht übernommen, gibt es
-  einen Fehler statt einer Erfolgsmeldung.
+  Wirkleistungssollwert (533). Schreibvorgänge auf die Grenzen werden
+  zurückgelesen; hat der Wechselrichter eine Grenze nicht übernommen, gibt es
+  einen Fehler statt einer Erfolgsmeldung. Register 533 ist nur beschreibbar:
+  Seine Entität zeigt den letzten Befehl, den der Wechselrichter nicht bestätigt.
 - Eingebaute Regler auf Basis dieser Grenzen: ein Regler für einen Ziel-SoC der
   Batterie, *Block Battery Charging* und der *Grid Feed-In Optimizer*.
 - Ein **Modbus-Proxy**, über den evcc oder ein anderer Client die eine
@@ -117,7 +118,9 @@ einschließlich Entity-IDs und Verlauf ([Anleitung](docs/de/migration.md)).
    zeigt die erkannte Zugriffsrolle (Benutzer oder Installateur) und ob
    Schreiben möglich ist.
 
-Alles lässt sich später unter **Konfigurieren** ändern.
+Später ändert **Konfigurieren** die Optionen für Modbus, MQTT, Proxy und KSEM.
+Host, Passwort und Servicecode änderst du mit **Neu konfigurieren** im Menü des
+Eintrags.
 
 ## Batteriesteuerung
 
