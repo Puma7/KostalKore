@@ -22,6 +22,7 @@ def entity():
     result._keepalive_incidents = 0
     result._keepalive_task = None
     result._last_command = None
+    result._ignored_baseline = None
     result._get_keepalive_interval = lambda: 1
     result.coordinator = SimpleNamespace(
         client=SimpleNamespace(connected=True, connection_generation=1), last_update_success=True,

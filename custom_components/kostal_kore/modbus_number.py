@@ -348,6 +348,9 @@ class ModbusNumberEntity(
         self._keepalive_incidents = 0
         # (command revision, outcome, last read-back) of the last entity write.
         self._last_command: tuple[int, str, float | None] | None = None
+        # (command revision, command still in effect) after a raised limit was
+        # rejected as ignored, so a retry of it is compared with that command.
+        self._ignored_baseline: tuple[int, float] | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -465,6 +468,11 @@ class ModbusNumberEntity(
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._cancel_keepalive()
         previous = self.coordinator.last_commanded(self._register.name)
+        # The coordinator also records the rejected write; a retry of it must
+        # still be compared with the command in effect before it.
+        if (self._ignored_baseline is not None
+                and self._ignored_baseline[0] == self.coordinator.command_revision(self._register.name)):
+            previous = self._ignored_baseline[1]
         await self.coordinator.async_write_register(self._register, value)
         write_generation = self.coordinator.client.connection_generation
         revision = self.coordinator.command_revision(self._register.name)
@@ -530,6 +538,9 @@ class ModbusNumberEntity(
             # controllers cannot treat an ignored command as an applied limit.
             # The outcome tells them whether the limit reads higher or lower.
             self._record_last_command(revision, outcome, observed)
+            if (outcome == READBACK_BELOW_COMMAND and previous is not None
+                    and self._register.name in EFFECTIVE_LIMIT_REGISTERS):
+                self._ignored_baseline = (revision, previous)
             if not read_failed:
                 await self.coordinator.async_request_refresh()
             raise ReadbackUnconfirmedError(
@@ -573,6 +584,7 @@ class ModbusNumberEntity(
 
         self._record_last_command(
             revision, COMMAND_LIMITED if limited else COMMAND_CONFIRMED, decided_readback)
+        self._ignored_baseline = None
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),

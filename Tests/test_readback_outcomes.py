@@ -119,6 +119,39 @@ async def test_a_raised_limit_that_reads_the_old_command_was_ignored() -> None:
     assert err.value.outcome == mod.READBACK_BELOW_COMMAND
 
 
+@pytest.mark.asyncio
+async def test_a_retried_ignored_raise_is_still_ignored() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=1000.0)
+    entity = _limit_entity(coord)
+    coord._commanded = 1000
+    for _ in range(2):  # the coordinator now records 2000 as the last command
+        with pytest.raises(ReadbackUnconfirmedError) as err:
+            await entity.async_set_native_value(2000)
+        assert err.value.outcome == mod.READBACK_BELOW_COMMAND
+    # Once the inverter takes it, the baseline is dropped.
+    coord.client.read_register = AsyncMock(return_value=2000.0)
+    coord.data = {mod.REG_BAT_MAX_CHARGE_LIMIT.name: 2000.0}
+    await entity.async_set_native_value(2000)
+    assert entity._ignored_baseline is None
+
+
+@pytest.mark.asyncio
+async def test_another_write_path_drops_the_ignored_baseline() -> None:
+    coord = _coord()
+    coord.client.read_register = AsyncMock(return_value=1000.0)
+    entity = _limit_entity(coord)
+    coord._commanded = 1000
+    with pytest.raises(ReadbackUnconfirmedError):
+        await entity.async_set_native_value(2000)
+    _command(coord, 3000)  # e.g. MQTT raises it further
+    coord.data = {mod.REG_BAT_MAX_CHARGE_LIMIT.name: 1000.0}
+    # Compared with the newer 3000 W command, a read of 1000 W cannot be an
+    # ignored 2000 W command: it is limited.
+    await entity.async_set_native_value(2000)
+    assert entity.extra_state_attributes["last_command_outcome"] == mod.COMMAND_LIMITED
+
+
 def test_only_1038_and_1040_read_the_limit_in_effect() -> None:
     soc = _limit_entity(_coord(), register=mod.REG_BAT_MIN_SOC)
     assert not soc._readback_limited(70.0, 80.0, None)
