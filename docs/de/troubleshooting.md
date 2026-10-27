@@ -35,8 +35,9 @@ Anmeldung also. Andere Integrationen, die `pycryptodome` nutzen (z. B. die
 eingebaute Kostal-Integration), bleiben betroffen, bis die Bibliothek sauber neu
 installiert ist: unter Home Assistant OS im Terminal-Add-on `ha core rebuild`
 ausführen oder im Container
-`python3 -m pip install --force-reinstall --no-deps pycryptodome` und Home
-Assistant neu starten.
+`python3 -m pip install --force-reinstall --no-deps "pycryptodome>=3.19,<4"` und
+Home Assistant neu starten (pykoplenti, das die eingebaute Kostal-Integration
+nutzt, verlangt eine 3.x-Version).
 
 ## Installateur-Zugang erforderlich
 

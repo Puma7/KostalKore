@@ -33,8 +33,9 @@ so updating KORE fixes the login. Other integrations that use `pycryptodome`
 (for example the built-in Kostal integration) stay affected until the library
 is reinstalled cleanly: on Home Assistant OS run `ha core rebuild` in the
 Terminal add-on, or in the container run
-`python3 -m pip install --force-reinstall --no-deps pycryptodome` and restart
-Home Assistant.
+`python3 -m pip install --force-reinstall --no-deps "pycryptodome>=3.19,<4"` and
+restart Home Assistant (pykoplenti, which the built-in Kostal integration uses,
+requires a 3.x version).
 
 ## Installer access required
 

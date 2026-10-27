@@ -16,8 +16,10 @@ from base64 import b64decode, b64encode
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp import ClientResponse, ClientSession
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from custom_components.kostal_kore.pykoplenti import ApiClient, AuthenticationException
@@ -107,6 +109,29 @@ async def test_login_with_a_wrong_password_is_rejected() -> None:
     client = ApiClient(_FakeInverter("secret"), "192.0.2.1")  # type: ignore[arg-type]
     with pytest.raises(AuthenticationException):
         await client.login("wrong")
+
+
+async def test_expired_session_logs_in_again_and_retries() -> None:
+    """A 401 on a request triggers one re-login and a successful retry (ported from upstream)."""
+    responses = []
+    for status, body in (
+        (401, None),
+        (200, [{"moduleid": "moda", "processdata": [{"id": "procb", "unit": "W", "value": 7}]}]),
+    ):
+        response = MagicMock(spec_set=ClientResponse)
+        response.status = status
+        if body is not None:
+            response.json.return_value = body
+        responses.append(response)
+    websession = MagicMock(spec_set=ClientSession)
+    websession.request.return_value.__aenter__.side_effect = responses
+    client = ApiClient(websession, "192.0.2.1")
+    client._login = AsyncMock()  # type: ignore[method-assign]
+
+    values = await client.get_process_data_values("moda", "procb")
+
+    client._login.assert_awaited_once()
+    assert values["moda"]["procb"].value == 7
 
 
 def _imported_modules(path: Path) -> set[str]:
