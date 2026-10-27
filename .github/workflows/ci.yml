@@ -52,7 +52,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
-          pip install "pykoplenti==1.5.0" "pymodbus>=3.6"
+          pip install "pydantic>=1.10,<3" "pymodbus>=3.6"
 
       # Ruff's result is interpreter-independent (target-version comes from
       # ruff.toml) — one leg suffices, mirroring the mypy gate below.

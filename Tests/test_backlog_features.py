@@ -7,7 +7,6 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pykoplenti import EventData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.const import DOMAIN
@@ -28,6 +27,7 @@ from custom_components.kostal_kore.modbus_client import (
     ModbusReadError,
 )
 from custom_components.kostal_kore.modbus_registers import REG_INVERTER_GEN_POWER
+from custom_components.kostal_kore.pykoplenti import EventData
 
 
 def _mk_event(code: int, category: str = "error", active: bool = True) -> EventData:

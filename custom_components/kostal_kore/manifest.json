@@ -1,7 +1,7 @@
 {
   "domain": "kostal_kore",
   "name": "KOSTAL KORE",
-  "version": "3.0.16",
+  "version": "3.0.17",
   "codeowners": [
     "@Puma7"
   ],
@@ -15,11 +15,10 @@
   "integration_type": "device",
   "iot_class": "local_polling",
   "loggers": [
-    "custom_components.kostal_kore",
-    "pykoplenti"
+    "custom_components.kostal_kore"
   ],
   "requirements": [
-    "pykoplenti==1.5.0",
+    "pydantic>=1.10,<3",
     "pymodbus>=3.6,<4.0"
   ]
 }

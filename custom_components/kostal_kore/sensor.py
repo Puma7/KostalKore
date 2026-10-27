@@ -31,7 +31,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pykoplenti import ApiException
 
 from .const import MAX_SANE_STRING_COUNT, AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
@@ -48,6 +47,7 @@ from .helper import (
 from .ksem_coordinator import KsemDataUpdateCoordinator
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .naming import async_translated_adder
+from .pykoplenti import ApiException
 from .startup_trace import log_entity_batch
 
 _LOGGER = logging.getLogger(__name__)

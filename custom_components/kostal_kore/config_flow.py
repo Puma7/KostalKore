@@ -15,7 +15,6 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.const import CONF_BASE, CONF_HOST, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pykoplenti import ApiClient, ApiException, AuthenticationException
 
 from .const import (
     CONF_ACCESS_ROLE,
@@ -41,6 +40,7 @@ from .const import (
     DOMAIN,
 )
 from .helper import get_hostname_id, normalize_hostname, validate_bind_address
+from .pykoplenti import ApiClient, ApiException, AuthenticationException
 
 if TYPE_CHECKING:  # pragma: no cover
     from homeassistant.config_entries import ConfigFlowResult

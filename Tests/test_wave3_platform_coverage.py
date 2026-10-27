@@ -10,8 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.helpers.device_registry import DeviceInfo
-from pykoplenti import SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import SettingsData
 
 
 def _split_request(request):

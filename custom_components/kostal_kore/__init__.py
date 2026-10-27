@@ -27,7 +27,6 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
-from pykoplenti import ApiException
 
 from .battery_chemistry import detect_chemistry
 from .const import (
@@ -70,6 +69,7 @@ from .orphan_history import (
     async_register_orphan_history_services,
     async_unregister_orphan_history_services_if_unused,
 )
+from .pykoplenti import ApiException
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
 from .request_scheduler import RequestScheduler
 from .startup_trace import (
@@ -212,6 +212,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         setup_success = await asyncio.wait_for(
             plenticore.async_setup(), timeout=SETUP_TIMEOUT_SECONDS
         )
+    except (ConfigEntryNotReady, TimeoutError, ClientError) as err:
+        # The inverter is unreachable or slow to answer (e.g. it is still booting
+        # after a power cut): let Home Assistant retry instead of failing for good.
+        trace.phase_end("login", success=False)
+        await plenticore.async_unload()
+        trace.phase_end("setup_entry", success=False, reason="ConfigEntryNotReady")
+        _log_setup_metrics(start_time, False, trace)
+        if isinstance(err, ConfigEntryNotReady):
+            raise
+        if isinstance(err, TimeoutError):
+            raise ConfigEntryNotReady(
+                f"Inverter did not answer within {SETUP_TIMEOUT_SECONDS:.0f}s"
+            ) from err
+        raise ConfigEntryNotReady(f"Inverter not reachable: {err}") from err
     except Exception as err:
         setup_success = _handle_init_error(err, "setup")
     trace.phase_end("login", success=setup_success)

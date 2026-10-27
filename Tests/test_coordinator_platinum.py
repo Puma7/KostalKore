@@ -138,12 +138,11 @@ class TestPlatinumCoordinator:
     def test_modbus_exception_parsing(self):
         """Test MODBUS exception parsing."""
         try:
-            from pykoplenti import ApiException
-
             from custom_components.kostal_kore.helper import (
                 ModbusException,
                 parse_modbus_exception,
             )
+            from custom_components.kostal_kore.pykoplenti import ApiException
 
             test_cases = [
                 ("illegal function error", 0x01),

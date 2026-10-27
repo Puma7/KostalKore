@@ -17,9 +17,9 @@ from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pykoplenti import ApiClient, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
+from custom_components.kostal_kore.pykoplenti import ApiClient, SettingsData
 from kostal_plenticore.const import DOMAIN
 
 pytestmark = [

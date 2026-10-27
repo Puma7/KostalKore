@@ -16,13 +16,13 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pykoplenti import ApiException
 
 from .const import AddConfigEntryEntitiesCallback
 from .const_ids import STRING_FEATURE_TEMPLATE, ModuleId, SettingId, string_feature_id
 from .coordinator import PlenticoreConfigEntry, SettingDataUpdateCoordinator
 from .helper import ensure_installer_access, parse_modbus_exception
 from .naming import async_translated_adder
+from .pykoplenti import ApiException
 
 _LOGGER = logging.getLogger(__name__)
 

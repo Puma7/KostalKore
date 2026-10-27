@@ -25,13 +25,6 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from pykoplenti import (
-    ApiClient,
-    ApiException,
-    AuthenticationException,
-    EventData,
-    ExtendedApiClient,
-)
 
 from .communication import CommunicationState
 from .const import ADVANCED_WRITE_ARM_TTL_SECONDS, CONF_SERVICE_CODE, DOMAIN
@@ -51,6 +44,13 @@ from .helper import (
     parse_modbus_exception,
     requires_advanced_write_arm,
     validate_cross_field_write_rules,
+)
+from .pykoplenti import (
+    ApiClient,
+    ApiException,
+    AuthenticationException,
+    EventData,
+    ExtendedApiClient,
 )
 from .repairs import (
     clear_issue,

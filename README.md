@@ -181,7 +181,6 @@ detail:
 logger:
   logs:
     custom_components.kostal_kore: debug
-    pykoplenti: debug
 ```
 
 ## Languages
@@ -197,7 +196,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Credits and license
 
 KORE builds on [pykoplenti](https://github.com/stegm/pykoplenti) by `@stegm` and
-on the `kostal_plenticore` integration in Home Assistant Core. It became a
+on the `kostal_plenticore` integration in Home Assistant Core. A copy of
+pykoplenti 1.5.1 (Apache-2.0) ships with the integration in
+`custom_components/kostal_kore/pykoplenti/`, changed to encrypt the login with
+`cryptography` instead of `pycryptodome` and to share one re-login between
+concurrent requests. It became a
 separate project because its scope and architecture moved too far apart to
 merge back.
 

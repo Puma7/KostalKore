@@ -1,3 +1,7 @@
+# Bundled copy of pykoplenti 1.5.1 (Apache-2.0, https://github.com/stegm/pykoplenti).
+# Modified for KOSTAL KORE: the login encrypts with `cryptography` instead of
+# `pycryptodome` (see encrypt_session_token), and concurrent re-logins share one
+# attempt (_relogin). See README.md in this folder.
 import asyncio
 from base64 import b64decode, b64encode
 from collections.abc import Mapping
@@ -12,8 +16,8 @@ from os import urandom
 from typing import IO, Dict, Final, Iterable, List, Union, overload
 import warnings
 
-from Crypto.Cipher import AES
 from aiohttp import ClientResponse, ClientSession, ClientTimeout
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from yarl import URL
 
 from .model import (
@@ -27,6 +31,16 @@ from .model import (
 )
 
 _logger: Final = logging.getLogger(__name__)
+
+
+def encrypt_session_token(key: bytes, nonce: bytes, token: bytes) -> tuple[bytes, bytes]:
+    """Encrypt the session token with AES-GCM and return (cipher text, tag).
+
+    KOSTAL KORE: uses ``cryptography`` (a dependency of Home Assistant itself)
+    instead of ``pycryptodome``; the output is byte-identical.
+    """
+    sealed = AESGCM(key).encrypt(nonce, token, None)
+    return sealed[:-16], sealed[-16:]
 
 
 class ApiException(Exception):
@@ -89,23 +103,22 @@ class ModuleNotFoundException(ApiException):
 def _relogin(fn):
     """Decorator for automatic re-login if session was expired.
 
-    Uses a per-client lock so that concurrent callers share a single
-    re-login attempt instead of racing against each other and
-    invalidating each other's freshly created sessions.
+    KOSTAL KORE: concurrent callers share a single re-login instead of racing
+    against each other and invalidating each other's freshly created sessions.
+    Only the login runs under the per-client lock; the request is retried
+    after the lock is released, so a slow request never blocks other callers.
     """
 
     @functools.wraps(fn)
     async def _wrapper(self: "ApiClient", *args, **kwargs):
+        failed_session = self.session_id
         with contextlib.suppress(AuthenticationException, NotAuthorizedException):
             return await fn(self, *args, **kwargs)
         _logger.debug("Request failed - try to re-login")
         async with self._login_lock:
-            # After acquiring the lock another caller may already have
-            # re-authenticated.  Optimistically retry the request first;
-            # only re-login if the retry still fails.
-            with contextlib.suppress(AuthenticationException, NotAuthorizedException):
-                return await fn(self, *args, **kwargs)
-            await self._login()
+            # Another caller may have logged in while this request was failing.
+            if self.session_id == failed_session:
+                await self._login()
         return await fn(self, *args, **kwargs)
 
     return _wrapper
@@ -323,12 +336,13 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
         session_key_hmac.update(client_key)
         protocol_key = session_key_hmac.digest()
         session_nonce = urandom(16)
-        cipher = AES.new(protocol_key, AES.MODE_GCM, nonce=session_nonce)
 
         if self._user == "master":
             token = f"{token}:{self._service_code}"
 
-        cipher_text, auth_tag = cipher.encrypt_and_digest(token.encode("utf-8"))
+        cipher_text, auth_tag = encrypt_session_token(
+            protocol_key, session_nonce, token.encode("utf-8")
+        )
 
         session_request = {
             # AES initialization vector
@@ -533,33 +547,34 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
                     )
                 }
 
-        if isinstance(module_id, str) and isinstance(processdata_id, str):
-            # get a single process data of a module
+        if isinstance(module_id, str) and processdata_id is not None:
+            # get multiple process data of a module
+
+            if isinstance(processdata_id, str):
+                request = [
+                    {
+                        "moduleid": module_id,
+                        "processdataids": [processdata_id],
+                    }
+                ]
+            else:
+                request = [
+                    {
+                        "moduleid": module_id,
+                        "processdataids": list(processdata_id),
+                    }
+                ]
+
             async with self._session_request(
-                f"processdata/{module_id}/{processdata_id}"
+                "processdata", method="POST", json=request
             ) as resp:
                 await self._check_response(resp)
                 data_response = await resp.json()
                 return {
-                    data_response[0]["moduleid"]: ProcessDataCollection(
-                        process_data_list(data_response[0]["processdata"])
+                    x["moduleid"]: ProcessDataCollection(
+                        process_data_list(x["processdata"])
                     )
-                }
-
-        if (
-            isinstance(module_id, str)
-            and processdata_id is not None
-            and hasattr(processdata_id, "__iter__")
-        ):
-            # get multiple process data of a module
-            ids = ",".join(processdata_id)
-            async with self._session_request(f"processdata/{module_id}/{ids}") as resp:
-                await self._check_response(resp)
-                data_response = await resp.json()
-                return {
-                    data_response[0]["moduleid"]: ProcessDataCollection(
-                        process_data_list(data_response[0]["processdata"])
-                    )
+                    for x in data_response
                 }
 
         if isinstance(module_id, dict) and processdata_id is None:
@@ -647,35 +662,31 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
                 data_response = await resp.json()
                 return {module_id: {data_response[0]["id"]: data_response[0]["value"]}}
 
-        if isinstance(module_id, str) and isinstance(setting_id, str):
-            # get a single setting of a module
+        if isinstance(module_id, str) and setting_id is not None:
+            # get single/multiple settings of a module
+
+            if isinstance(setting_id, str):
+                request = [
+                    {
+                        "moduleid": module_id,
+                        "settingids": [setting_id],
+                    }
+                ]
+            else:
+                # There was once an API version which explicitly supports a single module with
+                # multiple settings in one request. However this way seems to be not supported anymore
+                # and hence we use the same approach as for multiple modules.
+                # Known to work: Plenticore plus 10
+                # Known not to work: Plenticore plus 10 G2, Plenticore M G3
+                request = [
+                    {
+                        "moduleid": module_id,
+                        "settingids": list(setting_id),
+                    }
+                ]
             async with self._session_request(
-                f"settings/{module_id}/{setting_id}"
+                "settings", method="POST", json=request
             ) as resp:
-                await self._check_response(resp)
-                data_response = await resp.json()
-                return {module_id: {data_response[0]["id"]: data_response[0]["value"]}}
-
-        if (
-            isinstance(module_id, str)
-            and setting_id is not None
-            and hasattr(setting_id, "__iter__")
-        ):
-            # get multiple settings of a module
-
-            # There was once an API version which explicitly supports a single module with
-            # multiple settings in one request. However this way seems to be not supported anymore
-            # and hence we use the same approach as for multiple modules.
-            # Known to work: Plenticore plus 10
-            # Known not to work: Plenticore plus 10 G2, Plenticore M G3
-            request = [
-                {
-                    "moduleid": module_id,
-                    "settingids": list(setting_id),
-                }
-            ]
-
-            async with self._session_request("settings", method="POST", json=request) as resp:
                 await self._check_response(resp)
                 data_response = await resp.json()
                 # expected response looks like

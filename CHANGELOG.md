@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
+Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
 
 ### Added
 - German user interface (`translations/de.json`): setup and options flows,
@@ -42,6 +42,36 @@ Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
   KOSTAL's manuals (Modbus protocol description, event list) were removed in
   favour of links to the official documents. The issue link in the old README
   pointed to the wrong repository.
+
+### Fixed
+- Setup no longer fails with `cannot import name 'MessageTooLongError' from
+  'Crypto'`. KORE now ships its own copy of pykoplenti 1.5.1
+  (`custom_components/kostal_kore/pykoplenti/`, Apache-2.0) instead of installing
+  pykoplenti 1.5.0 from PyPI. (1.5.1 reads single process values and settings
+  through the bulk endpoints; KORE already used only those.) The bundled copy encrypts the login session with
+  `cryptography`, which Home Assistant itself depends on, instead of
+  `pycryptodome` (byte-identical result, covered by a login test against a
+  simulated inverter). KORE therefore no longer depends on `pycryptodome` at
+  all: a mixed 3.x/4.x installation of it (pycryptodome 4 was released in
+  October 2026, pykoplenti pins `<4`) or another integration's version
+  requirement can no longer break the login. The manifest drops
+  `pykoplenti==1.5.0` and requires `pydantic>=1.10,<3`, which pykoplenti needs.
+- When several requests find the inverter session expired at the same time,
+  they now share one re-login (a per-client lock in the bundled pykoplenti)
+  instead of starting overlapping logins that can invalidate each other's new
+  sessions. Only the login holds the lock; requests are retried after it is
+  released. The PyPI pykoplenti 1.5.0 used until now had no such lock.
+- When the inverter is not reachable at start (it boots after Home Assistant,
+  e.g. after a power cut, or the network is not up yet), Home Assistant now
+  retries the setup in the background (*Retrying setup*) until the inverter
+  answers. Before, a connection error, a login timeout, the 90 s setup timeout
+  or a busy inverter API left the entry failed (*Failed to set up*) until it
+  was reloaded by hand. A rejected password still fails for good and raises
+  the repair issue.
+
+## [3.0.16] - 2026-10-25
+
+### Changed
 - A Modbus write to `Battery Max Charge Limit` / `Battery Max Discharge Limit`
   (REG 1038 / 1040) that reads back **below** the command now counts as
   applied (`last_command_outcome = limited`) instead of failing as "Readback is

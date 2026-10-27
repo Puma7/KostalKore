@@ -16,9 +16,11 @@ Shell-History und Prozessliste (für andere lokale Benutzer sichtbar).
 import asyncio
 import getpass  # NEU: sichere interaktive Eingabe ohne Shell-History
 import sys
+from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, "pykoplenti-master")
+# The integration ships its own copy of pykoplenti; load it without Home Assistant.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "custom_components" / "kostal_kore"))
 
 import aiohttp
 from pykoplenti import ApiClient

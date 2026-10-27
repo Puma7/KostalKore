@@ -15,13 +15,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, UpdateFailed
-from pykoplenti import ApiException
 
 from .const import AddConfigEntryEntitiesCallback
 from .const_ids import ModuleId
 from .coordinator import PlenticoreConfigEntry, SelectDataUpdateCoordinator
 from .helper import parse_modbus_exception
 from .naming import async_translated_adder
+from .pykoplenti import ApiException
 
 _LOGGER = logging.getLogger(__name__)
 

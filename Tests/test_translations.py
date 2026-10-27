@@ -178,7 +178,8 @@ async def test_names_follow_the_language_and_ids_stay_english(
     hass, mock_config_entry, mock_get_settings, language: str, friendly_name: str,
 ) -> None:
     from homeassistant.helpers import entity_registry as er
-    from pykoplenti import SettingsData
+
+    from custom_components.kostal_kore.pykoplenti import SettingsData
 
     hass.config.language = language
     mock_get_settings["devices:local"].extend(
