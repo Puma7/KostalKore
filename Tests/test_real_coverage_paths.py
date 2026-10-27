@@ -15,8 +15,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pykoplenti import ApiException, ProcessData, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import ApiException, ProcessData, SettingsData
 
 
 def _split_request(request):
@@ -43,8 +44,7 @@ def _mock_entry() -> MockConfigEntry:
 @pytest.mark.asyncio
 async def test_plenticore_async_setup_and_unload_error_paths(hass: HomeAssistant) -> None:
     """Cover login/metadata/module error branches and unload branches."""
-    from pykoplenti import AuthenticationException
-
+    from custom_components.kostal_kore.pykoplenti import AuthenticationException
     from kostal_plenticore.coordinator import Plenticore
 
     entry = _mock_entry()

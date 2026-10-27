@@ -9,7 +9,6 @@ import pytest
 from aiohttp.client_exceptions import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
-from pykoplenti import ApiClient, ApiException, ExtendedApiClient, SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore import coordinator
@@ -39,6 +38,12 @@ from custom_components.kostal_kore.helper import (
     safe_home_power_w,
     sum_home_consumption_power_w,
     validate_bind_address,
+)
+from custom_components.kostal_kore.pykoplenti import (
+    ApiClient,
+    ApiException,
+    ExtendedApiClient,
+    SettingsData,
 )
 
 

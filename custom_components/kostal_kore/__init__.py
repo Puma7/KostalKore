@@ -27,7 +27,6 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
-from pykoplenti import ApiException
 
 from .battery_chemistry import detect_chemistry
 from .const import (
@@ -70,6 +69,7 @@ from .orphan_history import (
     async_register_orphan_history_services,
     async_unregister_orphan_history_services_if_unused,
 )
+from .pykoplenti import ApiException
 from .repairs import clear_issue, create_battery_capacity_unit_migration_issue  # GEÄNDERT
 from .request_scheduler import RequestScheduler
 from .startup_trace import (

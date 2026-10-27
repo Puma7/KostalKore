@@ -31,8 +31,15 @@ except Exception:
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-from pykoplenti import ExtendedApiClient, MeData, ProcessData, SettingsData, VersionData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import (
+    ExtendedApiClient,
+    MeData,
+    ProcessData,
+    SettingsData,
+    VersionData,
+)
 
 # Ensure SelectorEventLoop on Windows (aiodns requirement)
 if sys.platform == "win32":

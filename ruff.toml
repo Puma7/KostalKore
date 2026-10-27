@@ -4,7 +4,8 @@
 # large mechanical reformat and is intentionally deferred to its own dedicated PR.
 target-version = "py312"
 line-length = 100
-extend-exclude = ["pykoplenti-master"]
+# The bundled pykoplenti is third-party code, kept as close to upstream as possible.
+extend-exclude = ["custom_components/kostal_kore/pykoplenti"]
 
 [lint]
 # High-signal rules: pyflakes (F), import sorting (I), whitespace (W).

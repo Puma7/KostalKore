@@ -21,7 +21,7 @@ Home Assistant:
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements_test.txt
-pip install "pykoplenti==1.5.0" "pymodbus>=3.6"
+pip install "pydantic>=1.10,<3" "pymodbus>=3.6"
 ln -s Tests tests        # pytest.ini expects lowercase "tests" on Linux
 
 python -m pytest Tests/ --timeout=60          # needs 100 % branch coverage

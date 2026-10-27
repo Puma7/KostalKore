@@ -4,8 +4,9 @@ from unittest.mock import MagicMock  # noqa: F401
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pykoplenti import ProcessData, SettingsData  # noqa: F401
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import ProcessData, SettingsData  # noqa: F401
 
 pytestmark = [
     pytest.mark.usefixtures("mock_plenticore_client"),

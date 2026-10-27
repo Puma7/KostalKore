@@ -1,4 +1,6 @@
-import asyncio
+# Bundled copy of pykoplenti 1.5.0 (Apache-2.0, https://github.com/stegm/pykoplenti).
+# Modified for KOSTAL KORE: the login encrypts with `cryptography` instead of
+# `pycryptodome` (see encrypt_session_token and README.md in this folder).
 from base64 import b64decode, b64encode
 from collections.abc import Mapping
 import contextlib
@@ -12,8 +14,8 @@ from os import urandom
 from typing import IO, Dict, Final, Iterable, List, Union, overload
 import warnings
 
-from Crypto.Cipher import AES
 from aiohttp import ClientResponse, ClientSession, ClientTimeout
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from yarl import URL
 
 from .model import (
@@ -27,6 +29,16 @@ from .model import (
 )
 
 _logger: Final = logging.getLogger(__name__)
+
+
+def encrypt_session_token(key: bytes, nonce: bytes, token: bytes) -> tuple[bytes, bytes]:
+    """Encrypt the session token with AES-GCM and return (cipher text, tag).
+
+    KOSTAL KORE: uses ``cryptography`` (a dependency of Home Assistant itself)
+    instead of ``pycryptodome``; the output is byte-identical.
+    """
+    sealed = AESGCM(key).encrypt(nonce, token, None)
+    return sealed[:-16], sealed[-16:]
 
 
 class ApiException(Exception):
@@ -87,25 +99,14 @@ class ModuleNotFoundException(ApiException):
 
 
 def _relogin(fn):
-    """Decorator for automatic re-login if session was expired.
-
-    Uses a per-client lock so that concurrent callers share a single
-    re-login attempt instead of racing against each other and
-    invalidating each other's freshly created sessions.
-    """
+    """Decorator for automatic re-login if session was expired."""
 
     @functools.wraps(fn)
     async def _wrapper(self: "ApiClient", *args, **kwargs):
         with contextlib.suppress(AuthenticationException, NotAuthorizedException):
             return await fn(self, *args, **kwargs)
         _logger.debug("Request failed - try to re-login")
-        async with self._login_lock:
-            # After acquiring the lock another caller may already have
-            # re-authenticated.  Optimistically retry the request first;
-            # only re-login if the retry still fails.
-            with contextlib.suppress(AuthenticationException, NotAuthorizedException):
-                return await fn(self, *args, **kwargs)
-            await self._login()
+        await self._login()
         return await fn(self, *args, **kwargs)
 
     return _wrapper
@@ -173,7 +174,6 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
         self._key: Union[str, None] = None
         self._service_code: Union[str, None] = None
         self._user: Union[str, None] = None
-        self._login_lock: asyncio.Lock = asyncio.Lock()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """Logout support for context manager."""
@@ -323,12 +323,13 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
         session_key_hmac.update(client_key)
         protocol_key = session_key_hmac.digest()
         session_nonce = urandom(16)
-        cipher = AES.new(protocol_key, AES.MODE_GCM, nonce=session_nonce)
 
         if self._user == "master":
             token = f"{token}:{self._service_code}"
 
-        cipher_text, auth_tag = cipher.encrypt_and_digest(token.encode("utf-8"))
+        cipher_text, auth_tag = encrypt_session_token(
+            protocol_key, session_nonce, token.encode("utf-8")
+        )
 
         session_request = {
             # AES initialization vector

@@ -9,7 +9,6 @@ Wenn du ein Problem meldest, häng den Diagnose-Download an
 logger:
   logs:
     custom_components.kostal_kore: debug
-    pykoplenti: debug
 ```
 
 ## Einrichtung und Verbindung
@@ -25,6 +24,19 @@ logger:
   gleichzeitig und ist bei Updates und Wartung beschäftigt. KORE stellt seine
   eigenen Anfragen hintereinander; andere Programme, die den Wechselrichter
   gleichzeitig abfragen, machen Zeitüberschreitungen wahrscheinlicher.
+
+## Einrichtung scheitert mit `cannot import name 'MessageTooLongError' from 'Crypto'`
+
+Die Bibliothek `pycryptodome` in Home Assistant ist beschädigt: Ihre Dateien
+stammen aus zwei Versionen (3.x und 4.x). Bis Version 3.0.16 hat sich KORE
+darüber angemeldet. Seit 3.0.17 bringt KORE eine eigene Kopie von pykoplenti
+mit, die stattdessen `cryptography` nutzt; ein Update von KORE behebt die
+Anmeldung also. Andere Integrationen, die `pycryptodome` nutzen (z. B. die
+eingebaute Kostal-Integration), bleiben betroffen, bis die Bibliothek sauber neu
+installiert ist: unter Home Assistant OS im Terminal-Add-on `ha core rebuild`
+ausführen oder im Container
+`python3 -m pip install --force-reinstall --no-deps pycryptodome` und Home
+Assistant neu starten.
 
 ## Installateur-Zugang erforderlich
 

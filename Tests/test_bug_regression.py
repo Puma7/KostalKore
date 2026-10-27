@@ -19,8 +19,9 @@ from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pykoplenti import ApiException, ProcessData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import ApiException, ProcessData
 
 _TRANSLATIONS = Path(__file__).resolve().parents[1] / "custom_components" / "kostal_kore" / "translations" / "en.json"
 

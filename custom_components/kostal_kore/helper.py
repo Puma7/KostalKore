@@ -16,10 +16,10 @@ from typing import Any, Final, cast
 from aiohttp.client_exceptions import ClientError
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import Unauthorized, UnknownUser
-from pykoplenti import ApiClient, ApiException
 
 from .const import CONF_INSTALLER_ACCESS, DOMAIN
 from .const_ids import ModuleId, SettingId
+from .pykoplenti import ApiClient, ApiException
 from .repairs import clear_issue, create_installer_required_issue
 
 _LOGGER = logging.getLogger(__name__)

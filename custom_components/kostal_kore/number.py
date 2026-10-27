@@ -27,7 +27,6 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er  # noqa: F401
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from pykoplenti import ApiException, SettingsData
 
 from .const import (
     CONF_INSTALLER_ACCESS,
@@ -47,6 +46,7 @@ from .helper import (
 )
 from .naming import async_translated_adder
 from .notifications import clear_control_lease_notice, notify_control_lease_lost
+from .pykoplenti import ApiException, SettingsData
 
 _LOGGER = logging.getLogger(__name__)
 

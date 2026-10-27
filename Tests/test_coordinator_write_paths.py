@@ -14,8 +14,9 @@ from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed  # noqa: F401
-from pykoplenti import ApiException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import ApiException
 
 
 def _entry() -> MockConfigEntry:

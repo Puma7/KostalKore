@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pykoplenti import ProcessData
 
 from custom_components.kostal_kore.const import DOMAIN
+from custom_components.kostal_kore.pykoplenti import ProcessData
 
 
 @pytest.mark.usefixtures("entity_registry_enabled_by_default")

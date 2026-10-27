@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pykoplenti import ModuleNotFoundException
 
 from custom_components.kostal_kore import config_flow
 from custom_components.kostal_kore.const import CONF_HOST, CONF_PASSWORD
 from custom_components.kostal_kore.helper import normalize_hostname
+from custom_components.kostal_kore.pykoplenti import ModuleNotFoundException
 
 PACKAGE = Path(__file__).resolve().parent.parent / "custom_components" / "kostal_kore"
 

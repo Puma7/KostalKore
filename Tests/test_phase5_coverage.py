@@ -12,8 +12,9 @@ from aiohttp.client_exceptions import ClientError, ContentTypeError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
-from pykoplenti import ApiException, AuthenticationException
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.kostal_kore.pykoplenti import ApiException, AuthenticationException
 
 kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
 from custom_components.kostal_kore import config_flow, diagnostics, helper, repairs, select

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
+Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
 
 ### Added
 - German user interface (`translations/de.json`): setup and options flows,
@@ -42,6 +42,23 @@ Manifest version 3.0.16; tag the release that ships this `v3.0.16`.
   KOSTAL's manuals (Modbus protocol description, event list) were removed in
   favour of links to the official documents. The issue link in the old README
   pointed to the wrong repository.
+
+### Fixed
+- Setup no longer fails with `cannot import name 'MessageTooLongError' from
+  'Crypto'`. KORE now ships its own copy of pykoplenti 1.5.0
+  (`custom_components/kostal_kore/pykoplenti/`, Apache-2.0) instead of installing
+  it from PyPI. The bundled copy encrypts the login session with
+  `cryptography`, which Home Assistant itself depends on, instead of
+  `pycryptodome` (byte-identical result, covered by a login test against a
+  simulated inverter). KORE therefore no longer depends on `pycryptodome` at
+  all: a mixed 3.x/4.x installation of it (pycryptodome 4 was released in
+  October 2026, pykoplenti pins `<4`) or another integration's version
+  requirement can no longer break the login. The manifest drops
+  `pykoplenti==1.5.0` and requires `pydantic>=1.10,<3`, which pykoplenti needs.
+
+## [3.0.16] - 2026-10-25
+
+### Changed
 - A Modbus write to `Battery Max Charge Limit` / `Battery Max Discharge Limit`
   (REG 1038 / 1040) that reads back **below** the command now counts as
   applied (`last_command_outcome = limited`) instead of failing as "Readback is

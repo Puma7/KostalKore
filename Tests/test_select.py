@@ -6,8 +6,9 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pykoplenti import SettingsData
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+
+from custom_components.kostal_kore.pykoplenti import SettingsData
 
 pytestmark = [
     pytest.mark.usefixtures("mock_plenticore_client"),

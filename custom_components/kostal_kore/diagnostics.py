@@ -27,7 +27,6 @@ from homeassistant.helpers import config_validation as cv  # noqa: F401
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView, current_request
 from homeassistant.helpers.system_info import async_get_system_info
-from pykoplenti import ApiException
 
 from .const import CONF_HOST, CONF_SERVICE_CODE, DOMAIN, MAX_SANE_STRING_COUNT
 from .const_ids import STRING_FEATURE_TEMPLATE, ModuleId, SettingId, string_feature_id  # noqa: F401
@@ -35,6 +34,7 @@ from .coordinator import PlenticoreConfigEntry
 
 # Import MODBUS exception handling from coordinator
 from .helper import async_require_admin, parse_modbus_exception
+from .pykoplenti import ApiException
 
 _LOGGER = logging.getLogger(__name__)
 

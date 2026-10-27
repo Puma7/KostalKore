@@ -5,10 +5,10 @@ from unittest.mock import Mock
 
 from homeassistant.components.diagnostics import REDACTED
 from homeassistant.core import HomeAssistant
-from pykoplenti import ApiException
 from pytest_homeassistant_custom_component.common import ANY, MockConfigEntry  # noqa: F401
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.kostal_kore.pykoplenti import ApiException
 from kostal_plenticore.diagnostics import (
     _handle_diagnostics_error,
     async_get_config_entry_diagnostics,

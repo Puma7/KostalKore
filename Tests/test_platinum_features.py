@@ -31,8 +31,7 @@ class TestModbusExceptionHandling:
 
     def test_error_parsing_functionality(self) -> None:
         """parse_modbus_exception maps an ApiException to a typed Modbus error."""
-        from pykoplenti import ApiException
-
+        from custom_components.kostal_kore.pykoplenti import ApiException
         from kostal_plenticore.helper import parse_modbus_exception
 
         modbus_exc = parse_modbus_exception(ApiException("illegal function error"))
