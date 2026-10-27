@@ -15,7 +15,8 @@ Changes against the PyPI release 1.5.0:
   the login fail with `cannot import name 'MessageTooLongError' from 'Crypto'`.
 - `api.py`: when several requests find the session expired at the same time,
   they share one re-login behind a per-client lock (`_relogin`), instead of
-  starting overlapping logins that invalidate each other's new sessions.
+  starting overlapping logins that invalidate each other's new sessions. Only
+  the login runs under the lock; requests are retried after it is released.
 - `cli.py` (the command-line tool) is not included.
 
 Everything else is unchanged. Import it relatively inside the integration

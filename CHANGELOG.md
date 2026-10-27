@@ -58,7 +58,8 @@ Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
 - When several requests find the inverter session expired at the same time,
   they now share one re-login (a per-client lock in the bundled pykoplenti)
   instead of starting overlapping logins that can invalidate each other's new
-  sessions. The PyPI pykoplenti 1.5.0 used until now had no such lock.
+  sessions. Only the login holds the lock; requests are retried after it is
+  released. The PyPI pykoplenti 1.5.0 used until now had no such lock.
 
 ## [3.0.16] - 2026-10-25
 

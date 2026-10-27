@@ -116,10 +116,13 @@ class _ExpiringInverter:
     def __init__(self) -> None:
         self.logged_in = False
         self.logins = 0
+        self.lock: asyncio.Lock | None = None
+        self.requested_under_lock = False
 
     @asynccontextmanager
     async def request(self, method: str, url: Any, **kwargs: Any):
         await asyncio.sleep(0)  # let concurrent requests run into the 401 as well
+        self.requested_under_lock |= bool(self.lock and self.lock.locked())
         if not self.logged_in:
             yield _Response(401, {"message": "session expired"})
         else:
@@ -133,7 +136,13 @@ class _ExpiringInverter:
 
 def _client_for(inverter: _ExpiringInverter) -> ApiClient:
     client = ApiClient(inverter, "192.0.2.1")  # type: ignore[arg-type]
-    client._login = inverter.login  # type: ignore[method-assign]
+
+    async def login() -> None:  # like ApiClient._login: a successful login sets a new session
+        await inverter.login()
+        client.session_id = f"session-{inverter.logins}"
+
+    client._login = login  # type: ignore[method-assign]
+    inverter.lock = client._login_lock
     return client
 
 
@@ -143,6 +152,7 @@ async def test_expired_session_logs_in_again_and_retries() -> None:
     values = await _client_for(inverter).get_process_data_values("moda", "procb")
     assert inverter.logins == 1
     assert values["moda"]["procb"].value == 7
+    assert not inverter.requested_under_lock  # only the login holds the lock, requests run outside it
 
 
 async def test_concurrent_requests_share_one_re_login() -> None:

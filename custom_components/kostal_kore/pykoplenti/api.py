@@ -103,23 +103,22 @@ class ModuleNotFoundException(ApiException):
 def _relogin(fn):
     """Decorator for automatic re-login if session was expired.
 
-    KOSTAL KORE: uses a per-client lock so that concurrent callers share a
-    single re-login attempt instead of racing against each other and
-    invalidating each other's freshly created sessions.
+    KOSTAL KORE: concurrent callers share a single re-login instead of racing
+    against each other and invalidating each other's freshly created sessions.
+    Only the login runs under the per-client lock; the request is retried
+    after the lock is released, so a slow request never blocks other callers.
     """
 
     @functools.wraps(fn)
     async def _wrapper(self: "ApiClient", *args, **kwargs):
+        failed_session = self.session_id
         with contextlib.suppress(AuthenticationException, NotAuthorizedException):
             return await fn(self, *args, **kwargs)
         _logger.debug("Request failed - try to re-login")
         async with self._login_lock:
-            # After acquiring the lock another caller may already have
-            # re-authenticated. Retry the request first; only re-login if the
-            # retry still fails.
-            with contextlib.suppress(AuthenticationException, NotAuthorizedException):
-                return await fn(self, *args, **kwargs)
-            await self._login()
+            # Another caller may have logged in while this request was failing.
+            if self.session_id == failed_session:
+                await self._login()
         return await fn(self, *args, **kwargs)
 
     return _wrapper
