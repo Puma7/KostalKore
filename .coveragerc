@@ -2,7 +2,7 @@
 branch = True
 source = custom_components/kostal_kore
 omit =
-    # bundled third-party library (pykoplenti 1.5.0); its login is tested in test_bundled_pykoplenti.py
+    # bundled third-party library (pykoplenti 1.5.1); its login is tested in test_bundled_pykoplenti.py
     custom_components/kostal_kore/pykoplenti/*
     custom_components/kostal_kore/coordinator.py
     custom_components/kostal_kore/number.py

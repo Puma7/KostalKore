@@ -45,9 +45,10 @@ Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
 
 ### Fixed
 - Setup no longer fails with `cannot import name 'MessageTooLongError' from
-  'Crypto'`. KORE now ships its own copy of pykoplenti 1.5.0
+  'Crypto'`. KORE now ships its own copy of pykoplenti 1.5.1
   (`custom_components/kostal_kore/pykoplenti/`, Apache-2.0) instead of installing
-  it from PyPI. The bundled copy encrypts the login session with
+  pykoplenti 1.5.0 from PyPI. (1.5.1 reads single process values and settings
+  through the bulk endpoints; KORE already used only those.) The bundled copy encrypts the login session with
   `cryptography`, which Home Assistant itself depends on, instead of
   `pycryptodome` (byte-identical result, covered by a login test against a
   simulated inverter). KORE therefore no longer depends on `pycryptodome` at

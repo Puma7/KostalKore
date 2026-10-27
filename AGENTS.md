@@ -23,7 +23,7 @@ python -m mypy custom_components/kostal_kore/
 Uses strict mode per `mypy.ini`. Should report zero issues.
 
 ### Key dependencies
-- `pykoplenti` 1.5.0 ships inside the integration at `custom_components/kostal_kore/pykoplenti/` (Apache-2.0, see its `README.md`); import it relatively (`from .pykoplenti import …`), never the PyPI package. Its only change: the login uses `cryptography`'s AES-GCM instead of `pycryptodome`. It is excluded from ruff, mypy strict and the coverage gate; `Tests/test_bundled_pykoplenti.py` covers the login.
+- `pykoplenti` 1.5.1 ships inside the integration at `custom_components/kostal_kore/pykoplenti/` (Apache-2.0, see its `README.md` for the changes); import it relatively (`from .pykoplenti import …`), never the PyPI package. Changes against upstream: the login uses `cryptography`'s AES-GCM instead of `pycryptodome`, and concurrent re-logins share one attempt behind a lock (`_relogin`). To update it, apply those changes to the new upstream `api.py`. It is excluded from ruff, mypy strict and the coverage gate; `Tests/test_bundled_pykoplenti.py` covers the login.
 - `pytest-homeassistant-custom-component` provides a mocked Home Assistant runtime for tests.
 - No lockfile exists; `requirements_test.txt` lists unpinned test deps.
 
