@@ -1,6 +1,8 @@
 # Bundled copy of pykoplenti 1.5.0 (Apache-2.0, https://github.com/stegm/pykoplenti).
 # Modified for KOSTAL KORE: the login encrypts with `cryptography` instead of
-# `pycryptodome` (see encrypt_session_token and README.md in this folder).
+# `pycryptodome` (see encrypt_session_token), and concurrent re-logins share one
+# attempt (_relogin). See README.md in this folder.
+import asyncio
 from base64 import b64decode, b64encode
 from collections.abc import Mapping
 import contextlib
@@ -99,14 +101,25 @@ class ModuleNotFoundException(ApiException):
 
 
 def _relogin(fn):
-    """Decorator for automatic re-login if session was expired."""
+    """Decorator for automatic re-login if session was expired.
+
+    KOSTAL KORE: uses a per-client lock so that concurrent callers share a
+    single re-login attempt instead of racing against each other and
+    invalidating each other's freshly created sessions.
+    """
 
     @functools.wraps(fn)
     async def _wrapper(self: "ApiClient", *args, **kwargs):
         with contextlib.suppress(AuthenticationException, NotAuthorizedException):
             return await fn(self, *args, **kwargs)
         _logger.debug("Request failed - try to re-login")
-        await self._login()
+        async with self._login_lock:
+            # After acquiring the lock another caller may already have
+            # re-authenticated. Retry the request first; only re-login if the
+            # retry still fails.
+            with contextlib.suppress(AuthenticationException, NotAuthorizedException):
+                return await fn(self, *args, **kwargs)
+            await self._login()
         return await fn(self, *args, **kwargs)
 
     return _wrapper
@@ -174,6 +187,7 @@ class ApiClient(contextlib.AbstractAsyncContextManager):
         self._key: Union[str, None] = None
         self._service_code: Union[str, None] = None
         self._user: Union[str, None] = None
+        self._login_lock: asyncio.Lock = asyncio.Lock()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """Logout support for context manager."""

@@ -9,6 +9,7 @@ copy uses ``cryptography``'s AES-GCM, which Home Assistant itself depends on.
 from __future__ import annotations
 
 import ast
+import asyncio
 import hashlib
 import hmac
 import json
@@ -16,10 +17,8 @@ from base64 import b64decode, b64encode
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from aiohttp import ClientResponse, ClientSession
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from custom_components.kostal_kore.pykoplenti import ApiClient, AuthenticationException
@@ -111,27 +110,48 @@ async def test_login_with_a_wrong_password_is_rejected() -> None:
         await client.login("wrong")
 
 
+class _ExpiringInverter:
+    """Answers 401 until the client has logged in again, then returns a value."""
+
+    def __init__(self) -> None:
+        self.logged_in = False
+        self.logins = 0
+
+    @asynccontextmanager
+    async def request(self, method: str, url: Any, **kwargs: Any):
+        await asyncio.sleep(0)  # let concurrent requests run into the 401 as well
+        if not self.logged_in:
+            yield _Response(401, {"message": "session expired"})
+        else:
+            yield _Response(200, [{"moduleid": "moda", "processdata": [{"id": "procb", "unit": "W", "value": 7}]}])
+
+    async def login(self) -> None:
+        self.logins += 1
+        await asyncio.sleep(0)
+        self.logged_in = True
+
+
+def _client_for(inverter: _ExpiringInverter) -> ApiClient:
+    client = ApiClient(inverter, "192.0.2.1")  # type: ignore[arg-type]
+    client._login = inverter.login  # type: ignore[method-assign]
+    return client
+
+
 async def test_expired_session_logs_in_again_and_retries() -> None:
     """A 401 on a request triggers one re-login and a successful retry (ported from upstream)."""
-    responses = []
-    for status, body in (
-        (401, None),
-        (200, [{"moduleid": "moda", "processdata": [{"id": "procb", "unit": "W", "value": 7}]}]),
-    ):
-        response = MagicMock(spec_set=ClientResponse)
-        response.status = status
-        if body is not None:
-            response.json.return_value = body
-        responses.append(response)
-    websession = MagicMock(spec_set=ClientSession)
-    websession.request.return_value.__aenter__.side_effect = responses
-    client = ApiClient(websession, "192.0.2.1")
-    client._login = AsyncMock()  # type: ignore[method-assign]
-
-    values = await client.get_process_data_values("moda", "procb")
-
-    client._login.assert_awaited_once()
+    inverter = _ExpiringInverter()
+    values = await _client_for(inverter).get_process_data_values("moda", "procb")
+    assert inverter.logins == 1
     assert values["moda"]["procb"].value == 7
+
+
+async def test_concurrent_requests_share_one_re_login() -> None:
+    """Two requests that both find the session expired trigger a single login."""
+    inverter = _ExpiringInverter()
+    client = _client_for(inverter)
+    results = await asyncio.gather(*(client.get_process_data_values("moda", "procb") for _ in range(2)))
+    assert inverter.logins == 1
+    assert [result["moda"]["procb"].value for result in results] == [7, 7]
 
 
 def _imported_modules(path: Path) -> set[str]:

@@ -55,6 +55,10 @@ Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
   October 2026, pykoplenti pins `<4`) or another integration's version
   requirement can no longer break the login. The manifest drops
   `pykoplenti==1.5.0` and requires `pydantic>=1.10,<3`, which pykoplenti needs.
+- When several requests find the inverter session expired at the same time,
+  they now share one re-login (a per-client lock in the bundled pykoplenti)
+  instead of starting overlapping logins that can invalidate each other's new
+  sessions. The PyPI pykoplenti 1.5.0 used until now had no such lock.
 
 ## [3.0.16] - 2026-10-25
 

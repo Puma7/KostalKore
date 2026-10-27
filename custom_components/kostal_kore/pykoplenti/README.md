@@ -13,6 +13,9 @@ Changes against the PyPI release 1.5.0:
   the encrypted bytes are identical. pykoplenti 1.5.0 pins
   `pycryptodome~=3.19`, and a broken or mixed `pycryptodome` installation made
   the login fail with `cannot import name 'MessageTooLongError' from 'Crypto'`.
+- `api.py`: when several requests find the session expired at the same time,
+  they share one re-login behind a per-client lock (`_relogin`), instead of
+  starting overlapping logins that invalidate each other's new sessions.
 - `cli.py` (the command-line tool) is not included.
 
 Everything else is unchanged. Import it relatively inside the integration
