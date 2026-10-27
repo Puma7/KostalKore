@@ -122,29 +122,41 @@ async def test_async_setup_entry_success(
 
 
 @pytest.mark.asyncio
-async def test_async_setup_entry_config_entry_not_ready(
+@pytest.mark.parametrize(
+    ("err", "message"),
+    [
+        (None, "transient failure"),
+        (TimeoutError(), "did not answer within 90s"),
+        (ClientError("Connect call failed"), "not reachable: Connect call failed"),
+    ],
+)
+async def test_async_setup_entry_retries_when_the_inverter_is_unreachable(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
+    err: Exception | None,
+    message: str,
 ) -> None:
-    """ConfigEntryNotReady is now caught like any other exception and returns False."""
+    """An unreachable or slow inverter raises ConfigEntryNotReady so HA retries."""
     from homeassistant.exceptions import ConfigEntryNotReady
+
+    unloaded = []
 
     class DummyPlenticore:
         def __init__(self, *_args):
             pass
 
         async def async_setup(self) -> bool:
-            raise ConfigEntryNotReady("transient failure")
+            raise err if err is not None else ConfigEntryNotReady("transient failure")
 
         async def async_unload(self) -> None:
-            pass
+            unloaded.append(True)
 
     mock_config_entry.add_to_hass(hass)
 
-    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore), patch(
-        "custom_components.kostal_kore.__init__._handle_init_error", return_value=False
-    ):
-        assert await kp_init.async_setup_entry(hass, mock_config_entry) is False
+    with patch("custom_components.kostal_kore.__init__.Plenticore", DummyPlenticore):
+        with pytest.raises(ConfigEntryNotReady, match=message):
+            await kp_init.async_setup_entry(hass, mock_config_entry)
+    assert unloaded == [True]
 
 
 @pytest.mark.asyncio

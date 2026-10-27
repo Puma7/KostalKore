@@ -61,6 +61,13 @@ Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
   instead of starting overlapping logins that can invalidate each other's new
   sessions. Only the login holds the lock; requests are retried after it is
   released. The PyPI pykoplenti 1.5.0 used until now had no such lock.
+- When the inverter is not reachable at start (it boots after Home Assistant,
+  e.g. after a power cut, or the network is not up yet), Home Assistant now
+  retries the setup in the background (*Retrying setup*) until the inverter
+  answers. Before, a connection error, a login timeout, the 90 s setup timeout
+  or a busy inverter API left the entry failed (*Failed to set up*) until it
+  was reloaded by hand. A rejected password still fails for good and raises
+  the repair issue.
 
 ## [3.0.16] - 2026-10-25
 

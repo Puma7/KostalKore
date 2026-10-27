@@ -3,6 +3,8 @@
 import importlib
 from unittest.mock import AsyncMock, call, patch
 
+import pytest
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -11,6 +13,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.const import DOMAIN
+from custom_components.kostal_kore.pykoplenti import ApiException, AuthenticationException
 
 kp_init = importlib.import_module("custom_components.kostal_kore.__init__")
 
@@ -66,6 +69,41 @@ async def test_setup_fails(
 
     # HA async_setup will return True but log the failure if it's handled,
     # or return False if it's not. Plenticore.async_setup returns False on Exception.
+    assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ClientError("Connect call failed"), TimeoutError(), ApiException("busy")],
+)
+async def test_setup_retries_when_the_inverter_is_unreachable(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+    error: Exception,
+) -> None:
+    """An inverter that is not reachable yet (e.g. booting) is retried by HA."""
+    mock_plenticore_client.login.side_effect = error
+    mock_config_entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_setup_fails_for_good_on_wrong_credentials(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_plenticore_client,
+) -> None:
+    """A rejected password is not retried; the repair issue asks for new credentials."""
+    mock_plenticore_client.login.side_effect = AuthenticationException(400, "bad password")
+    mock_config_entry.add_to_hass(hass)
+
     assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
