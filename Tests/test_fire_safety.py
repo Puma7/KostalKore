@@ -351,6 +351,22 @@ class TestFireSafetyMonitor:
         )
         assert any(a.category == "dc_arc_indicator" for a in alerts)
 
+    def test_dc_imbalance_names_the_weaker_string(self) -> None:
+        """Two strings deviate equally from their average; only the weak one is reported."""
+        m = FireSafetyMonitor()
+        alerts = m._check_dc_string_anomaly(
+            {
+                "dc1_power": 5301.5,
+                "dc2_power": 270.7,
+                "dc1_voltage": 391.8,
+                "dc2_voltage": 625.5,
+            },
+            0.0,
+        )
+        assert [a.title for a in alerts if a.category == "dc_imbalance"] == [
+            "DC string dc2 significantly weaker than others"
+        ]
+
     def test_stable_ratio_true_for_steady_history(self) -> None:
         m = FireSafetyMonitor()
         for idx in range(10):

@@ -385,7 +385,9 @@ class FireSafetyMonitor:
                     f"Look for burn marks, loose connections, or animal damage.",
                     vals,
                 ))
-            elif deviation > 85 and not self._is_stable_ratio(now):
+            # Only a string below the average is the weak one: with two strings
+            # both deviate by the same percentage from their average.
+            elif power < avg_power and deviation > 85 and not self._is_stable_ratio(now):
                 alerts.append(SafetyAlert(
                     now, FireRiskLevel.MONITOR, "dc_imbalance",
                     f"DC string {string} significantly weaker than others",
