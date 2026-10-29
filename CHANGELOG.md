@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
+## [3.0.17] - 2026-10-29
 
 ### Added
 - German user interface (`translations/de.json`): setup and options flows,
