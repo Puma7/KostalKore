@@ -72,10 +72,11 @@ Manifest version 3.0.17; tag the release that ships this `v3.0.17`.
   weaker than others" on a two-string system (both strings deviate from their
   average by the same percentage, and the first one won). It now names only a
   string below the average.
-- Docs: `Battery Max Charge Limit (Modbus)` (REG 1038) has no keepalive; a write
-  through the entity is not repeated, so whoever drives the limit must write it
-  again (EN/DE entities). The night of 28/29 Oct 2026 showed a 2 h 44 min gap
-  after a BMS-limited write (Puma7/KostalKore#92); KORE itself was not at fault.
+- Docs: `Battery Max Charge Limit (Modbus)` (REG 1038) and `Battery Max
+  Discharge Limit (Modbus)` (REG 1040) have no keepalive. KORE does not repeat
+  a write through them, so whoever drives the limit must write it again
+  (EN/DE entities). The night of 28/29 Oct 2026 showed a 2 h 44 min gap after
+  a BMS-limited write (Puma7/KostalKore#92); KORE itself was not at fault.
 
 ## [3.0.16] - 2026-10-25
 
