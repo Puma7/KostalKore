@@ -358,6 +358,13 @@ async def test_a_kept_alive_limit_logs_info_only_for_a_change(caplog) -> None:
         assert len(_info_lines(caplog, "Writing bat_max_charge_limit")) == 1
         assert len(_info_lines(caplog, "currently allows")) == 1
 
+        caplog.clear()
+        coord._commanded = 5000  # replaced by another write path (proxy, MQTT)
+        await write(51.5)
+        coord._commanded = None  # reconnect: the coordinator forgets the command
+        await write(51.5)
+        assert len(_info_lines(caplog, "currently allows")) == 2
+
 
 @pytest.mark.asyncio
 async def test_coordinator_logs_a_repeated_write_at_debug(caplog) -> None:

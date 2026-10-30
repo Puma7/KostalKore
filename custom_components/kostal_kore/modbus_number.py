@@ -468,6 +468,10 @@ class ModbusNumberEntity(
             raise ServiceValidationError("Modbus number value is outside its allowed range")
 
         previous = self.coordinator.last_commanded(self._register.name)
+        if previous != value:
+            # Another write path or a reconnect replaced the command since the
+            # last logged limit in effect; this one is a new command again.
+            self._logged_allowance = None
         # A controller re-writing the same command keeps it alive; only a new
         # command is worth an INFO line.
         _LOGGER.log(
