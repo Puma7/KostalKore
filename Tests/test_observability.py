@@ -606,6 +606,7 @@ def test_modbus_coordinator_write_hook_logs_ok(monkeypatch):
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
+    coord._last_commanded = {}
     coord._command_revision = {}
 
     from custom_components.kostal_kore.modbus_registers import Access
@@ -637,6 +638,7 @@ def test_modbus_coordinator_write_hook_logs_error_on_exception(monkeypatch):
     coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
+    coord._last_commanded = {}
 
     from custom_components.kostal_kore.modbus_registers import Access
     reg = MagicMock()
@@ -668,6 +670,7 @@ def test_modbus_coordinator_write_register_honors_audit_source():
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
+    coord._last_commanded = {}
     coord._command_revision = {}
 
     reg = MagicMock()
@@ -697,6 +700,7 @@ def test_modbus_coordinator_write_register_logs_non_modbus_exceptions():
     coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
+    coord._last_commanded = {}
 
     reg = MagicMock()
     reg.access = Access.RW
@@ -729,6 +733,7 @@ def test_modbus_coordinator_write_by_address_logs_ok():
     coord._client = client
     coord._write_audit = audit
     coord._last_commanded = {}
+    coord._last_commanded = {}
     coord._command_revision = {}
 
     asyncio.get_event_loop().run_until_complete(
@@ -758,6 +763,7 @@ def test_modbus_coordinator_write_by_address_logs_error():
     coord._proxy_observations = {}
     coord._client = client
     coord._write_audit = audit
+    coord._last_commanded = {}
 
     with pytest.raises(RuntimeError):
         asyncio.get_event_loop().run_until_complete(

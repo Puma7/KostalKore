@@ -686,6 +686,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Refusing to write NaN/Infinity to register {register.name}"
             )
 
+        previous = self.last_commanded(register.name)
+        generation = self._client.connection_generation
         try:
             self._proxy_observations.pop(register.name, None)
             if precondition is None:
@@ -697,8 +699,16 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._slow_tick = 5
             if record_command:
                 self._record_commanded(register.name, value)
-            _LOGGER.info(
-                "Wrote %s = %s to inverter via Modbus", register.name, value
+            # A keepalive or a controller re-writing the same command on the same
+            # connection is not a new command; keep INFO for a change.
+            repeat = not record_command or (
+                previous is not None
+                and generation == self._client.connection_generation
+                and self.last_commanded(register.name) == previous
+            )
+            _LOGGER.log(
+                logging.DEBUG if repeat else logging.INFO,
+                "Wrote %s = %s to inverter via Modbus", register.name, value,
             )
             if self._write_audit is not None:
                 from .write_audit import WriteEvent

@@ -82,7 +82,8 @@ _READBACK_HINTS: Final[dict[str, str]] = {
     READBACK_BELOW_COMMAND: "reads below the command, e.g. an effective BMS limit",
 }
 # REG 1038/1040 read min(command, BMS limit): the BMS lowers the charge limit
-# as the battery fills and the discharge limit as it empties (HV8). A read
+# as the battery fills and the discharge limit as it empties (HV8), and the
+# charge limit reads about 50 W while the battery rests at its min SOC. A read
 # below the command is therefore the command applied, limited by the BMS.
 EFFECTIVE_LIMIT_REGISTERS: Final[frozenset[str]] = frozenset({
     REG_BAT_MAX_CHARGE_LIMIT.name,
@@ -99,6 +100,12 @@ G3_CYCLIC_REGISTERS: Final[frozenset[str]] = frozenset({
 # equivalent of SunSpec model 123 WMaxLimPct. It gets curtailment-specific
 # state attributes (see ModbusNumberEntity.extra_state_attributes).
 CURTAILMENT_REGISTER_NAME: Final[str] = REG_ACTIVE_POWER_SETPOINT.name
+
+# A controller that keeps a limit alive re-writes it every 20-30 s. The limit in
+# effect is logged at INFO only when it moved by more than this since the last
+# logged one for the same command; smaller moves are DEBUG.
+ALLOWANCE_LOG_MIN_CHANGE_W: Final[float] = 100.0
+ALLOWANCE_LOG_REL_CHANGE: Final[float] = 0.05
 
 
 async def _probe_modbus_access(coordinator: ModbusDataUpdateCoordinator) -> bool:
@@ -351,6 +358,8 @@ class ModbusNumberEntity(
         # (command revision, command still in effect) after a raised limit was
         # rejected as ignored, so a retry of it is compared with that command.
         self._ignored_baseline: tuple[int, float] | None = None
+        # (command, limit in effect) of the last "applied" line logged at INFO.
+        self._logged_allowance: tuple[float, float] | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -458,7 +467,11 @@ class ModbusNumberEntity(
             )
             raise ServiceValidationError("Modbus number value is outside its allowed range")
 
-        _LOGGER.info(
+        previous = self.coordinator.last_commanded(self._register.name)
+        # A controller re-writing the same command keeps it alive; only a new
+        # command is worth an INFO line.
+        _LOGGER.log(
+            logging.DEBUG if previous == value else logging.INFO,
             "Writing %s = %s via Modbus (register %d)",
             self._register.name, value, self._register.address,
         )
@@ -467,7 +480,6 @@ class ModbusNumberEntity(
         # setpoint read it back through native_value / the attributes.
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._cancel_keepalive()
-        previous = self.coordinator.last_commanded(self._register.name)
         # The coordinator also records the rejected write; a retry of it must
         # still be compared with the command in effect before it.
         if (self._ignored_baseline is not None
@@ -500,9 +512,11 @@ class ModbusNumberEntity(
                         break
                     if attempt == READBACK_ATTEMPTS - 1 and self._readback_limited(observed, value, previous):
                         limited = True
-                        _LOGGER.info(
+                        _LOGGER.log(
+                            logging.DEBUG if self._allowance_logged(value, observed) else logging.INFO,
                             "%s applied: wrote %s, the inverter currently allows %s "
-                            "(limit in effect, e.g. BMS taper near full or empty)",
+                            "(the limit in effect: lowered by the BMS near full or empty; "
+                            "the charge limit reads about 50 W while the battery rests at its min SOC)",
                             self._register.name, value, readback,
                         )
                     elif attempt == READBACK_ATTEMPTS - 1:
@@ -585,6 +599,8 @@ class ModbusNumberEntity(
         self._record_last_command(
             revision, COMMAND_LIMITED if limited else COMMAND_CONFIRMED, decided_readback)
         self._ignored_baseline = None
+        if not limited:
+            self._logged_allowance = None
         if self._register.name in G3_CYCLIC_REGISTERS:
             self._start_keepalive(value)
             clear_control_lease_notice(getattr(self, "hass", None),
@@ -612,6 +628,19 @@ class ModbusNumberEntity(
         if self._register.name not in EFFECTIVE_LIMIT_REGISTERS or not 0 <= observed < value:
             return False
         return previous is None or previous >= value or not self._readback_matches(observed, previous)
+
+    def _allowance_logged(self, value: float, observed: float) -> bool:
+        """Return True if a limit in effect this close was already logged for the command.
+
+        Otherwise remember it as the one logged now.
+        """
+        if self._logged_allowance is not None:
+            command, allowance = self._logged_allowance
+            if command == value and abs(observed - allowance) <= max(
+                    ALLOWANCE_LOG_MIN_CHANGE_W, abs(allowance) * ALLOWANCE_LOG_REL_CHANGE):
+                return True
+        self._logged_allowance = (value, observed)
+        return False
 
     def _readback_matches(self, observed: float, value: float) -> bool:
         """Return True if a read-back confirms the commanded value."""

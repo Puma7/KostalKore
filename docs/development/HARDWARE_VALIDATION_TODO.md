@@ -87,6 +87,10 @@ against your FW 3.06.10 G3.
   below the command now counts as applied (`limited`); a raised limit that still reads the
   previous command still fails as ignored. Still open: whether the G3 cyclic limits 1280/1282
   read back the same way (they keep exact confirmation), and how long the read lags a raise.
+  Night 29/30 Oct 2026: at rest on its raised min SOC the battery read about 50 W (51-56 W for
+  3.5 h); after the min SOC was raised to 61 % and 7000 W written (00:08:15), 1038 read 51.5 W
+  until 00:10:49 and only then 7000 W, so the read lagged the raise by about 2.5 minutes. With
+  5000 W written and read back (23:01-23:08), the battery drew about 2 W.
 - **HV9 — Which battery charge counters are AC and which are DC?** `Grid2Bat_P` tracks `Battery
   Power` within 1-2 % during night charging, so it is DC. Compare over one night without PV:
   REG 1054 (`total_ac_charge_grid`), REG 1050 (`total_ac_charge`), REG 1046 (`total_dc_charge`),
