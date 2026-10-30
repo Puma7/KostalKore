@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Less log volume when another integration keeps a limit alive: a Modbus write
+  of the value already commanded (same register, same connection) and the G3
+  keepalive re-writes now log `Writing …` / `Wrote …` at DEBUG; a new command
+  stays at INFO. The `… applied: wrote X, the inverter currently allows Y` line
+  is logged at INFO only when the limit in effect moved by more than 100 W (5 %
+  of a limit above 2 kW) for the same command. One night of an external
+  controller re-writing REG 1038 every ~23 s produced about 2200 INFO lines
+  (Puma7/KostalKore#94).
+- The `applied` line no longer blames a BMS taper only: it names the limit in
+  effect, lowered by the BMS near full or empty; the charge limit reads about
+  50 W while the battery rests at its min SOC. Docs (EN/DE entities, HV8) record
+  the 50 W at rest and a read that lags a raised min SOC by about 2.5 minutes.
+
 ## [3.0.17] - 2026-10-29
 
 ### Added

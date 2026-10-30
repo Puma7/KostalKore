@@ -215,6 +215,7 @@ async def test_coordinator_forwards_precondition_only_when_given() -> None:
     coordinator._proxy_observations = {}
     coordinator._write_audit = None
     coordinator._record_commanded = MagicMock()
+    coordinator._last_commanded = {}
 
     def guard() -> bool:
         return True

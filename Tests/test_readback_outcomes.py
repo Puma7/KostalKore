@@ -320,3 +320,71 @@ async def test_keepalive_rewrite_is_not_a_new_command(hass) -> None:
     assert coordinator.command_revision(register.name) == 1
     assert coordinator.last_commanded(register.name) == 1000
 
+
+
+def _info_lines(caplog, text: str) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.INFO and text in r.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_a_kept_alive_limit_logs_info_only_for_a_change(caplog) -> None:
+    """Night of 29/30 Oct 2026: a controller re-writes 3000 W every ~23 s (Puma7/KostalKore#94)."""
+    coord = _coord()
+    entity = _limit_entity(coord)
+
+    async def write(observed: float) -> None:
+        coord.client.read_register = AsyncMock(return_value=observed)
+        coord.data = {mod.REG_BAT_MAX_CHARGE_LIMIT.name: observed}
+        await entity.async_set_native_value(3000)
+
+    with caplog.at_level(logging.DEBUG):
+        # The battery settles on its raised min SOC: the limit in effect drops to about 50 W.
+        for observed in (1550.61, 122.45, 65.23, 56.07, 51.5, 51.5):
+            await write(observed)
+        assert _info_lines(caplog, "Writing bat_max_charge_limit") == [
+            "Writing bat_max_charge_limit = 3000 via Modbus (register 1038)"]
+        allows = _info_lines(caplog, "currently allows")
+        assert [line.split("currently allows ")[1].split(" ")[0] for line in allows] == ["1550.61", "122.45"]
+        assert "the charge limit reads about 50 W while the battery rests at its min SOC" in allows[0]
+        assert "BMS taper" not in caplog.text
+        assert sum("currently allows" in r.getMessage() for r in caplog.records) == 6
+
+        caplog.clear()
+        await write(3000.0)  # the battery charges at the command again
+        await write(51.5)
+        assert len(_info_lines(caplog, "currently allows")) == 1
+        caplog.clear()
+        await entity.async_set_native_value(5000)  # a new command
+        assert len(_info_lines(caplog, "Writing bat_max_charge_limit")) == 1
+        assert len(_info_lines(caplog, "currently allows")) == 1
+
+        caplog.clear()
+        coord._commanded = 5000  # replaced by another write path (proxy, MQTT)
+        await write(51.5)
+        coord._commanded = None  # reconnect: the coordinator forgets the command
+        await write(51.5)
+        assert len(_info_lines(caplog, "currently allows")) == 2
+
+
+@pytest.mark.asyncio
+async def test_coordinator_logs_a_repeated_write_at_debug(caplog) -> None:
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+
+    coordinator = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coordinator._client = SimpleNamespace(write_register=AsyncMock(), connection_generation=1)
+    coordinator._proxy_observations = {}
+    coordinator._write_audit = None
+    coordinator._last_commanded = {}
+    coordinator._command_revision = {}
+    reg = mod.REG_BAT_MAX_CHARGE_LIMIT
+
+    with caplog.at_level(logging.DEBUG):
+        await coordinator.async_write_register(reg, 3000.0)  # new command
+        await coordinator.async_write_register(reg, 3000.0)  # kept alive
+        await coordinator.async_write_register(reg, 3000.0, record_command=False)  # keepalive re-write
+        coordinator._client.connection_generation = 2  # reconnect: the inverter may have dropped it
+        await coordinator.async_write_register(reg, 3000.0)
+        await coordinator.async_write_register(reg, 5000.0)  # changed command
+    lines = [(r.levelno, r.getMessage()) for r in caplog.records if r.getMessage().startswith("Wrote ")]
+    assert [level for level, _ in lines] == [logging.INFO, logging.DEBUG, logging.DEBUG, logging.INFO, logging.INFO]
+    assert coordinator._command_revision[reg.name] == 4
