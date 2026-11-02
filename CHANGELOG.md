@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   v3.0.19 shipped manifest version 3.0.17, so Home Assistant showed 3.0.17 as
   installed; the tags are left as they are, as with Puma7/KostalKore#67.
   v3.0.18 contained the changes listed under 3.0.17 below (the DC imbalance
-  fix and the REG 1038/1040 keepalive docs), and v3.0.19 the log changes above.
+  fix and the REG 1038/1040 keepalive docs), and v3.0.19 the first two entries
+  above (kept-alive writes at DEBUG and the `applied` hint, #94); the WARNING
+  for transient write failures is new in 3.0.20.
 
 ## [3.0.17] - 2026-10-29
 
