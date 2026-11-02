@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.20] - 2026-11-02
+
 ### Changed
 - Less log volume when another integration keeps a limit alive: a Modbus write
   of the value already commanded (same register, same connection) and the G3
@@ -20,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effect, lowered by the BMS near full or empty; the charge limit reads about
   50 W while the battery rests at its min SOC. Docs (EN/DE entities, HV8) record
   the 50 W at rest and a read that lags a raised min SOC by about 2.5 minutes.
+- A Modbus write that fails for a transient reason (busy, or the inverter's
+  nightly `Server device failure` at 03:10, which lasts about 15 s) is logged
+  at WARNING instead of ERROR. The exception still reaches the caller, which
+  decides what the failed write means; permanent and unknown failures stay
+  ERROR (Puma7/KostalKore#96).
+
+### Fixed
+- The manifest declares the release version again. The tags v3.0.18 and
+  v3.0.19 shipped manifest version 3.0.17, so Home Assistant showed 3.0.17 as
+  installed; the tags are left as they are, as with Puma7/KostalKore#67.
+  v3.0.18 contained the changes listed under 3.0.17 below (the DC imbalance
+  fix and the REG 1038/1040 keepalive docs), and v3.0.19 the log changes above.
 
 ## [3.0.17] - 2026-10-29
 
