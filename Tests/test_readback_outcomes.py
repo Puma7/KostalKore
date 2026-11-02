@@ -10,7 +10,13 @@ import pytest
 
 from custom_components.kostal_kore import modbus_number as mod
 from custom_components.kostal_kore import sensor as sensor_mod
-from custom_components.kostal_kore.modbus_client import ModbusClientError, ReadbackUnconfirmedError
+from custom_components.kostal_kore.modbus_client import (
+    ModbusClientError,
+    ModbusPermanentError,
+    ModbusTransientError,
+    ModbusWriteError,
+    ReadbackUnconfirmedError,
+)
 from Tests.test_wave9_modbus_number_coverage import _coord, _device_info
 
 
@@ -388,3 +394,68 @@ async def test_coordinator_logs_a_repeated_write_at_debug(caplog) -> None:
     lines = [(r.levelno, r.getMessage()) for r in caplog.records if r.getMessage().startswith("Wrote ")]
     assert [level for level, _ in lines] == [logging.INFO, logging.DEBUG, logging.DEBUG, logging.INFO, logging.INFO]
     assert coordinator._command_revision[reg.name] == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("cause", "level"), [
+    # The nightly 03:10 "Server device failure" (0x04) outlasts the client's retries.
+    (ModbusTransientError("Modbus transient error (func=0x90, exc=0x04): Server device failure"),
+     logging.WARNING),
+    (ModbusPermanentError("Modbus permanent error (exc=0x02): Illegal data address"), logging.ERROR),
+    (None, logging.ERROR),
+])
+async def test_a_transient_write_failure_is_a_warning_and_still_raised(caplog, cause, level) -> None:
+    """Puma7/KostalKore#96: the caller decides what a refused write means."""
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+
+    error = ModbusWriteError("Write failed after 2 retries for bat_max_charge_limit")
+    error.__cause__ = cause
+    coordinator = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coordinator._client = SimpleNamespace(write_register=AsyncMock(side_effect=error), connection_generation=1)
+    coordinator._proxy_observations = {}
+    coordinator._write_audit = None
+    coordinator._last_commanded = {}
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ModbusWriteError):
+        await coordinator.async_write_register(mod.REG_BAT_MAX_CHARGE_LIMIT, 0.0)
+    assert [(r.levelno, r.getMessage().split(":")[0]) for r in caplog.records] == [
+        (level, "Modbus write failed for bat_max_charge_limit")]
+
+
+@pytest.mark.asyncio
+async def test_the_nightly_0x04_fault_through_the_client_is_one_warning(caplog, monkeypatch) -> None:
+    """A 1038 write answered with 0x04 until the client gives up, then the fault ends (#96)."""
+    from custom_components.kostal_kore import modbus_client
+    from custom_components.kostal_kore.modbus_coordinator import ModbusDataUpdateCoordinator
+
+    monkeypatch.setattr(modbus_client.asyncio, "sleep", AsyncMock())  # no wall-clock retry delay
+    refused = MagicMock(exception_code=modbus_client.ModbusExceptionCode.SERVER_DEVICE_FAILURE,
+                        function_code=0x90)
+    refused.isError.return_value = True
+    accepted = MagicMock()
+    accepted.isError.return_value = False
+    client = modbus_client.KostalModbusClient("192.0.2.1")
+    client._client = AsyncMock(connected=True)
+    client._client.write_registers = AsyncMock(side_effect=[refused] * (1 + modbus_client.MAX_RETRIES) + [accepted])
+
+    coordinator = ModbusDataUpdateCoordinator.__new__(ModbusDataUpdateCoordinator)
+    coordinator._client = client
+    coordinator._proxy_observations = {}
+    coordinator._write_audit = None
+    coordinator._last_commanded = {}
+    coordinator._command_revision = {}
+
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(ModbusWriteError) as err:
+            await coordinator.async_write_register(mod.REG_BAT_MAX_CHARGE_LIMIT, 0.0)
+        assert isinstance(err.value.__cause__, ModbusTransientError)
+        await coordinator.async_write_register(mod.REG_BAT_MAX_CHARGE_LIMIT, 0.0)  # the fault has ended
+
+    records = [r for r in caplog.records if r.name.startswith("custom_components.kostal_kore")]
+    assert not [r for r in records if r.levelno >= logging.ERROR]
+    warnings = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Modbus write failed for bat_max_charge_limit: Write failed after 2 retries")
+    assert "exc=0x04" in warnings[0]
+    assert client._client.write_registers.await_count == 2 + modbus_client.MAX_RETRIES
+    assert coordinator.last_commanded(mod.REG_BAT_MAX_CHARGE_LIMIT.name) == 0.0
