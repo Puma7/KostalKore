@@ -59,11 +59,14 @@ def test_the_hook_calls_the_base_class() -> None:
         def async_entity_id_changed(self, old_entity_id: str) -> None:
             called.append(old_entity_id)
 
-    for cls in _kore_entity_classes():
-        if "async_entity_id_changed" in cls.__dict__:
-            # Without the hook in Entity (HA before 2026.11) it is a no-op.
-            cls.async_entity_id_changed(object.__new__(cls), "sensor.old")
-            probe = type("Probe", (cls, Base), {})
-            probe.async_entity_id_changed(object.__new__(probe), "sensor.old")
-    if not hasattr(Entity, "async_entity_id_changed"):
-        assert called and set(called) == {"sensor.old"}
+    hooked = [cls for cls in _kore_entity_classes() if "async_entity_id_changed" in cls.__dict__]
+    assert len(hooked) >= 13
+    for cls in hooked:
+        # Without the hook in Entity (HA before 2026.11) it is a no-op.
+        cls.async_entity_id_changed(object.__new__(cls), "sensor.old")
+        if hasattr(Entity, "async_entity_id_changed"):
+            continue  # Entity's own hook ends the chain before Base.
+        called.clear()
+        probe = type("Probe", (cls, Base), {})
+        probe.async_entity_id_changed(object.__new__(probe), "sensor.old")
+        assert called == ["sensor.old"], cls.__qualname__
