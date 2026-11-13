@@ -208,3 +208,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                 except Exception:
                     _LOGGER.debug("Failed to dismiss charge block notification on removal")
         await super().async_will_remove_from_hass()
+
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)

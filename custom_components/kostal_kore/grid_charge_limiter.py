@@ -302,6 +302,10 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         await super().async_will_remove_from_hass()
 
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
+
 
 class FeedInLimitNumber(NumberEntity):
     """Number entity to configure the grid feed-in limit in watts."""
