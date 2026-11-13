@@ -39,6 +39,23 @@ ausführen oder im Container
 Home Assistant neu starten (pykoplenti, das die eingebaute Kostal-Integration
 nutzt, verlangt eine 3.x-Version).
 
+## Entitätsnamen sehen nach Home Assistant 2026.11 anders aus
+
+Home Assistant 2026.11 setzt jeden angezeigten Namen aus Gerätename und
+Entitätsname zusammen. KOREs Entitäten nutzen dieses Schema bereits, ihre Namen
+und Entitäts-IDs bleiben also gleich, und Automationen laufen weiter.
+
+- Wer eine KORE-Entität selbst umbenannt hat und der Name mit dem Gerätenamen
+  beginnt, dem entfernt Home Assistant diesen Anfang aus dem eigenen Namen und
+  setzt den Gerätenamen bei der Anzeige davor. Ein eigener Name, der nicht mit
+  dem Gerätenamen beginnt, wird jetzt mit vorangestelltem Gerätenamen angezeigt.
+- Templates und eigene Karten, die das Attribut `friendly_name` lesen, sollten
+  stattdessen `entity_name()` oder `device_name()` verwenden.
+- Ab Home Assistant 2026.11 läuft eine KORE-Entität weiter, wenn man ihre
+  Entitäts-ID umbenennt: *Batterieladung sperren* oder der
+  Netzeinspeise-Begrenzer bleiben an. Ältere Versionen entfernen die Entität und
+  legen sie neu an; dabei endet eine aktive Ladesperre oder Begrenzung.
+
 ## Installateur-Zugang erforderlich
 
 Zeigt Home Assistant den Reparaturhinweis *Installer access required*, trag den

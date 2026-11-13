@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.21] - 2026-11-13
+
+### Fixed
+- A virtual value (`pv_P`, `Statistic:EnergyGrid:*`) whose inputs the inverter
+  did not all return no longer fails the whole process-data poll. The bundled
+  pykoplenti raised `KeyError` for it, so KORE served the last known values for
+  every REST sensor; now only that virtual value is missing from the poll and
+  all other values are fresh. Ported from upstream stegm/pykoplenti#39 into the
+  bundled copy.
+- Renaming the entity ID of a KORE entity on Home Assistant 2026.11 or later
+  changes it in place. Before, Home Assistant removed and re-added it, which
+  ended an active *Block Battery Charging* or grid feed-in limit and reset the
+  switch to off. Every KORE entity class with its own add or remove logic now
+  defines `async_entity_id_changed` (required by Home Assistant 2027.11).
+
+### Changed
+- An MQTT command whose Modbus write fails for a transient reason (busy, the
+  nightly `Server device failure`) is logged at WARNING without a traceback;
+  permanent and unknown failures stay ERROR with traceback
+  (Puma7/KostalKore#96).
+- Docs (EN/DE troubleshooting): what the Home Assistant 2026.11 naming change
+  means for KORE entities.
+
 ## [3.0.20] - 2026-11-02
 
 ### Changed
