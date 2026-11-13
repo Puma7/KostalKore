@@ -2313,6 +2313,10 @@ class PlenticoreCalculatedSensor(
                 self.coordinator.stop_fetch_data("scb:statistic:EnergyFlow", data_id)
         await super().async_will_remove_from_hass()
 
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
+
 
 class CalculatedPvSumSensor(
     CoordinatorEntity[ProcessDataUpdateCoordinator], SensorEntity
@@ -2405,6 +2409,10 @@ class CalculatedPvSumSensor(
         for module_id in self._pv_modules:
             self.coordinator.stop_fetch_data(module_id, "P")
         await super().async_will_remove_from_hass()
+
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
 
 
 class PlenticoreEventSensor(
@@ -2530,6 +2538,10 @@ class ModbusEnergySensor(
         if math.isfinite(restored) and restored > 0:
             self._last_kwh = max(restored, self._last_kwh or 0.0)
 
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
+
     @property
     def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]
         data = self.coordinator.data
@@ -2622,6 +2634,10 @@ class PreferredGridPowerSensor(
             self._remove_process_listener()
             self._remove_process_listener = None
         await super().async_will_remove_from_hass()
+
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
 
     def _async_external_update(self) -> None:
         self.async_write_ha_state()
@@ -2766,6 +2782,10 @@ class PlenticoreDataSensor(
         """Unregister this entity from the Update Coordinator."""
         self.coordinator.stop_fetch_data(self.module_id, self.data_id)
         await super().async_will_remove_from_hass()
+
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
 
     @property
     def native_value(self) -> StateType:  # pyright: ignore[reportIncompatibleVariableOverride]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from types import ModuleType  # noqa: F401
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -660,6 +661,28 @@ class TestProxyCommands:
         from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
         await bridge._execute_write(REG_BAT_MIN_SOC, "50", source="test")
         coord.async_write_register.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("transient", "level"), [(True, logging.WARNING), (False, logging.ERROR)])
+    async def test_failed_write_log_level(self, caplog, transient: bool, level: int) -> None:
+        """A transient refusal (#96) is a WARNING without traceback; anything else stays ERROR."""
+        from kostal_plenticore.modbus_client import (
+            ModbusPermanentError,
+            ModbusTransientError,
+            ModbusWriteError,
+        )
+        from kostal_plenticore.modbus_registers import REG_BAT_MIN_SOC
+
+        error = ModbusWriteError("Write failed after 2 retries for bat_min_soc")
+        error.__cause__ = (ModbusTransientError if transient else ModbusPermanentError)("exc=0x04")
+        coord = _mock_coordinator()
+        coord.async_write_register = AsyncMock(side_effect=error)
+        bridge = KostalMqttBridge(_mock_hass(), coord, "INV123", installer_access=True)
+
+        with caplog.at_level(logging.DEBUG):
+            await bridge._execute_write(REG_BAT_MIN_SOC, "50", source="test")
+        failed = [r for r in caplog.records if r.getMessage().startswith("MQTT command failed")]
+        assert [(r.levelno, r.exc_info is not None) for r in failed] == [(level, not transient)]
 
 
 class TestListenerCleanup:

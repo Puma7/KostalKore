@@ -54,6 +54,7 @@ from .helper import (
     optional_float,
     sum_home_consumption_power_w,
 )
+from .modbus_client import is_transient_failure
 from .modbus_coordinator import ModbusDataUpdateCoordinator
 from .modbus_registers import (
     BATTERY_CONTROL_NAMES,
@@ -812,11 +813,19 @@ class KostalMqttBridge:
             await self._coordinator.async_request_refresh()
 
         except Exception as err:
-            _LOGGER.error(
-                "MQTT command failed for %s: %s (source: %s)",
-                reg.name, err, source,
-                exc_info=True,
-            )
+            if is_transient_failure(err):
+                # The coordinator already logged the refused write; it heals on
+                # its own (busy, the nightly "Server device failure").
+                _LOGGER.warning(
+                    "MQTT command failed for %s: %s (source: %s)",
+                    reg.name, err, source,
+                )
+            else:
+                _LOGGER.error(
+                    "MQTT command failed for %s: %s (source: %s)",
+                    reg.name, err, source,
+                    exc_info=True,
+                )
 
     def _log_audit_rejection(
         self, key: str, value: Any, result: str, detail: str

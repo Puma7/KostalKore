@@ -180,3 +180,49 @@ def test_integration_uses_neither_pycryptodome_nor_the_pypi_pykoplenti() -> None
     assert {path: names for path, names in offenders.items() if names} == {}
     manifest = json.loads((COMPONENT / "manifest.json").read_text("utf-8"))
     assert not [req for req in manifest["requirements"] if req.lower().startswith(("pykoplenti", "pycryptodome"))]
+
+
+def _collection(values: dict[str, float], unit: str = "W"):
+    from custom_components.kostal_kore.pykoplenti import ProcessData, ProcessDataCollection
+
+    return ProcessDataCollection([ProcessData(id=pid, unit=unit, value=value) for pid, value in values.items()])
+
+
+def test_virtual_values_with_a_missing_dependency_are_skipped() -> None:
+    """Upstream stegm/pykoplenti#39: a missing input skips the virtual value instead of raising KeyError."""
+    from custom_components.kostal_kore.pykoplenti.extended import _VirtProcessDataManager
+
+    stats = ("Statistic:Yield:Total", "Statistic:EnergyHomeBat:Total", "Statistic:EnergyHomePv:Total")
+    manager = _VirtProcessDataManager()
+    manager.initialize({
+        "devices:local:pv1": ["P"], "devices:local:pv2": ["P"], "devices:local": ["EM_State"],
+        "scb:statistic:EnergyFlow": list(stats),
+    })
+    request = {"_virt_": ["pv_P", "Statistic:EnergyGrid:Total"], "devices:local": ["EM_State"]}
+
+    # pv1 'P' and one statistic are missing, as around the inverter's nightly fault.
+    incomplete = manager.adapt_process_value_response({
+        "devices:local:pv1": _collection({}),
+        "devices:local:pv2": _collection({"P": 300.0}),
+        "devices:local": _collection({"EM_State": 1.0}, unit=""),
+        "scb:statistic:EnergyFlow": _collection({stats[0]: 1000.0, stats[1]: 100.0}, unit="Wh"),
+    }, request)
+    assert dict(incomplete["_virt_"]) == {}
+    assert incomplete["devices:local"]["EM_State"].value == 1.0
+
+    # A whole module missing is skipped the same way.
+    no_module = manager.adapt_process_value_response(
+        {"devices:local:pv2": _collection({"P": 300.0}), "devices:local": _collection({"EM_State": 1.0}, unit="")},
+        request,
+    )
+    assert dict(no_module["_virt_"]) == {}
+
+    complete = manager.adapt_process_value_response({
+        "devices:local:pv1": _collection({"P": 700.0}),
+        "devices:local:pv2": _collection({"P": 300.0}),
+        "devices:local": _collection({"EM_State": 1.0}, unit=""),
+        "scb:statistic:EnergyFlow": _collection({stats[0]: 1000.0, stats[1]: 100.0, stats[2]: 400.0}, unit="Wh"),
+    }, request)
+    assert {pid: data.value for pid, data in complete["_virt_"].items()} == {
+        "pv_P": 1000.0, "Statistic:EnergyGrid:Total": 500.0,
+    }

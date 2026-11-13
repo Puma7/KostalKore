@@ -27,7 +27,8 @@ from .modbus_client import (
     ModbusConnectionError,
     ModbusPermanentError,  # noqa: F401
     ModbusShutdownAbort,
-    ModbusTransientError,
+    ModbusTransientError,  # noqa: F401
+    is_transient_failure,
 )
 from .modbus_registers import (
     ALL_REGISTERS,  # noqa: F401
@@ -723,10 +724,8 @@ class ModbusDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A transient refusal (busy, the nightly "Server device failure")
             # heals on its own and the caller gets the exception to decide on
             # it; only a permanent or unknown failure is an ERROR here.
-            transient = isinstance(err, ModbusTransientError) or isinstance(
-                err.__cause__, ModbusTransientError)
             _LOGGER.log(
-                logging.WARNING if transient else logging.ERROR,
+                logging.WARNING if is_transient_failure(err) else logging.ERROR,
                 "Modbus write failed for %s: %s", register.name, err,
             )
             if self._write_audit is not None:

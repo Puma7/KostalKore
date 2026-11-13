@@ -122,3 +122,37 @@ async def test_missing_process_value_keyerror_is_transient(hass: HomeAssistant) 
     coordinator._last_result = {"_virt_": {"pv_P": "0.0"}}
     coordinator._last_success_ts = time.monotonic()
     assert await coordinator._async_fetch_process_data() == {"_virt_": {"pv_P": "0.0"}}
+
+
+async def test_missing_virtual_input_keeps_the_other_values_fresh(hass: HomeAssistant) -> None:
+    """With stegm/pykoplenti#39 a missing pv1 'P' drops only the virtual sum, not the whole poll."""
+    import logging
+    from datetime import timedelta
+    from unittest.mock import MagicMock
+
+    from custom_components.kostal_kore.coordinator import ProcessDataUpdateCoordinator
+    from custom_components.kostal_kore.pykoplenti import ProcessData, ProcessDataCollection
+    from custom_components.kostal_kore.pykoplenti.extended import _VirtProcessDataManager
+
+    manager = _VirtProcessDataManager()
+    manager.initialize({"devices:local:pv1": ["P"], "devices:local:pv2": ["P"], "devices:local": ["Dc_P"]})
+    request = {"_virt_": ["pv_P"], "devices:local": ["Dc_P"]}
+    response = manager.adapt_process_value_response({
+        "devices:local:pv1": ProcessDataCollection([]),
+        "devices:local:pv2": ProcessDataCollection([ProcessData(id="P", unit="W", value=300.0)]),
+        "devices:local": ProcessDataCollection([ProcessData(id="Dc_P", unit="W", value=310.0)]),
+    }, request)
+
+    plenticore = MagicMock()
+    plenticore.client.get_process_data_values = AsyncMock(return_value=response)
+    coordinator = ProcessDataUpdateCoordinator(
+        hass, MagicMock(), logging.getLogger(__name__), "Process Data",
+        timedelta(seconds=10), plenticore,
+    )
+    coordinator._fetch = {"_virt_": {"pv_P"}, "devices:local": {"Dc_P"}}
+    coordinator._last_result = {"_virt_": {"pv_P": "999.0"}, "devices:local": {"Dc_P": "1.0"}}
+
+    result = await coordinator._async_fetch_process_data()
+    assert result["devices:local"] == {"Dc_P": "310.0"}
+    assert "pv_P" not in result.get("_virt_", {})
+    assert coordinator._last_result["_virt_"] == {"pv_P": "999.0"}

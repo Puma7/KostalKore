@@ -37,6 +37,23 @@ Terminal add-on, or in the container run
 restart Home Assistant (pykoplenti, which the built-in Kostal integration uses,
 requires a 3.x version).
 
+## Entity names look different after Home Assistant 2026.11
+
+Home Assistant 2026.11 builds every displayed name from the device name and the
+entity name. KORE's entities already use this scheme, so their names and entity
+IDs stay the same, and automations keep working.
+
+- If you renamed a KORE entity yourself and your name starts with the device
+  name, Home Assistant removes that prefix from your name and adds the device
+  name when it shows it. A name of yours that does not start with the device
+  name is now shown with the device name in front.
+- Templates and custom cards that read the `friendly_name` attribute should use
+  `entity_name()` or `device_name()` instead.
+- From Home Assistant 2026.11, renaming the entity ID of a KORE entity keeps it
+  running: *Block Battery Charging* or the grid feed-in limiter stays on. Older
+  versions remove and re-add the entity, which ends an active charge block or
+  limit.
+
 ## Installer access required
 
 If Home Assistant shows the repair issue *Installer access required*, add the

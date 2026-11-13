@@ -185,6 +185,15 @@ class ModbusPermanentError(ModbusClientError):
     """Raised on permanent faults that should NOT be retried (illegal address)."""
 
 
+def is_transient_failure(err: BaseException) -> bool:
+    """Return True for a transient fault, raised directly or as the cause of a write error.
+
+    The client raises ``ModbusWriteError`` from the last ``ModbusTransientError``
+    once its retries are used up (busy, the nightly "Server device failure").
+    """
+    return isinstance(err, ModbusTransientError) or isinstance(err.__cause__, ModbusTransientError)
+
+
 def _classify_exception_response(resp: Any) -> ModbusClientError:
     """Classify a Modbus exception response into the right error type."""
     exc_code = getattr(resp, "exception_code", None)

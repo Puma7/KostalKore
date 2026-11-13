@@ -661,6 +661,10 @@ class AdvancedWriteArmSwitch(SwitchEntity):
             self._remove_expire_listener = None
         await super().async_will_remove_from_hass()
 
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -1065,6 +1069,10 @@ class PlenticoreDataSwitch(
         """Unregister this entity from the Update Coordinator."""
         self.coordinator.stop_fetch_data(self.module_id, self.data_id)
         await super().async_will_remove_from_hass()
+
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""
+        getattr(super(), "async_entity_id_changed", lambda _old: None)(old_entity_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn device on."""

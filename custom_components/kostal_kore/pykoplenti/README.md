@@ -17,6 +17,10 @@ Changes against the PyPI release 1.5.1:
   they share one re-login behind a per-client lock (`_relogin`), instead of
   starting overlapping logins that invalidate each other's new sessions. Only
   the login runs under the lock; requests are retried after it is released.
+- `extended.py`: a virtual value (`pv_P`, `Statistic:EnergyGrid:*`) whose
+  inputs the inverter did not all return is left out of the response instead
+  of raising `KeyError`, so the other values of the poll still arrive. This is
+  upstream's fix from stegm/pykoplenti#39, not yet in a pykoplenti release.
 - `cli.py` (the command-line tool) is not included.
 
 Everything else is unchanged. Import it relatively inside the integration
