@@ -1028,9 +1028,11 @@ class ProcessDataUpdateCoordinator(
             self._record_failure()
             raise UpdateFailed("Timeout fetching process data") from timeout_err
         except (ApiException, ClientError, TimeoutError, KeyError) as err:
-            # KeyError: pykoplenti's virtual PV sums raise it when the inverter
-            # briefly omits a requested value (e.g. pv1 'P' for a few seconds
-            # around 03:10, home-assistant/core#183701). Treat it as transient.
+            # KeyError: pykoplenti's virtual PV sums raised it when the inverter
+            # briefly omitted a requested value (e.g. pv1 'P' for a few seconds
+            # around 03:10, home-assistant/core#183701). The bundled copy now
+            # skips such a virtual value (stegm/pykoplenti#39); a KeyError is
+            # still treated as transient.
             error_msg = str(err)
             # GEÄNDERT: Stale-Cache TTL-gebunden statt unbegrenzt.
             if self._stale_cache_usable():
