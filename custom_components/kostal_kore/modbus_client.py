@@ -43,6 +43,11 @@ from .modbus_registers import (
     ModbusRegister,
     RegisterGroup,
 )
+from .pymodbus_compat import (
+    read_holding_registers,
+    write_register,
+    write_registers,
+)
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -768,8 +773,8 @@ class KostalModbusClient:
             assert self._client is not None
             try:
                 resp = await asyncio.wait_for(
-                    self._client.read_holding_registers(
-                        address=address, count=count, device_id=self._unit_id,
+                    read_holding_registers(
+                        self._client, address, count, self._unit_id
                     ),
                     timeout=READ_TIMEOUT,
                 )
@@ -842,16 +847,12 @@ class KostalModbusClient:
                     for i in range(0, len(data), 2)
                 ]
                 if count == 1:
-                    coro = self._client.write_register(
-                        address=address,
-                        value=registers[0],
-                        device_id=self._unit_id,
+                    coro = write_register(
+                        self._client, address, registers[0], self._unit_id
                     )
                 else:
-                    coro = self._client.write_registers(
-                        address=address,
-                        values=registers,
-                        device_id=self._unit_id,
+                    coro = write_registers(
+                        self._client, address, registers, self._unit_id
                     )
                 resp = await asyncio.wait_for(coro, timeout=READ_TIMEOUT)
                 if resp.isError():

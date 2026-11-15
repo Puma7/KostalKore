@@ -14,6 +14,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException as PyModbusException
 
+from .pymodbus_compat import read_holding_registers
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 KSEM_CONNECT_TIMEOUT: Final[float] = 10.0
@@ -97,10 +99,8 @@ class KsemDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float]]):
                 )
             try:
                 response = await asyncio.wait_for(
-                    self._client.read_holding_registers(
-                        address=address,
-                        count=count,
-                        device_id=self._unit_id,
+                    read_holding_registers(
+                        self._client, address, count, self._unit_id
                     ),
                     timeout=KSEM_READ_TIMEOUT,
                 )

@@ -101,7 +101,7 @@ async def test_run_test_success_warnings_and_error_paths(capsys) -> None:
         15: _Response(error=True, exception_code=4),
     }
 
-    async def _read_holding_registers(*, address: int, count: int, device_id: int):
+    async def _read_holding_registers(*, address: int, count: int, **unit_id: int):
         if address == 16:
             raise RuntimeError("broken register")
         return responses[address]
@@ -147,7 +147,7 @@ async def test_run_test_unexpected_endianness_and_clean_success_summary(capsys) 
         21: _Response(error=True, exception_code=2),
     }
 
-    async def _warning_reads(*, address: int, count: int, device_id: int):
+    async def _warning_reads(*, address: int, count: int, **unit_id: int):
         return warning_responses[address]
 
     warning_client = SimpleNamespace(
@@ -172,7 +172,7 @@ async def test_run_test_unexpected_endianness_and_clean_success_summary(capsys) 
         31: _Response(registers=_u16(6)),
     }
 
-    async def _ok_reads(*, address: int, count: int, device_id: int):
+    async def _ok_reads(*, address: int, count: int, **unit_id: int):
         if address == 5:
             raise RuntimeError("endianness failed")
         return ok_responses[address]
@@ -205,7 +205,7 @@ async def test_run_test_unexpected_endianness_and_clean_success_summary(capsys) 
         42: _Response(error=True, exception_code=2),
     }
 
-    async def _default_reads(*, address: int, count: int, device_id: int):
+    async def _default_reads(*, address: int, count: int, **unit_id: int):
         return default_responses[address]
 
     default_client = SimpleNamespace(
@@ -230,7 +230,7 @@ async def test_run_test_unexpected_endianness_and_clean_success_summary(capsys) 
         50: _Response(registers=_u16(2)),
     }
 
-    async def _little_reads(*, address: int, count: int, device_id: int):
+    async def _little_reads(*, address: int, count: int, **unit_id: int):
         return little_responses[address]
 
     little_client = SimpleNamespace(

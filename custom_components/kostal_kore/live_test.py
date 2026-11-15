@@ -45,6 +45,8 @@ from .modbus_registers import (
 async def run_test(host: str, port: int, unit_id: int, output: str | None) -> None:
     from pymodbus.client import AsyncModbusTcpClient
 
+    from .pymodbus_compat import read_holding_registers
+
     report: dict[str, Any] = {
         "timestamp": datetime.now().isoformat(),
         "host": host,
@@ -88,7 +90,7 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
     # Step 2: Detect endianness
     print("\n[2/5] Detecting byte order...")
     try:
-        resp = await client.read_holding_registers(address=5, count=1, device_id=unit_id)
+        resp = await read_holding_registers(client, 5, 1, unit_id)
         if resp.isError():
             print("  WARNING: Could not read byte order register (using little-endian default)")
             endianness = "little"
@@ -136,8 +138,8 @@ async def run_test(host: str, port: int, unit_id: int, output: str | None) -> No
             continue
 
         try:
-            resp = await client.read_holding_registers(
-                address=reg.address, count=reg.count, device_id=unit_id,
+            resp = await read_holding_registers(
+                client, reg.address, reg.count, unit_id
             )
             if resp.isError():
                 exc_code = getattr(resp, "exception_code", None)
