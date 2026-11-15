@@ -472,3 +472,27 @@ async def test_switches_refuse_turn_on_once_unloading() -> None:
 
     assert coord.writes == []
     assert get_reg_1038_owner_manager(hass, ENTRY).current is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("feature", ["charge_block", "grid_limiter"])
+async def test_turn_off_cancelled_during_the_restore_still_releases_reg_1038(
+    feature: str,
+) -> None:
+    coord = _Registers({"bat_max_charge_limit": 3000.0})
+    hass = _hass()
+    if feature == "charge_block":
+        switch: object = _charge_block(coord, hass)
+        with patch.object(switch, "_start_keepalive"):
+            await switch.async_turn_on()  # type: ignore[attr-defined]
+    else:
+        switch = _grid_limiter(coord, hass)
+        with patch.object(switch, "_start_control"):
+            await switch.async_turn_on()  # type: ignore[attr-defined]
+    coord.async_write_register.side_effect = asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await switch.async_turn_off()  # type: ignore[attr-defined]
+
+    assert not switch.is_on  # type: ignore[attr-defined]
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None

@@ -186,8 +186,12 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             except asyncio.CancelledError:
                 pass
         restore = self._restore_limit()
-        await self._write_charge_limit(restore)
-        release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+        try:
+            await self._write_charge_limit(restore)
+        finally:
+            # Also when cancelled mid-write: the switch is off now, so nothing
+            # else would release REG 1038.
+            release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         self._current_charge_limit = 0.0
         self._modbus_read_failed_cycles = 0
         self.async_write_ha_state()

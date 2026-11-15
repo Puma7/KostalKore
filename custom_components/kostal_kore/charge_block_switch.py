@@ -154,8 +154,13 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         # write must take the no-op path, not write the device maximum.
         self._is_on = False
         restore = self._restore_limit()
-        await self._write_normal(restore)
-        release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
+        try:
+            await self._write_normal(restore)
+        finally:
+            # Also when cancelled mid-write: the switch is off now, so nothing
+            # else would release REG 1038. Without the keepalive the inverter's
+            # external-control timeout reverts a block that is left behind.
+            release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         self.async_write_ha_state()
         _LOGGER.info("Battery charging RESTORED (REG 1038 = %.0f)", restore)
 
@@ -248,8 +253,10 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         self._cancel_keepalive()
         if self._is_on:
             self._is_on = False
-            await self._write_normal(self._restore_limit())
-            release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
+            try:
+                await self._write_normal(self._restore_limit())
+            finally:
+                release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
             if self._hass_ref:
                 try:
                     await self._hass_ref.services.async_call(
