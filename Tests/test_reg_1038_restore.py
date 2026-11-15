@@ -50,6 +50,7 @@ class _Registers:
         return self.values.get(reg.name, 0.0)
 
     async def _write(self, reg: object, value: float) -> None:
+        await asyncio.sleep(0)  # yield like a real Modbus round trip
         self.writes.append((reg.name, value))
         self.values[reg.name] = value
 
@@ -129,6 +130,7 @@ async def test_temperature_pause_keeps_the_snapshot_for_the_final_restore() -> N
     coord = _Registers({"bat_max_charge_limit": 3000.0})
     controller = BatterySocController(coord, hass=None, entry_id=ENTRY)  # type: ignore[arg-type]
     controller._original_charge_limit = 3000.0
+    controller._wrote_1034 = True
     controller._wrote_1038 = True
 
     await controller._write_normal(keep_snapshot=True)  # the pause
@@ -371,3 +373,102 @@ async def test_failed_repeat_turn_on_keeps_an_active_charge_block() -> None:
     assert switch.is_on
     assert switch._original_charge_limit == 3000.0
     assert get_reg_1038_owner_manager(hass, ENTRY).current == OWNER_CHARGE_BLOCK
+
+
+@pytest.mark.asyncio
+async def test_temperature_pause_before_any_command_writes_nothing() -> None:
+    coord = _Registers()
+    controller = BatterySocController(coord, hass=None, entry_id=ENTRY)  # type: ignore[arg-type]
+
+    await controller._write_normal(keep_snapshot=True)
+
+    assert coord.writes == []
+
+
+@pytest.mark.asyncio
+async def test_target_set_during_a_stop_is_not_lost() -> None:
+    """stop() and set_target() run one at a time."""
+    coord = _Registers({"battery_soc": 40.0, "battery_temperature": 25.0, "inverter_state": 6.0})
+    hass = _hass()
+    controller = BatterySocController(coord, hass=hass, entry_id=ENTRY)  # type: ignore[arg-type]
+
+    with patch.object(controller, "_notify", new=AsyncMock()):
+        await controller.set_target(80)
+        await asyncio.sleep(0)
+        stop = asyncio.ensure_future(controller.stop())
+        await asyncio.sleep(0)
+        await controller.set_target(60)
+        await stop
+        assert controller.target_soc == 60
+        assert controller.active
+        assert get_reg_1038_owner_manager(hass, ENTRY).current is not None
+        await controller.stop()
+
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None
+
+
+@pytest.mark.asyncio
+async def test_second_charge_block_turn_off_during_the_restore_writes_nothing() -> None:
+    coord = _Registers({"bat_max_charge_limit": 3000.0})
+    hass = _hass()
+    switch = _charge_block(coord, hass)
+    with patch.object(switch, "_start_keepalive"):
+        await switch.async_turn_on()
+    coord.writes.clear()
+
+    await asyncio.gather(switch.async_turn_off(), switch.async_turn_off())
+
+    assert coord.writes == [("bat_max_charge_limit", 3000.0)]
+
+
+@pytest.mark.asyncio
+async def test_repeated_grid_limiter_turn_on_keeps_the_running_loop() -> None:
+    coord = _Registers({"bat_max_charge_limit": 6000.0})
+    hass = _hass()
+    limiter = _grid_limiter(coord, hass)
+    running = asyncio.ensure_future(asyncio.sleep(3600))
+    with patch.object(limiter, "_start_control") as start:
+        await limiter.async_turn_on()
+        limiter._task = running
+        await limiter.async_turn_on()
+
+    start.assert_called_once()
+    assert limiter.is_on
+    assert not running.cancelled()
+    assert get_reg_1038_owner_manager(hass, ENTRY).current == OWNER_GRID_FEEDIN
+    running.cancel()
+
+
+@pytest.mark.asyncio
+async def test_unload_waits_for_a_restore_already_in_progress() -> None:
+    limiter = _grid_limiter(_Registers(), _hass())
+    finished: list[bool] = []
+
+    async def _finishing_restore() -> None:
+        await asyncio.sleep(0)
+        finished.append(True)
+
+    limiter._task = asyncio.ensure_future(_finishing_restore())
+    await limiter.async_release_for_unload()
+
+    assert finished == [True]
+    assert limiter._task is None
+
+
+@pytest.mark.asyncio
+async def test_switches_refuse_turn_on_once_unloading() -> None:
+    coord = _Registers()
+    hass = _hass()
+    switch = _charge_block(coord, hass)
+    limiter = _grid_limiter(coord, hass)
+    await _release_reg_1038_features(
+        {"charge_block_switch": switch, "grid_feedin_limiter": limiter}
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await switch.async_turn_on()
+    with pytest.raises(HomeAssistantError):
+        await limiter.async_turn_on()
+
+    assert coord.writes == []
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None

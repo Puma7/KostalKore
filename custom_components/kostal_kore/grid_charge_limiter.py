@@ -29,7 +29,7 @@ from typing import Any, Final
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory, UnitOfPower
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .battery_reg_1038_owner import (
@@ -52,6 +52,8 @@ MIN_CHARGE_POWER_W: Final[float] = 100.0
 
 class GridFeedInLimiterSwitch(SwitchEntity):
     """Switch to enable dynamic battery charge limiting for grid feed-in optimization."""
+
+    _unloading: bool = False  # class default for objects built without __init__
 
     _attr_has_entity_name = True
     _english_name = "Grid Feed-In Optimizer"
@@ -78,6 +80,9 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._current_charge_limit: float = 0.0
         self._original_charge_limit: float | None = None
         self._restore_handled_in_turn_off: bool = False
+        # Set once the entry unload has restored REG 1038: a turn-on after
+        # that would write a limit nobody restores (the client closes next).
+        self._unloading: bool = False
 
     @property
     def is_on(self) -> bool:
@@ -126,6 +131,14 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             _LOGGER.debug("Could not snapshot charge limit: %s", err)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        if self._unloading:
+            raise HomeAssistantError("KOSTAL KORE is unloading")
+        if self._is_on and self._task is not None and not self._task.done():
+            # Already running. Restarting would cancel the loop without
+            # awaiting it, and its finally would restore and release REG 1038
+            # under the new loop.
+            self.async_write_ha_state()
+            return
         self._restore_handled_in_turn_off = False
         # Acquire before the snapshot: a refused turn-on must not keep the
         # value the current owner wrote, or a later turn-off restores it.
@@ -320,10 +333,19 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         Called by the entry unload before the coordinator shuts the client down,
         and again (as a no-op) when the entity is removed.
         """
+        self._unloading = True
         if self._is_on:
             await self.async_turn_off()
-        else:
-            self._cancel_control()
+            return
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            # Off but the loop is still in its finally, restoring REG 1038
+            # after an error: let that restore finish instead of cancelling it.
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     def async_entity_id_changed(self, old_entity_id: str) -> None:
         """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""

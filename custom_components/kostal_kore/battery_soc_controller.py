@@ -154,11 +154,25 @@ class BatterySocController:
         except Exception:
             return False
 
+    def _operation_lock(self) -> asyncio.Lock:
+        """Serialises set_target() and stop() (created on first use)."""
+        lock: asyncio.Lock | None = getattr(self, "_op_lock", None)
+        if lock is None:
+            lock = self._op_lock = asyncio.Lock()
+        return lock
+
     async def set_target(self, soc: float | None) -> None:
         """Set target SoC. None or <SAFE_MIN_SOC = stop controller.
 
-        Values are clamped to SAFE_MIN_SOC..SAFE_MAX_SOC (10-95%).
+        Values are clamped to SAFE_MIN_SOC..SAFE_MAX_SOC (10-95%). Runs one at
+        a time with stop(): a target set while a stop awaits the cancelled
+        loop would otherwise be cleared, and its REG 1038 claim released, by
+        that stop.
         """
+        async with self._operation_lock():
+            await self._set_target(soc)
+
+    async def _set_target(self, soc: float | None) -> None:
         if soc is not None and not math.isfinite(soc):
             raise ServiceValidationError(
                 f"Target SoC must be a finite number, got {soc!r}"
@@ -237,7 +251,8 @@ class BatterySocController:
 
     async def stop(self) -> None:
         """Public stop method."""
-        await self._stop()
+        async with self._operation_lock():
+            await self._stop()
 
     # ------------------------------------------------------------------
     # Main control loop
@@ -478,8 +493,8 @@ class BatterySocController:
     async def _write_normal(self, *, keep_snapshot: bool = False) -> None:
         """Reset to automatic mode, restoring original limits if available.
 
-        REG 1034 goes back to 0. REG 1038 is put back only if this session set
-        it to 0 (discharging): to its snapshot, or to the device maximum without
+        REG 1034 goes back to 0 if this session wrote it. REG 1038 is put back
+        only if this session set it to 0 (discharging): to its snapshot, or to the device maximum without
         one. The controller never writes REG 1040, so it leaves it alone.
         """
         if self._coord.client.closing or not self._coord.client.connected:
@@ -487,7 +502,11 @@ class BatterySocController:
                 "SoC Controller: skip register restore (Modbus unavailable)"
             )
             return
-        writes: list[tuple[str, float]] = [("bat_charge_dc_abs_power", 0.0)]
+        writes: list[tuple[str, float]] = []
+        if self._wrote_1034:
+            # Only a command this session set: a temperature pause on the
+            # first cycle must not clear someone else's REG 1034.
+            writes.append(("bat_charge_dc_abs_power", 0.0))
         if self._wrote_1038:
             writes.append((
                 "bat_max_charge_limit",

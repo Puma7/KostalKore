@@ -43,6 +43,8 @@ KEEPALIVE_INTERVAL: Final[float] = 15.0
 class BatteryChargeBlockSwitch(SwitchEntity):
     """Switch to block battery charging from PV/grid."""
 
+    _unloading: bool = False  # class default for objects built without __init__
+
     _attr_has_entity_name = True
     _english_name = "Block Battery Charging"
     _attr_icon = "mdi:battery-off"
@@ -64,6 +66,9 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         self._is_on = False
         self._keepalive_task: asyncio.Task[None] | None = None
         self._original_charge_limit: float | None = None
+        # Set once the entry unload has restored REG 1038: a turn-on after
+        # that would write a block nobody restores (the client closes next).
+        self._unloading: bool = False
 
     @property
     def is_on(self) -> bool:
@@ -103,6 +108,8 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         """Block battery charging: REG 1038 = 0."""
         # Acquire before the snapshot: a refused turn-on must not keep the
         # value the current owner wrote, or a later turn-off restores it.
+        if self._unloading:
+            raise HomeAssistantError("KOSTAL KORE is unloading")
         was_on = self._is_on
         acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         try:
@@ -143,9 +150,11 @@ class BatteryChargeBlockSwitch(SwitchEntity):
             # would override whichever feature owns it now.
             self.async_write_ha_state()
             return
+        # Off before the await: a second turn-off arriving during the restore
+        # write must take the no-op path, not write the device maximum.
+        self._is_on = False
         restore = self._restore_limit()
         await self._write_normal(restore)
-        self._is_on = False
         release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         self.async_write_ha_state()
         _LOGGER.info("Battery charging RESTORED (REG 1038 = %.0f)", restore)
@@ -235,6 +244,7 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         Called by the entry unload before the coordinator shuts the client down,
         and again (as a no-op) when the entity is removed.
         """
+        self._unloading = True
         self._cancel_keepalive()
         if self._is_on:
             self._is_on = False
