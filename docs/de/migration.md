@@ -110,18 +110,20 @@ Service-Beschreibungen in der HA-UI stammen aus `custom_components/kostal_kore/s
 
 **Was technisch passiert:**
 
-- Legacy-`data`/`options` werden in den KORE-Eintrag gemerged (Host, Passwort, Modbus/MQTT-Optionen, …).
-- Alle Legacy-Entities werden auf den KORE-Eintrag umgebunden; `unique_id` wird von `alter_entry_id_*` auf `neuer_entry_id_*` umgeschrieben.
-- Doppelte KORE-Entities mit gleicher `unique_id` werden entfernt.
-- Am Legacy-Gerät wird ein `kostal_kore`-Identifier ergänzt (verhindert zweite Gerätekarte).
-- Der Legacy-Eintrag wird **entladen** (Integration stoppt), aber **nicht gelöscht** — du kannst ihn in der UI wieder aktivieren, falls nötig.
-- KORE lädt neu (`async_reload`).
+1. Der Legacy-Eintrag wird **zuerst entladen** (Integration stoppt), aber **nicht gelöscht** — du kannst ihn in der UI wieder aktivieren, falls nötig. Home Assistant verschiebt Entities nur zwischen Integrationen, solange sie nicht geladen sind.
+2. Legacy-`data`/`options` werden in den KORE-Eintrag gemerged (Host, Passwort, Modbus/MQTT-Optionen, …).
+3. Doppelte KORE-Entities mit gleicher `unique_id` werden entfernt.
+4. Alle Legacy-Entities werden auf den KORE-Eintrag **und die Plattform `kostal_kore`** umgebunden; `unique_id` wird von `alter_entry_id_*` auf `neuer_entry_id_*` umgeschrieben. Die `entity_id` bleibt gleich.
+5. Am Legacy-Gerät wird ein `kostal_kore`-Identifier ergänzt (verhindert zweite Gerätekarte).
+6. KORE lädt neu (`async_reload`) und übernimmt dabei die alten `entity_id`s, statt neue Entities anzulegen.
+
+Lässt sich der Legacy-Eintrag nicht entladen oder liefert er danach noch Werte, bricht der Import mit einer Fehlermeldung ab, bevor Registry oder KORE-Konfiguration geändert werden.
 
 **Nach dem Import prüfen:**
 
 - Persistente Benachrichtigung mit Zählerstand (Entities, Devices, Duplikate entfernt).
 - Button-Attribut `last_status` = `ok` (Entwickleransicht).
-- Dashboards und Automationen — Entity-IDs können sich geändert haben (`kostal_plenticore_*` → oft gleiche Suffixe unter `kostal_kore` / deinem Namensschema).
+- Dashboards und Automationen — umgebundene Entities behalten ihre `entity_id`; nur Entitäten, die es in der alten Integration nicht gab, kommen mit neuen IDs hinzu.
 - Recorder-Verlauf bleibt für umgebundene Entities in der Regel erhalten (Registry zeigt auf dieselben `entity_id`-Pfade).
 
 **Testphase:** Tage bis Wochen — alte Legacy-Entry bleibt bewusst als Rückfallebene.
@@ -166,6 +168,8 @@ Alle destruktiven Services nutzen standardmäßig **`dry_run: true`**. Für Appl
 ### 4.1 `kostal_kore.adopt_legacy_entity_ids`
 
 **Wann:** Registry-Rebind ohne erneutes Überschreiben der KORE-Config; Dry-Run/Vorschau; wiederholbar.
+
+Beim Apply wird der Legacy-Eintrag zuerst entladen, dann werden die Entities wie beim Import auf die Plattform `kostal_kore` umgebunden (gleiche Schritte wie in 3.2, ohne Config-Merge). Der Dry-Run ändert nichts und lässt den Legacy-Eintrag geladen.
 
 **Preview:**
 
@@ -288,6 +292,8 @@ Ausführlich: [orphan-history.md](orphan-history.md).
 | `No legacy 'kostal_plenticore' config entry found` | Alter Eintrag gelöscht | Backup restore oder alten Eintrag neu anlegen; ggf. **Orphan-Weg** (Kap. 6) |
 | `Multiple legacy entries found` | Mehrere Plenticore-Einträge | `source_entry_id` bei Services setzen; einen Eintrag nach dem anderen migrieren |
 | Import: `0 entities migrated` | Legacy nicht geladen / falsches `unique_id`-Format | Legacy-Integration aktivieren; Logs prüfen; ggf. `adopt` mit `dry_run` |
+| `The legacy entry could not be unloaded` / `… is still provided after unloading the legacy entry` | Legacy-Integration hängt beim Entladen | Nichts wurde migriert. Legacy-Eintrag in der UI deaktivieren oder HA neu starten, dann erneut ausführen |
+| `Unique id '…' is already used by '…'` | Eine KORE-Entität außerhalb des Ziel-Eintrags hat schon diese `unique_id` | Nichts wurde geändert. Die genannte Entität prüfen und entfernen, dann erneut ausführen |
 | Zweite Gerätekarte nach Migration | Bekannte Identifier-Thematik | Nach Import nur ein KORE-Gerät nutzen; siehe [MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md) |
 | History leer trotz Import | Andere `entity_id` als erwartet | `copy_legacy_history` oder Orphan-Weg |
 | Cleanup-Code abgelehnt | Tippfehler / abgelaufen | Neuen Zyklus starten (Button erneut) |

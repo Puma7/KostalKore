@@ -948,6 +948,18 @@ A structured audit of `legacy_migration.py` and `migration_services.py` exposed 
 
 **Fix:** Added `await hass.config_entries.async_unload(source_entry.entry_id)` after rebind and before `async_reload(target_entry.entry_id)`. The legacy entry stays in the config entry registry (visible in HA UI, re-enableable) but its integration is unloaded so it cannot spawn new entities. This does not apply when `remove_source_entry=True` (already handled by `async_remove`).
 
+**Superseded (Bug D below):** the unload now runs *before* the rebind, in both functions and also when `remove_source_entry=True`.
+
+### Bug D — Rebound entities stayed on the legacy platform (orphaned entity IDs)
+
+**Symptom:** After import or adopt, KORE created fresh entities (`sensor.new_dc_power`) and the legacy entity IDs showed "not provided", now attached to the KORE entry. The migration still reported success.
+
+**Root cause:** `async_update_entity(..., config_entry_id=..., new_unique_id=...)` cannot change `platform`, and HA looks entities up by `(domain, platform, unique_id)`. The row kept `platform="kostal_plenticore"`, so `async_get_entity_id(domain, "kostal_kore", uid)` returned `None` and KORE's entity platform registered a new row.
+
+**Fix:** `async_update_entity_platform(entity_id, DOMAIN, new_config_entry_id=..., new_unique_id=...)`. HA refuses it for any entity whose state is not `unknown`, and unloading an entry leaves an `unavailable` state flagged `restored: True` for every enabled entity. So the legacy entry is unloaded first, those placeholder states are removed, and only then are rows moved. A failed unload or a still-live state raises before any registry or config-entry change. `_plan_entity_rebinds` also rejects a rewritten `unique_id` that a KORE row outside the target entry already owns, because HA's `_async_update_entity` checks unique-ID conflicts against the *old* platform and would otherwise index two rows under the same key.
+
+**Lesson:** Moving an entity between integrations is `async_update_entity_platform`, and it only works on unloaded entities. Test it with a live entity from a mock integration: registry-only fixtures never have a state, so they hide the "only entities that haven't been loaded" refusal.
+
 ### Bug C — `_merge_statistics_metadata` hits UNIQUE constraint on commit (data corruption risk)
 
 **Symptom:** First revealed by real-SQLite tests: `sqlite3.IntegrityError: UNIQUE constraint failed: statistics_meta.statistic_id`.

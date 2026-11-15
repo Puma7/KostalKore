@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_RESTORED, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.typing import UNDEFINED
 
 from .const import (
     CONF_ACCESS_ROLE,
@@ -149,6 +151,111 @@ def _rewrite_unique_id(
     if unique_id.startswith(source_prefix):
         return f"{target_entry_id}{unique_id[len(source_entry_id):]}"
     return unique_id
+
+
+@dataclass(slots=True, frozen=True)
+class _EntityRebind:
+    """One legacy registry row to move onto the KORE platform and entry."""
+
+    entity_id: str
+    new_unique_id: str | None
+    duplicate_entity_id: str | None
+
+
+def _plan_entity_rebinds(
+    hass: HomeAssistant,
+    source_entry_id: str,
+    target_entry_id: str,
+) -> list[_EntityRebind]:
+    """Work out every rebind and reject unique_id clashes before any change."""
+    registry = er.async_get(hass)
+    target_by_unique_id = {
+        entity_entry.unique_id: entity_entry
+        for entity_entry in er.async_entries_for_config_entry(registry, target_entry_id)
+        if entity_entry.unique_id
+    }
+    plan: list[_EntityRebind] = []
+    for source_entity in er.async_entries_for_config_entry(registry, source_entry_id):
+        new_unique_id: str | None = None
+        duplicate_entity_id: str | None = None
+        if source_entity.unique_id:
+            unique_id = _rewrite_unique_id(
+                source_entity.unique_id, source_entry_id, target_entry_id
+            )
+            if unique_id != source_entity.unique_id:
+                new_unique_id = unique_id
+            duplicate = target_by_unique_id.get(unique_id)
+            if duplicate is not None and duplicate.entity_id != source_entity.entity_id:
+                duplicate_entity_id = duplicate.entity_id
+            # HA indexes entities by (domain, platform, unique_id). A KORE row
+            # outside the target entry would share that key with the rebound
+            # row, so neither could be found reliably afterwards.
+            owner = registry.async_get_entity_id(source_entity.domain, DOMAIN, unique_id)
+            if owner not in (None, source_entity.entity_id, duplicate_entity_id):
+                raise HomeAssistantError(
+                    f"Unique id '{unique_id}' is already used by '{owner}'; "
+                    f"cannot rebind '{source_entity.entity_id}'. Nothing was changed."
+                )
+        plan.append(
+            _EntityRebind(source_entity.entity_id, new_unique_id, duplicate_entity_id)
+        )
+    return plan
+
+
+async def _async_release_source_entities(
+    hass: HomeAssistant,
+    source_entry_id: str,
+    plan: list[_EntityRebind],
+) -> None:
+    """Unload the legacy entry so HA lets its entities change platform.
+
+    ``async_update_entity_platform`` refuses entities that have a state other
+    than ``unknown``. Unloading leaves an ``unavailable`` placeholder flagged
+    ``restored`` for each enabled entity; drop those so the rebind can run.
+    The KORE reload afterwards writes the real state under the same entity_id.
+    """
+    if not await hass.config_entries.async_unload(source_entry_id):
+        raise HomeAssistantError(
+            "The legacy entry could not be unloaded; no entities were migrated."
+        )
+    placeholders: list[str] = []
+    for step in plan:
+        state = hass.states.get(step.entity_id)
+        if state is None or state.state == STATE_UNKNOWN:
+            continue
+        if not state.attributes.get(ATTR_RESTORED):
+            raise HomeAssistantError(
+                f"Entity '{step.entity_id}' is still provided after unloading the "
+                "legacy entry; no entities were migrated."
+            )
+        placeholders.append(step.entity_id)
+    for entity_id in placeholders:
+        hass.states.async_remove(entity_id)
+
+
+def _async_apply_entity_rebinds(
+    hass: HomeAssistant,
+    plan: list[_EntityRebind],
+    target_entry_id: str,
+) -> None:
+    """Remove KORE duplicates, then move each legacy row to the KORE platform."""
+    registry = er.async_get(hass)
+    for step in plan:
+        if step.duplicate_entity_id is not None:
+            registry.async_remove(step.duplicate_entity_id)
+    for step in plan:
+        # ``async_update_entity`` cannot change the platform, and HA looks
+        # entities up by (domain, platform, unique_id): a row left on
+        # ``kostal_plenticore`` is invisible to KORE, which then registers a
+        # fresh entity and orphans the legacy entity_id.
+        registry.async_update_entity_platform(
+            step.entity_id,
+            DOMAIN,
+            new_config_entry_id=target_entry_id,
+            new_unique_id=(
+                UNDEFINED if step.new_unique_id is None else step.new_unique_id
+            ),
+        )
 
 
 def _select_source_entry(
@@ -315,71 +422,29 @@ async def adopt_legacy_entity_ids(
         dry_run=dry_run,
     )
     _preflight_devices(hass, source_entry.entry_id, target_entry.entry_id)
-
-    entity_registry = er.async_get(hass)
-    source_entities = list(
-        er.async_entries_for_config_entry(entity_registry, source_entry.entry_id)
+    plan = _plan_entity_rebinds(hass, source_entry.entry_id, target_entry.entry_id)
+    result.migrated_entities = len(plan)
+    result.removed_target_duplicates = sum(
+        1 for step in plan if step.duplicate_entity_id is not None
     )
-    target_entities = list(
-        er.async_entries_for_config_entry(entity_registry, target_entry.entry_id)
-    )
-    target_by_unique_id = {
-        entity_entry.unique_id: entity_entry
-        for entity_entry in target_entities
-        if entity_entry.unique_id
-    }
-
-    for source_entity in source_entities:
-        rewritten_unique_id = source_entity.unique_id
-        if source_entity.unique_id:
-            rewritten_unique_id = _rewrite_unique_id(
-                source_entity.unique_id,
-                source_entry.entry_id,
-                target_entry.entry_id,
-            )
-            duplicate_target_entity = target_by_unique_id.get(rewritten_unique_id)
-            if (
-                duplicate_target_entity is not None
-                and duplicate_target_entity.entity_id != source_entity.entity_id
-            ):
-                result.removed_target_duplicates += 1
-                if not dry_run:
-                    entity_registry.async_remove(duplicate_target_entity.entity_id)
-
-        result.migrated_entities += 1
-        if dry_run:
-            continue
-
-        if source_entity.unique_id and rewritten_unique_id != source_entity.unique_id:
-            entity_registry.async_update_entity(
-                source_entity.entity_id,
-                config_entry_id=target_entry.entry_id,
-                new_unique_id=rewritten_unique_id,
-            )
-        else:
-            entity_registry.async_update_entity(
-                source_entity.entity_id,
-                config_entry_id=target_entry.entry_id,
-            )
 
     device_registry = dr.async_get(hass)
     source_devices = list(
         dr.async_entries_for_config_entry(device_registry, source_entry.entry_id)
     )
-    for source_device in source_devices:
-        result.migrated_devices += 1
-        if dry_run:
-            continue
-        _async_transfer_device(
-            hass,
-            device_registry,
-            source_device,
-            target_entry.entry_id,
-        )
+    result.migrated_devices = len(source_devices)
 
     if not dry_run:
-        await hass.config_entries.async_unload(source_entry.entry_id)
+        await _async_release_source_entities(hass, source_entry.entry_id, plan)
         result.unloaded_source_entry = True
+        _async_apply_entity_rebinds(hass, plan, target_entry.entry_id)
+        for source_device in source_devices:
+            _async_transfer_device(
+                hass,
+                device_registry,
+                source_device,
+                target_entry.entry_id,
+            )
         from .startup_trace import async_request_config_reload
 
         await async_request_config_reload(
@@ -428,6 +493,10 @@ async def migrate_legacy_plenticore_entry(
     merged_data = _merge_entry_data(target_entry, source_entry)
     merged_options = _merge_options(target_entry, source_entry)
     _preflight_devices(hass, source_entry.entry_id, target_entry.entry_id)
+    plan = _plan_entity_rebinds(hass, source_entry.entry_id, target_entry.entry_id)
+    # Unload before touching anything: HA only moves entities between
+    # platforms while they are not loaded.
+    await _async_release_source_entities(hass, source_entry.entry_id, plan)
     hass.config_entries.async_update_entry(
         target_entry,
         title=source_entry.title,
@@ -435,50 +504,11 @@ async def migrate_legacy_plenticore_entry(
         options=merged_options,
     )
 
-    entity_registry = er.async_get(hass)
-    source_entities = list(
-        er.async_entries_for_config_entry(entity_registry, source_entry.entry_id)
+    _async_apply_entity_rebinds(hass, plan, target_entry.entry_id)
+    result.migrated_entities = len(plan)
+    result.removed_target_duplicates = sum(
+        1 for step in plan if step.duplicate_entity_id is not None
     )
-    target_entities = list(
-        er.async_entries_for_config_entry(entity_registry, target_entry.entry_id)
-    )
-    target_by_unique_id = {
-        entity_entry.unique_id: entity_entry
-        for entity_entry in target_entities
-        if entity_entry.unique_id
-    }
-
-    for source_entity in source_entities:
-        if source_entity.unique_id:
-            rewritten_unique_id = _rewrite_unique_id(
-                source_entity.unique_id,
-                source_entry.entry_id,
-                target_entry.entry_id,
-            )
-            duplicate_target_entity = target_by_unique_id.get(rewritten_unique_id)
-            if (
-                duplicate_target_entity is not None
-                and duplicate_target_entity.entity_id != source_entity.entity_id
-            ):
-                entity_registry.async_remove(duplicate_target_entity.entity_id)
-                result.removed_target_duplicates += 1
-            if rewritten_unique_id != source_entity.unique_id:
-                entity_registry.async_update_entity(
-                    source_entity.entity_id,
-                    config_entry_id=target_entry.entry_id,
-                    new_unique_id=rewritten_unique_id,
-                )
-            else:
-                entity_registry.async_update_entity(
-                    source_entity.entity_id,
-                    config_entry_id=target_entry.entry_id,
-                )
-        else:
-            entity_registry.async_update_entity(
-                source_entity.entity_id,
-                config_entry_id=target_entry.entry_id,
-            )
-        result.migrated_entities += 1
 
     device_registry = dr.async_get(hass)
     source_devices = list(
@@ -501,7 +531,6 @@ async def migrate_legacy_plenticore_entry(
             hass.config_entries.async_get_entry(source_entry.entry_id) is None
         )
     else:
-        await hass.config_entries.async_unload(source_entry.entry_id)
         result.unloaded_source_entry = True
     from .startup_trace import async_request_config_reload
 
