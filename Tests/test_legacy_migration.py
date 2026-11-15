@@ -6,9 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import STATE_UNKNOWN
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.typing import UNDEFINED
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.kostal_kore.const import (
@@ -747,9 +750,11 @@ async def test_migration_and_cleanup_cover_remaining_no_unique_and_device_none_p
             source_entry_id=source_entry.entry_id,
         )
 
-    entity_registry.async_update_entity.assert_called_once_with(
+    entity_registry.async_update_entity_platform.assert_called_once_with(
         "sensor.legacy_no_uid",
-        config_entry_id=target_entry.entry_id,
+        DOMAIN,
+        new_config_entry_id=target_entry.entry_id,
+        new_unique_id=UNDEFINED,
     )
     assert migrated.migrated_entities == 1
     assert migrated.migrated_devices == 0
@@ -1122,3 +1127,206 @@ async def test_cleanup_reconciles_previous_partial_device_migration(hass,existin
     assert preserved.config_entry_id == target.entry_id
     assert preserved.device_id == (target_device.id if target_device else old.id)
     assert devices.async_get(preserved.device_id) is not None
+
+
+async def _async_setup_live_legacy_sensor(hass, source, unique_id, object_id):
+    """Load a stand-in legacy integration that provides one live sensor."""
+    from homeassistant.components.sensor import SensorEntity
+    from homeassistant.config_entries import ConfigFlow
+    from pytest_homeassistant_custom_component.common import (
+        MockModule,
+        MockPlatform,
+        mock_config_flow,
+        mock_integration,
+        mock_platform,
+    )
+
+    class LegacySensor(SensorEntity):
+        _attr_unique_id = unique_id
+        _attr_native_value = 1234
+
+    async def async_setup_entry(hass, entry):
+        await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+        return True
+
+    async def async_unload_entry(hass, entry):
+        return await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+
+    async def async_setup_sensor(hass, entry, async_add_entities):
+        async_add_entities([LegacySensor()])
+
+    mock_integration(
+        hass,
+        MockModule(
+            LEGACY_DOMAIN,
+            async_setup_entry=async_setup_entry,
+            async_unload_entry=async_unload_entry,
+        ),
+    )
+    mock_platform(hass, f"{LEGACY_DOMAIN}.config_flow", None)
+    mock_platform(hass, f"{LEGACY_DOMAIN}.sensor", MockPlatform(async_setup_entry=async_setup_sensor))
+    entity = er.async_get(hass).async_get_or_create(
+        "sensor", LEGACY_DOMAIN, unique_id, config_entry=source, suggested_object_id=object_id,
+    )
+    with mock_config_flow(LEGACY_DOMAIN, ConfigFlow):
+        assert await hass.config_entries.async_setup(source.entry_id)
+        await hass.async_block_till_done()
+    assert hass.states.get(entity.entity_id).state == "1234"
+    return entity
+
+
+@pytest.mark.parametrize("operation", ["migrate", "adopt"])
+async def test_rebind_moves_live_legacy_entity_onto_kore_platform(hass, operation):
+    """KORE must find the legacy row by (domain, kostal_kore, unique_id) after a rebind.
+
+    Before the fix the row kept ``platform="kostal_plenticore"``: KORE's reload
+    registered a fresh ``sensor.new_dc_power`` and orphaned the legacy entity_id.
+    """
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.8"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, data={CONF_HOST: "10.0.0.8"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    old_entity = await _async_setup_live_legacy_sensor(
+        hass, source, f"{source.entry_id}_devices:local_Dc_P", "legacy_dc_power"
+    )
+    rewritten_uid = f"{target.entry_id}_devices:local_Dc_P"
+    entities = er.async_get(hass)
+    duplicate = entities.async_get_or_create(
+        "sensor", DOMAIN, rewritten_uid, config_entry=target, suggested_object_id="new_dc_power",
+    )
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
+        if operation == "migrate":
+            result = await migrate_legacy_plenticore_entry(hass, target.entry_id, source.entry_id)
+        else:
+            result = await adopt_legacy_entity_ids(hass, target.entry_id, source.entry_id, dry_run=False)
+    await hass.async_block_till_done()
+
+    assert result.migrated_entities == 1
+    assert result.removed_target_duplicates == 1
+    assert result.unloaded_source_entry is True
+    assert er.async_get(hass).async_get_entity_id("sensor", "kostal_kore", rewritten_uid) == old_entity.entity_id
+    assert entities.async_get_entity_id("sensor", LEGACY_DOMAIN, old_entity.unique_id) is None
+    rebound = entities.async_get(old_entity.entity_id)
+    assert rebound.platform == DOMAIN
+    assert rebound.config_entry_id == target.entry_id
+    assert entities.async_get(duplicate.entity_id) is None
+    # The unloaded legacy placeholder state is gone, so KORE can write its own.
+    assert hass.states.get(old_entity.entity_id) is None
+    # What KORE's entity platform does on reload: it must get the legacy entity_id back.
+    assert entities.async_get_or_create(
+        "sensor", DOMAIN, rewritten_uid, config_entry=target, suggested_object_id="new_dc_power",
+    ).entity_id == old_entity.entity_id
+
+
+async def test_adopt_dry_run_keeps_live_legacy_entity_untouched(hass):
+    """The adopt preview must leave the loaded legacy entry, its row and state alone."""
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.9"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, data={CONF_HOST: "10.0.0.9"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    old_entity = await _async_setup_live_legacy_sensor(
+        hass, source, f"{source.entry_id}_power", "legacy_power_preview"
+    )
+
+    preview = await adopt_legacy_entity_ids(hass, target.entry_id, source.entry_id, dry_run=True)
+
+    assert preview.migrated_entities == 1
+    assert preview.unloaded_source_entry is False
+    assert source.state is ConfigEntryState.LOADED
+    unchanged = er.async_get(hass).async_get(old_entity.entity_id)
+    assert (unchanged.platform, unchanged.config_entry_id, unchanged.unique_id) == (
+        LEGACY_DOMAIN, source.entry_id, old_entity.unique_id,
+    )
+    assert hass.states.get(old_entity.entity_id).state == "1234"
+
+
+@pytest.mark.parametrize("operation", ["migrate", "adopt"])
+@pytest.mark.parametrize("failure", ["unload_failed", "still_live"])
+async def test_rebind_refuses_when_legacy_entity_cannot_be_released(hass, operation, failure):
+    """A failed unload or a still-live entity stops before any registry or entry change."""
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.10"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, title="legacy", data={CONF_HOST: "10.0.0.10"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    entities = er.async_get(hass)
+    old_entity = entities.async_get_or_create(
+        "sensor", LEGACY_DOMAIN, f"{source.entry_id}_power", config_entry=source,
+    )
+    duplicate = entities.async_get_or_create(
+        "sensor", DOMAIN, f"{target.entry_id}_power", config_entry=target,
+    )
+    # A state the unload left behind that is neither unknown nor a placeholder.
+    hass.states.async_set(old_entity.entity_id, "42")
+    original_data = dict(target.data)
+
+    with (
+        patch.object(
+            hass.config_entries, "async_unload", AsyncMock(return_value=failure == "still_live"),
+        ),
+        patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)) as reload,
+        pytest.raises(HomeAssistantError, match="no entities were migrated"),
+    ):
+        if operation == "migrate":
+            await migrate_legacy_plenticore_entry(hass, target.entry_id, source.entry_id)
+        else:
+            await adopt_legacy_entity_ids(hass, target.entry_id, source.entry_id, dry_run=False)
+
+    reload.assert_not_awaited()
+    assert entities.async_get(old_entity.entity_id) == old_entity
+    assert entities.async_get(duplicate.entity_id) is not None
+    assert dict(target.data) == original_data
+    assert target.title != "legacy"
+
+
+async def test_rebind_releases_entities_whose_state_is_unknown(hass):
+    """An ``unknown`` state is accepted by HA's platform move and kept as is."""
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.11"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, data={CONF_HOST: "10.0.0.11"})
+    target.add_to_hass(hass)
+    source.add_to_hass(hass)
+    entities = er.async_get(hass)
+    old_entity = entities.async_get_or_create(
+        "sensor", LEGACY_DOMAIN, f"{source.entry_id}_power", config_entry=source,
+    )
+    hass.states.async_set(old_entity.entity_id, STATE_UNKNOWN)
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)):
+        await adopt_legacy_entity_ids(hass, target.entry_id, source.entry_id, dry_run=False)
+
+    assert entities.async_get_entity_id(
+        "sensor", DOMAIN, f"{target.entry_id}_power"
+    ) == old_entity.entity_id
+    assert hass.states.get(old_entity.entity_id).state == STATE_UNKNOWN
+
+
+@pytest.mark.parametrize("operation", ["migrate", "adopt", "preview"])
+async def test_rebind_rejects_unique_id_owned_outside_target_entry(hass, operation):
+    """A KORE row with the rewritten unique_id under another entry is never shadowed."""
+    target = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.12"})
+    other_kore = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "10.0.0.13"})
+    source = MockConfigEntry(domain=LEGACY_DOMAIN, data={CONF_HOST: "10.0.0.12"})
+    for entry in (target, other_kore, source):
+        entry.add_to_hass(hass)
+    entities = er.async_get(hass)
+    old_entity = entities.async_get_or_create(
+        "sensor", LEGACY_DOMAIN, "shared_serial_power", config_entry=source,
+    )
+    foreign = entities.async_get_or_create(
+        "sensor", DOMAIN, "shared_serial_power", config_entry=other_kore,
+    )
+
+    with (
+        patch.object(hass.config_entries, "async_unload", AsyncMock(return_value=True)) as unload,
+        pytest.raises(HomeAssistantError, match="already used by"),
+    ):
+        if operation == "migrate":
+            await migrate_legacy_plenticore_entry(hass, target.entry_id, source.entry_id)
+        else:
+            await adopt_legacy_entity_ids(
+                hass, target.entry_id, source.entry_id, dry_run=operation == "preview",
+            )
+
+    unload.assert_not_awaited()
+    assert entities.async_get(old_entity.entity_id) == old_entity
+    assert entities.async_get(foreign.entity_id) == foreign

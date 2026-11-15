@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- *Import Legacy Plenticore Data* and `kostal_kore.adopt_legacy_entity_ids`
+  now keep the legacy entity IDs. Before, the rebound registry rows stayed on
+  the `kostal_plenticore` platform: KORE could not find them after the reload,
+  created new entities (for example `sensor.new_dc_power`) and left the legacy
+  entity IDs orphaned as "not provided", while the migration reported success.
+  Both now unload the legacy entry first and move its entities to the
+  `kostal_kore` platform. They stop with an error, before changing anything, if
+  the legacy entry cannot be unloaded or a rewritten `unique_id` already
+  belongs to another KORE entity. The adopt dry-run is unchanged.
+
 ## [3.0.21] - 2026-11-13
 
 ### Fixed

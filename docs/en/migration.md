@@ -72,7 +72,15 @@ See the [German guide](../de/migration.md) §3 for the same flow in German (scre
 
 1. Full HA backup.
 2. Add KORE integration; keep legacy entry until import finishes.
-3. **Import Legacy Plenticore Data:** first press arms 60 s window → second press runs `migrate_legacy_plenticore_entry`.
+3. **Import Legacy Plenticore Data:** first press arms 60 s window → second press runs `migrate_legacy_plenticore_entry`. It:
+   1. **unloads** the legacy entry first (not deleted; Home Assistant only moves entities between integrations while they are not loaded),
+   2. merges legacy `data`/`options` into the KORE entry,
+   3. removes duplicate KORE entities with the same `unique_id`,
+   4. moves every legacy entity to the KORE entry **and the `kostal_kore` platform**, rewriting `unique_id` from `old_entry_id_*` to `new_entry_id_*` (the `entity_id` stays the same),
+   5. adds a `kostal_kore` identifier to the legacy device,
+   6. reloads KORE, which picks up the old `entity_id`s instead of creating new entities.
+
+   If the legacy entry cannot be unloaded or still provides values afterwards, the import stops with an error before the registry or the KORE configuration is changed.
 4. Test dashboards/automations for days or weeks.
 5. **Finalize Legacy Cleanup:** 3-step flow (notification code → text entity → final press within 60 s) runs `finalize_legacy_cleanup`.
 
@@ -82,7 +90,9 @@ See the [German guide](../de/migration.md) §3 for the same flow in German (scre
 
 ### 4.1 `kostal_kore.adopt_legacy_entity_ids`
 
-Registry-only rebind. Preview:
+Registry-only rebind. Apply unloads the legacy entry first, then moves the entities to the `kostal_kore` platform as the import does (same steps as §3, without the config merge). The preview changes nothing and leaves the legacy entry loaded.
+
+Preview:
 
 ```yaml
 service: kostal_kore.adopt_legacy_entity_ids
@@ -127,6 +137,8 @@ See the [German guide](../de/migration.md) §8–9 for the full tables (German).
 
 - **No legacy entry** → restore backup or use orphan path.
 - **0 entities migrated** → enable legacy integration; check unique_id format in logs.
+- **`The legacy entry could not be unloaded`** / **`… is still provided after unloading the legacy entry`** → nothing was migrated; disable the legacy entry in the UI or restart HA, then run again.
+- **`Unique id '…' is already used by '…'`** → a KORE entity outside the target entry already has that `unique_id`; nothing was changed. Check and remove the named entity, then run again.
 - **Automation entity IDs** → update manually after migration.
 
 Technical architecture notes: [MIGRATION_ARCHITECTURE.md](../development/MIGRATION_ARCHITECTURE.md).
