@@ -22,6 +22,7 @@ from custom_components.kostal_kore.migration_services import (
     _build_auto_mapping,
     _copy_legacy_history,
     _copy_legacy_history_sync,
+    _CopyLegacyHistoryTask,
     _detect_recorder_backend,
     _ensure_guard_confirmed,
     _get_or_init_guard,
@@ -450,12 +451,16 @@ async def test_copy_history_async_and_service_handlers_cover_remaining_paths(
         def __init__(self, db_url: str, recording: bool = True) -> None:
             self.db_url = db_url
             self.recording = recording
-            self.async_add_executor_job = AsyncMock(return_value=summary)
+            self.queue_task = MagicMock(
+                side_effect=lambda task: task.future.set_result(summary)
+            )
 
     with patch.object(migration_services_mod, "Recorder", DummyRecorder):
         hass.data["recorder_instance"] = DummyRecorder("sqlite:///db.sqlite")
         assert await _copy_legacy_history(hass, mappings=[("sensor.a", "sensor.b")]) == summary
-        hass.data["recorder_instance"].async_add_executor_job.assert_awaited_once()
+        queued = hass.data["recorder_instance"].queue_task.call_args.args[0]
+        assert isinstance(queued, _CopyLegacyHistoryTask)
+        assert queued.mappings == [("sensor.a", "sensor.b")]
 
         hass.data["recorder_instance"] = DummyRecorder("custom://db.sqlite")
         with pytest.raises(HomeAssistantError, match="Unsupported recorder backend"):
@@ -961,3 +966,74 @@ def test_merge_statistics_metadata_deduplicates_overlapping_timestamps():
         assert start_ts_values == {1000.0, 2000.0}
 
     assert stats_moved == 1
+
+
+def _fake_recorder_with_caches() -> SimpleNamespace:
+    return SimpleNamespace(
+        states_meta_manager=MagicMock(),
+        states_manager=MagicMock(),
+        statistics_meta_manager=MagicMock(),
+    )
+
+
+def _assert_caches_evicted(recorder: SimpleNamespace) -> None:
+    recorder.states_meta_manager.evict_purged.assert_called_once_with(
+        {"sensor.old", "sensor.new"}
+    )
+    recorder.states_manager.evict_purged_entity_ids.assert_called_once_with({"sensor.old"})
+    recorder.statistics_meta_manager.reset.assert_called_once_with()
+
+
+def test_copy_task_success_sets_result_and_evicts_caches() -> None:
+    """The recorder job reports the summary and drops stale metadata ids."""
+    import concurrent.futures
+
+    recorder = _fake_recorder_with_caches()
+    summary = _HistoryCopySummary(backend="sqlite", total_mappings=1)
+    future: concurrent.futures.Future[_HistoryCopySummary] = concurrent.futures.Future()
+    task = _CopyLegacyHistoryTask(mappings=[("sensor.old", "sensor.new")], future=future)
+
+    with patch.object(
+        migration_services_mod, "_copy_legacy_history_sync", return_value=summary
+    ) as copy_mock:
+        task.run(recorder)  # type: ignore[arg-type]
+
+    copy_mock.assert_called_once_with(recorder, [("sensor.old", "sensor.new")])
+    assert future.result(timeout=0) is summary
+    _assert_caches_evicted(recorder)
+
+
+def test_copy_task_failure_is_handed_to_caller_and_still_evicts() -> None:
+    """A failed merge reaches the awaiting caller instead of the recorder loop."""
+    import concurrent.futures
+
+    recorder = _fake_recorder_with_caches()
+    future: concurrent.futures.Future[_HistoryCopySummary] = concurrent.futures.Future()
+    task = _CopyLegacyHistoryTask(mappings=[("sensor.old", "sensor.new")], future=future)
+
+    with patch.object(
+        migration_services_mod,
+        "_copy_legacy_history_sync",
+        side_effect=RuntimeError("db gone"),
+    ):
+        task.run(recorder)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="db gone"):
+        future.result(timeout=0)
+    _assert_caches_evicted(recorder)
+
+
+def test_copy_task_skips_work_when_caller_cancelled() -> None:
+    """A cancelled caller must not have the merge run behind its back later."""
+    import concurrent.futures
+
+    recorder = _fake_recorder_with_caches()
+    future: concurrent.futures.Future[_HistoryCopySummary] = concurrent.futures.Future()
+    future.cancel()
+    task = _CopyLegacyHistoryTask(mappings=[("sensor.old", "sensor.new")], future=future)
+
+    with patch.object(migration_services_mod, "_copy_legacy_history_sync") as copy_mock:
+        task.run(recorder)  # type: ignore[arg-type]
+
+    copy_mock.assert_not_called()
+    recorder.statistics_meta_manager.reset.assert_not_called()

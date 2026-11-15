@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- After `copy_legacy_history` or *Apply orphan history mapping* merged history
+  into an entity, the recorder kept using that entity's deleted metadata row.
+  On SQLite its next state failed with `FOREIGN KEY constraint failed` and the
+  recorder dropped the batch ("Unhandled database error"). SQLite could also
+  give the freed id to a new entity, which then received the merged entity's
+  states. The merge now runs as a job in the recorder thread and clears the
+  recorder's cached metadata ids for the merged entities afterwards.
+
 ## [3.0.21] - 2026-11-13
 
 ### Fixed

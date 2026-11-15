@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import hashlib
 import logging
 import time
@@ -18,6 +20,7 @@ from homeassistant.components.recorder.db_schema import (
     StatisticsMeta,
     StatisticsShortTerm,
 )
+from homeassistant.components.recorder.tasks import RecorderTask
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -478,6 +481,12 @@ def _copy_legacy_history_sync(
     recorder_instance: Any,
     mappings: list[tuple[str, str]],
 ) -> _HistoryCopySummary:
+    """Merge legacy history rows into the target entities (one transaction).
+
+    Must run in the recorder thread (see `_CopyLegacyHistoryTask`): the merge
+    deletes the target's `states_meta` / `statistics_meta` rows, which the
+    recorder's metadata caches may still point at.
+    """
     summary = _HistoryCopySummary(
         backend=_detect_recorder_backend(recorder_instance),
         total_mappings=len(mappings),
@@ -523,6 +532,66 @@ def _copy_legacy_history_sync(
     return summary
 
 
+def _evict_recorder_metadata_caches(
+    recorder_instance: Recorder,
+    mappings: list[tuple[str, str]],
+) -> None:
+    """Drop the recorder's cached ids for every entity a merge touched.
+
+    The merge keeps the legacy `metadata_id` / `statistics_meta.id` and
+    deletes the target's rows, so cached ids for the target would point at a
+    deleted row (`FOREIGN KEY constraint failed` on the next write) or at an id
+    SQLite hands to the next new entity. Evicted entries are reloaded from the
+    database on next use. Recorder thread only.
+    """
+    entity_ids = {entity_id for pair in mappings for entity_id in pair}
+    recorder_instance.states_meta_manager.evict_purged(entity_ids)
+    # The legacy rows now belong to the target; a still-live legacy entity
+    # must not link its next state to them via `old_state_id`.
+    recorder_instance.states_manager.evict_purged_entity_ids(
+        {old_entity_id for old_entity_id, _ in mappings}
+    )
+    # StatisticsMetaManager has no public per-id eviction; a full reset just
+    # reloads metadata from the database on next use.
+    recorder_instance.statistics_meta_manager.reset()
+
+
+@dataclass(slots=True)
+class _CopyLegacyHistoryTask(RecorderTask):
+    """Run the history merge inside the recorder thread.
+
+    Queued behind all pending events (`commit_before`), so every state is
+    committed before rows move, and nothing else writes until the caches are
+    evicted. The outcome is handed back through `future`.
+    """
+
+    mappings: list[tuple[str, str]]
+    future: concurrent.futures.Future[_HistoryCopySummary]
+
+    def run(self, instance: Recorder) -> None:
+        """Merge the history, evict stale cache entries, report the result."""
+        if not self.future.set_running_or_notify_cancel():
+            return
+        try:
+            summary = _copy_legacy_history_sync(instance, self.mappings)
+        except Exception as err:  # handed to the awaiting caller
+            self.future.set_exception(err)
+            return
+        finally:
+            _evict_recorder_metadata_caches(instance, self.mappings)
+        self.future.set_result(summary)
+
+
+async def _async_run_history_copy(
+    recorder_instance: Recorder,
+    mappings: list[tuple[str, str]],
+) -> _HistoryCopySummary:
+    """Queue the merge on the recorder thread and wait for its summary."""
+    future: concurrent.futures.Future[_HistoryCopySummary] = concurrent.futures.Future()
+    recorder_instance.queue_task(_CopyLegacyHistoryTask(mappings=mappings, future=future))
+    return await asyncio.wrap_future(future)
+
+
 async def _copy_legacy_history(
     hass: HomeAssistant,
     *,
@@ -537,12 +606,7 @@ async def _copy_legacy_history(
     if not bool(getattr(recorder_instance, "recording", True)):
         raise HomeAssistantError("Recorder is not active.")
 
-    summary = await recorder_instance.async_add_executor_job(
-        _copy_legacy_history_sync,
-        recorder_instance,
-        mappings,
-    )
-    return summary
+    return await _async_run_history_copy(recorder_instance, mappings)
 
 
 async def _handle_adopt_service(hass: HomeAssistant, call: ServiceCall) -> None:
