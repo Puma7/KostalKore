@@ -496,6 +496,18 @@ async def test_unregister_keeps_services_when_other_entries_active(
     assert hass.services.has_service(DOMAIN, SERVICE_APPLY_ORPHAN_HISTORY_MAPPING)
 
 
+async def test_unregister_ignores_bookkeeping_keys(hass: HomeAssistant) -> None:
+    """The last unload removes the services although "_entry_lifecycle" stays."""
+    async_register_orphan_history_services(hass)
+    hass.data.setdefault(DOMAIN, {})["_entry_lifecycle"] = {"entry-a": {}}
+    hass.data[DOMAIN]["entry-a"] = {"mock": True}
+    hass.data[DOMAIN]["not-a-store"] = "leftover"
+
+    async_unregister_orphan_history_services_if_unused(hass, unloading_entry_id="entry-a")
+    assert not hass.services.has_service(DOMAIN, SERVICE_SCAN_ORPHAN_HISTORY)
+    assert not hass.services.has_service(DOMAIN, SERVICE_APPLY_ORPHAN_HISTORY_MAPPING)
+
+
 async def test_register_services_is_idempotent(hass: HomeAssistant) -> None:
     """Double-registration must not raise (real-world: multiple entries setup)."""
     async_register_orphan_history_services(hass)

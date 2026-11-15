@@ -52,6 +52,11 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 RATE_WINDOW_SECONDS: Final[float] = 300.0
 MIN_SAMPLES_FOR_RATE: Final[int] = 3
+# Temperatures and battery voltage change slowly and are quantised (0.1 °C,
+# 0.1 V). Extrapolating 10 s of samples to the 5-minute window turned one
+# 0.1-step into "3 °C/5min" or "6 V/5min" right after a restart or a gap, so
+# their rate needs at least half the window of data.
+SLOW_RATE_MIN_SPAN_SECONDS: Final[float] = RATE_WINDOW_SECONDS / 2
 # Grid frequency / phase voltage extremes must persist across this many
 # consecutive checks. A single 0 Hz / 0 V sample while the inverter keeps
 # running is a read fault (G3 "Server device failure" around 03:10), not a
@@ -456,7 +461,11 @@ class FireSafetyMonitor:
                 vals,
             ))
         elif bat_temp > 45:
-            rate = _rate_of_change(self._bat_temp_history, RATE_WINDOW_SECONDS)
+            rate = _rate_of_change(
+                self._bat_temp_history,
+                RATE_WINDOW_SECONDS,
+                min_span_s=SLOW_RATE_MIN_SPAN_SECONDS,
+            )
             if rate is not None and rate > 2.0:
                 alerts.append(SafetyAlert(
                     now, FireRiskLevel.ELEVATED, "battery_thermal",
@@ -467,7 +476,11 @@ class FireSafetyMonitor:
                 ))
 
         if bat_voltage is not None:
-            v_rate = _rate_of_change(self._bat_voltage_history, RATE_WINDOW_SECONDS)
+            v_rate = _rate_of_change(
+                self._bat_voltage_history,
+                RATE_WINDOW_SECONDS,
+                min_span_s=SLOW_RATE_MIN_SPAN_SECONDS,
+            )
             if v_rate is not None and bat_temp > 40 and abs(v_rate) > 5.0:
                 alerts.append(SafetyAlert(
                     now, FireRiskLevel.ELEVATED, "battery_voltage_anomaly",
@@ -500,7 +513,11 @@ class FireSafetyMonitor:
                 vals,
             ))
         elif ctrl_temp > 75:
-            rate = _rate_of_change(self._ctrl_temp_history, RATE_WINDOW_SECONDS)
+            rate = _rate_of_change(
+                self._ctrl_temp_history,
+                RATE_WINDOW_SECONDS,
+                min_span_s=SLOW_RATE_MIN_SPAN_SECONDS,
+            )
             if rate is not None and rate > 3.0:
                 alerts.append(SafetyAlert(
                     now, FireRiskLevel.ELEVATED, "controller_thermal",
@@ -611,8 +628,17 @@ def _try_append(history: deque[tuple[float, float]], now: float, val: Any) -> No
         history.append((now, fv))
 
 
-def _rate_of_change(history: deque[tuple[float, float]], window: float) -> float | None:
-    """Calculate rate of change over the given window (value per window)."""
+def _rate_of_change(
+    history: deque[tuple[float, float]],
+    window: float,
+    *,
+    min_span_s: float = 10.0,
+) -> float | None:
+    """Calculate rate of change over the given window (value per window).
+
+    Returns None unless the samples in the window span at least
+    ``min_span_s`` seconds.
+    """
     if len(history) < MIN_SAMPLES_FOR_RATE:
         return None
     now = history[-1][0]
@@ -623,6 +649,6 @@ def _rate_of_change(history: deque[tuple[float, float]], window: float) -> float
     first_t, first_v = window_samples[0]
     last_t, last_v = window_samples[-1]
     dt = last_t - first_t
-    if dt < 10:
+    if dt < min_span_s:
         return None
     return (last_v - first_v) / dt * window

@@ -115,6 +115,7 @@ DEFAULT_PHASES: Final[list[TestPhase]] = [
 class BatteryTestSuite:
 
     _DEFAULT_LIMIT_W: Final = 20000.0
+    _registers_written: bool = False
 
     def __init__(
         self, coordinator: ModbusDataUpdateCoordinator, hass: Any = None,
@@ -166,6 +167,9 @@ class BatteryTestSuite:
         if not reg:
             self._d(f"WR {name} FAIL:unknown")
             return False
+        # Set before the attempt: a write that timed out may still have
+        # reached the inverter, so the run must restore afterwards.
+        self._registers_written = True
         try:
             await self._coord.async_write_register(reg, value)
             self._d(f"WR {name}({reg.address})={value} OK")
@@ -272,6 +276,12 @@ class BatteryTestSuite:
         self._dbg.clear()
         results: list[PhaseResult] = []
         reg_1038_acquired = False
+        # Only a run that wrote a register restores them: the pre-flight's own
+        # write check already does, after its snapshot. A run refused before
+        # that (REG 1038 taken, checks failed) must not reset REG
+        # 1034/1038/1040: there is no snapshot, and another feature may own
+        # REG 1038.
+        self._registers_written = False
         if phases is None:
             phases = list(DEFAULT_PHASES)
 
@@ -366,20 +376,27 @@ class BatteryTestSuite:
                     await asyncio.sleep(3)
 
         finally:
-            if (
-                reg_1038_acquired
-                and self._hass
-                and self._entry_id
-                and getattr(self._hass, "data", None) is not None
-            ):
-                from .battery_reg_1038_owner import (
-                    OWNER_BATTERY_TEST,
-                    release_reg_1038,
-                )
+            # Restore before releasing REG 1038, so no other feature can take
+            # it over and then have its value overwritten by this restore.
+            try:
+                if self._registers_written:
+                    await self._write_normal()
+            finally:
+                # Also when cancelled during the restore: nothing else would
+                # release REG 1038 or clear the running flag afterwards.
+                if (
+                    reg_1038_acquired
+                    and self._hass
+                    and self._entry_id
+                    and getattr(self._hass, "data", None) is not None
+                ):
+                    from .battery_reg_1038_owner import (
+                        OWNER_BATTERY_TEST,
+                        release_reg_1038,
+                    )
 
-                release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
-            await self._write_normal()
-            self._running = False
+                    release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
+                self._running = False
             self._emit("")
             self._emit("═" * 60)
             s = self._summary(results)

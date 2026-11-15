@@ -2010,6 +2010,28 @@ async def async_setup_entry(
             async_add_entities(soh_entities)
 
 
+# Inputs of each calculated statistic (module scb:statistic:EnergyFlow), by
+# metric. Every metric native_value computes must be listed: an input that is
+# not registered is only polled while its raw sensor happens to be enabled.
+_CALCULATED_STATISTIC_INPUTS: Final[dict[str, tuple[str, ...]]] = {
+    "TotalGridConsumption": ("EnergyHomeGrid", "EnergyChargeGrid"),
+    "BatteryDischargeTotal": ("EnergyHomeBat", "EnergyDischargeGrid"),
+    "BatteryChargeTotal": ("EnergyChargeGrid", "EnergyChargePv"),
+    "BatteryEfficiency": ("EnergyChargePv", "EnergyChargeGrid", "EnergyDischarge"),
+    "BatteryNetEfficiency": (
+        "EnergyChargePv",
+        "EnergyChargeGrid",
+        "EnergyHomeBat",
+        "EnergyDischargeGrid",
+    ),
+    "InverterDischargeEfficiency": (
+        "EnergyDischarge",
+        "EnergyHomeBat",
+        "EnergyDischargeGrid",
+    ),
+}
+
+
 class PlenticoreCalculatedSensor(
     CoordinatorEntity[ProcessDataUpdateCoordinator], SensorEntity
 ):
@@ -2242,75 +2264,27 @@ class PlenticoreCalculatedSensor(
             return self.coordinator.data[module_id][data_id]
         return None
 
+    def _required_input_ids(self) -> list[str]:
+        """Statistic ids this calculated value is built from (see native_value)."""
+        metric, sep, period = self.data_id.partition(":")
+        if not sep:
+            return []
+        return [
+            f"Statistic:{name}:{period}"
+            for name in _CALCULATED_STATISTIC_INPUTS.get(metric, ())
+        ]
+
     async def async_added_to_hass(self) -> None:
         """Register this entity on the Update Coordinator."""
         await super().async_added_to_hass()
-        # Ensure required statistic inputs are fetched even if base sensors are disabled
-        if ":" in self.data_id:
-            period = self.data_id.split(":")[1]
-            required_ids: list[str] = []
-
-            if "BatteryDischargeTotal" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "InverterDischargeEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyDischarge:{period}",
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "BatteryNetEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyChargePv:{period}",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "BatteryEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyChargePv:{period}",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                    f"Statistic:EnergyDischarge:{period}",
-                ]
-
-            for data_id in required_ids:
-                self.coordinator.start_fetch_data("scb:statistic:EnergyFlow", data_id)
+        # Fetch the inputs even when the raw statistic sensors are disabled.
+        for data_id in self._required_input_ids():
+            self.coordinator.start_fetch_data("scb:statistic:EnergyFlow", data_id)
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister this entity from the Update Coordinator."""
-        if ":" in self.data_id:
-            period = self.data_id.split(":")[1]
-            required_ids: list[str] = []
-
-            if "BatteryDischargeTotal" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "InverterDischargeEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyDischarge:{period}",
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "BatteryNetEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyChargePv:{period}",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                    f"Statistic:EnergyHomeBat:{period}",
-                    f"Statistic:EnergyDischargeGrid:{period}",
-                ]
-            elif "BatteryEfficiency" in self.data_id:
-                required_ids = [
-                    f"Statistic:EnergyChargePv:{period}",
-                    f"Statistic:EnergyChargeGrid:{period}",
-                    f"Statistic:EnergyDischarge:{period}",
-                ]
-
-            for data_id in required_ids:
-                self.coordinator.stop_fetch_data("scb:statistic:EnergyFlow", data_id)
+        for data_id in self._required_input_ids():
+            self.coordinator.stop_fetch_data("scb:statistic:EnergyFlow", data_id)
         await super().async_will_remove_from_hass()
 
     def async_entity_id_changed(self, old_entity_id: str) -> None:

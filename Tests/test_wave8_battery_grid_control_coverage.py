@@ -114,6 +114,9 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
         pending = asyncio.create_task(asyncio.sleep(3600))
         controller._task = pending
         controller._target_soc = 40
+        # The stub task has no finally of its own, so the session's writes
+        # are still pending when stop() runs.
+        controller._wrote_1034 = True
         await controller.stop()
     assert controller.target_soc is None
     assert controller.status == "idle"
@@ -121,12 +124,13 @@ async def test_battery_soc_controller_basic_set_target_stop_and_notification_pat
     write_normal.assert_awaited_once()
     assert pending.cancelled()
 
+    # Idle stop (nothing written this session): no register is touched.
     controller._task = None
     controller._target_soc = 25
     controller._write_normal = AsyncMock()
     await controller.stop()
     assert controller.target_soc is None
-    controller._write_normal.assert_awaited_once()
+    controller._write_normal.assert_not_awaited()
 
     notify_hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock(side_effect=RuntimeError("boom"))))
     controller._hass = notify_hass
@@ -155,17 +159,17 @@ async def test_battery_soc_controller_snapshot_read_write_and_normalization_path
     coord = _coord_stub()
     controller = BatterySocController(coord, hass=None, entry_id="entry")
 
-    coord.client.read_register.side_effect = [111.0, 222.0]
+    coord.client.read_register.side_effect = [111.0]
     await controller._snapshot_limits()
     assert controller._original_charge_limit == 111.0
-    assert controller._original_discharge_limit == 222.0
 
     controller._original_charge_limit = None
-    controller._original_discharge_limit = None
-    coord.client.read_register.side_effect = [ValueError("bad"), float("nan")]
+    coord.client.read_register.side_effect = [ValueError("bad")]
     await controller._snapshot_limits()
     assert controller._original_charge_limit is None
-    assert controller._original_discharge_limit is None
+    coord.client.read_register.side_effect = [float("nan")]
+    await controller._snapshot_limits()
+    assert controller._original_charge_limit is None
 
     with patch("custom_components.kostal_kore.battery_soc_controller.REGISTER_BY_NAME", {}):
         await controller._snapshot_limits()
@@ -199,13 +203,29 @@ async def test_battery_soc_controller_snapshot_read_write_and_normalization_path
         coord.async_write_register = AsyncMock()
         assert await controller._write_discharge(800) is True
 
+    # Charging only (REG 1038 untouched): just REG 1034 goes back to 0.
+    controller._wrote_1038 = False
     coord.async_write_register = AsyncMock()
     controller._original_charge_limit = 321.0
-    controller._original_discharge_limit = 654.0
     await controller._write_normal()
-    assert coord.async_write_register.await_count == 3
+    assert [c.args[1] for c in coord.async_write_register.await_args_list] == [0.0]
     assert controller._original_charge_limit is None
-    assert controller._original_discharge_limit is None
+
+    # Discharged (REG 1038 set to 0): REG 1038 goes back to the snapshot ...
+    controller._wrote_1038 = True
+    coord.async_write_register = AsyncMock()
+    controller._original_charge_limit = 321.0
+    await controller._write_normal(keep_snapshot=True)
+    assert [c.args[1] for c in coord.async_write_register.await_args_list] == [0.0, 321.0]
+    assert controller._original_charge_limit == 321.0
+    # ... or to the device maximum without one.
+    controller._original_charge_limit = None
+    coord.async_write_register = AsyncMock()
+    await controller._write_normal()
+    assert [c.args[1] for c in coord.async_write_register.await_args_list] == [
+        0.0, controller.device_power_limit,
+    ]
+    controller._wrote_1038 = False
 
     coord.async_write_register = AsyncMock(side_effect=ValueError("reset bad"))
     await controller._write_normal()
@@ -240,12 +260,13 @@ async def test_battery_soc_controller_run_loop_paths() -> None:
     assert controller._target_soc is None
     assert "error:" in controller.status
 
+    # A session that wrote nothing restores nothing.
     controller._target_soc = None
     controller._status = "idle"
     controller._write_normal = AsyncMock()
     with patch.object(controller, "_snapshot_limits", new=AsyncMock()):
         await controller._run_loop()
-    controller._write_normal.assert_awaited_once()
+    controller._write_normal.assert_not_awaited()
 
     controller._target_soc = 50
     controller._status = "idle"
@@ -381,7 +402,8 @@ async def test_battery_soc_controller_run_loop_paths() -> None:
         new=AsyncMock(),
     ):
         await controller._run_loop()
-    controller._write_normal.assert_awaited_once()
+    # Neither charge nor discharge was needed, so nothing was written.
+    controller._write_normal.assert_not_awaited()
 
     controller._target_soc = 50
     controller._status = "idle"
@@ -398,8 +420,10 @@ async def test_battery_soc_controller_run_loop_paths() -> None:
     with patch.object(controller, "_snapshot_limits", new=AsyncMock()), patch.object(
         controller, "_read_soc", new=AsyncMock(side_effect=asyncio.CancelledError)
     ):
+        controller._wrote_1034 = True  # a write from an earlier cycle
         await controller._run_loop()
     controller._write_normal.assert_awaited_once()
+    assert controller._wrote_1034 is False
 
 
 @pytest.mark.asyncio
@@ -488,6 +512,7 @@ async def test_grid_feed_in_limiter_switch_and_number_paths() -> None:
     assert get_reg_1038_owner_manager(limiter.hass, "entry").current is None
 
     limiter._original_charge_limit = 500.0
+    limiter._is_on = True
     with patch.object(limiter, "_cancel_control") as cancel_control, patch.object(
         limiter, "_write_charge_limit", new=AsyncMock()
     ) as write_limit:

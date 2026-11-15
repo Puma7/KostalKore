@@ -35,6 +35,7 @@ from .helper import (
     ModbusMemoryParityError,  # noqa: F401
     ModbusServerDeviceBusyError,
     ModbusServerDeviceFailureError,  # noqa: F401
+    device_configuration_url,
     firmware_at_least,
     get_hostname_id,
     is_allowed_write_target,
@@ -140,7 +141,7 @@ class Plenticore:
         self._shutdown_remove_listener: CALLBACK_TYPE | None = None
 
         self.device_info = DeviceInfo(
-            configuration_url=f"http://{self.host}",
+            configuration_url=device_configuration_url(self.host),
             identifiers={(DOMAIN, self._get_persistent_device_id())},
             manufacturer="Kostal",
             name="Kostal Plenticore",
@@ -404,7 +405,7 @@ class Plenticore:
         """
         device_id = self._get_persistent_device_id()
         self.device_info = DeviceInfo(
-            configuration_url=f"http://{self.host}",
+            configuration_url=device_configuration_url(self.host),
             identifiers={(DOMAIN, device_id)},
             manufacturer="Kostal",
             model="Unknown",
@@ -472,7 +473,7 @@ class Plenticore:
         hostname = normalize_hostname(network_settings.get(hostname_id), self.host)
 
         self.device_info = DeviceInfo(
-            configuration_url=f"http://{self.host}",
+            configuration_url=device_configuration_url(self.host),
             identifiers={(DOMAIN, serial_no)},
             manufacturer="Kostal",
             model=f"{prod1} {prod2}".strip() or "Unknown",

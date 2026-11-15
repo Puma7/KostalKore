@@ -20,7 +20,7 @@ import time
 import traceback
 from collections.abc import Awaitable
 from datetime import timedelta
-from typing import Final
+from typing import Any, Final
 
 from aiohttp.client_exceptions import ClientError
 from homeassistant.const import CONF_HOST, Platform
@@ -381,7 +381,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
             )
             try:
                 await modbus_proxy.start()
-            except OSError as proxy_err:
+            except (OSError, OverflowError) as proxy_err:
+                # OverflowError: a port outside 0-65535 stored by an older
+                # options flow, which did not check the range.
                 _LOGGER.warning("Modbus proxy failed to start on port %s: %s", proxy_port, proxy_err)
                 modbus_proxy = None
 
@@ -697,6 +699,22 @@ async def _async_unload_loaded_platforms(
     return unload_ok
 
 
+async def _release_reg_1038_features(entry_data: dict[str, Any]) -> None:
+    """Let the switches that hold REG 1038 restore it while Modbus is open.
+
+    Their own removal runs only after the coordinator has closed the client,
+    so a restore written there never reaches the inverter.
+    """
+    for key, label in (
+        ("charge_block_switch", "Charge block restore"),
+        ("grid_feedin_limiter", "Grid feed-in limiter restore"),
+    ):
+        feature = entry_data.get(key)
+        release = getattr(feature, "async_release_for_unload", None)
+        if release is not None:
+            await _await_cleanup_step(label, release())
+
+
 async def _rollback_setup(
     hass: HomeAssistant,
     entry: PlenticoreConfigEntry,
@@ -869,6 +887,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) 
     soc_ctrl = entry_data.get("soc_controller")
     if soc_ctrl:  # pragma: no cover
         await _await_cleanup_step("SoC controller stop", soc_ctrl.stop())
+    await _release_reg_1038_features(entry_data)
     modbus_proxy = entry_data.get("modbus_proxy")
     if modbus_proxy:  # pragma: no cover
         await _await_cleanup_step("Modbus proxy stop", modbus_proxy.stop())

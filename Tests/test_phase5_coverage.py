@@ -912,10 +912,13 @@ async def test_select_select_option_writes(
 
     select_entity = entities[0]
     select_entity.coordinator.async_write_data = AsyncMock(return_value=True)
+    select_entity.coordinator.async_request_refresh = AsyncMock()
     select_entity.hass = hass
     select_entity.async_write_ha_state = MagicMock()
     await select_entity.async_select_option("Battery:SmartBatteryControl:Enable")
     await select_entity.async_select_option("None")
+    # The new option is read back at once instead of after the next poll.
+    assert select_entity.coordinator.async_request_refresh.await_count == 2
 
 
 @pytest.mark.asyncio

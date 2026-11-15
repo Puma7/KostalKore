@@ -257,15 +257,20 @@ class BatterySohCalculator:
             return False
         self._current_capacity_wh = cap
 
-        charge_wh = _opt_float(data.get("total_dc_charge")) or 0.0
-        discharge_wh = _opt_float(data.get("total_dc_discharge")) or 0.0
+        # A missing counter (failed slow ENERGY read; capacity is a fast
+        # register) is unknown, not 0 kWh: a (0 kWh, cap) sample would anchor
+        # the throughput regression at zero for weeks.
+        charge_wh = _opt_float(data.get("total_dc_charge"))
+        discharge_wh = _opt_float(data.get("total_dc_discharge"))
         # Use only discharge as the throughput axis. Each cycle increments
         # both charge and discharge by roughly equal amounts (modulo
         # round-trip losses); summing both double-counts. Discharge alone
         # is what battery vendors and academic papers use for cycle-life.
-        discharge_kwh = discharge_wh / 1000.0
-        self._latest_discharge_kwh = discharge_kwh
-        self._latest_charge_kwh = charge_wh / 1000.0
+        discharge_kwh = discharge_wh / 1000.0 if discharge_wh is not None else None
+        if discharge_kwh is not None:
+            self._latest_discharge_kwh = discharge_kwh
+        if charge_wh is not None:
+            self._latest_charge_kwh = charge_wh / 1000.0
 
         cycles = _opt_float(data.get("battery_cycles"))
         if cycles is not None:
@@ -290,7 +295,7 @@ class BatterySohCalculator:
 
         # Always record on the first observation so the sample buffer has
         # an anchor point even on systems where time.monotonic() starts low.
-        if (
+        if discharge_kwh is not None and (
             self._last_sample_mono == 0.0
             or now_mono - self._last_sample_mono >= _SAMPLE_MIN_INTERVAL_S
         ):

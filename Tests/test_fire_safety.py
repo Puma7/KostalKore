@@ -388,6 +388,24 @@ class TestFireSafetyMonitor:
         ctrl_alerts = m._check_controller_thermal({"controller_temp": 79.0}, 300.0)
         assert any(a.category == "controller_thermal" for a in ctrl_alerts)
 
+    def test_short_history_after_restart_raises_no_rate_alert(self) -> None:
+        """Two 0.1 steps in 10 s are not "6 V/5min" or "3 °C/5min"."""
+        m = FireSafetyMonitor()
+        m._bat_temp_history.extend([(0.0, 45.5), (5.0, 45.6), (10.0, 45.6)])
+        m._bat_voltage_history.extend([(0.0, 400.0), (5.0, 400.1), (10.0, 400.2)])
+        assert m._check_battery_thermal(
+            {"battery_temperature": 45.6, "battery_voltage": 400.2}, 10.0
+        ) == []
+        m._ctrl_temp_history.extend([(0.0, 75.5), (5.0, 75.6), (10.0, 75.7)])
+        assert m._check_controller_thermal({"controller_temp": 75.7}, 10.0) == []
+
+    def test_rate_of_change_min_span(self) -> None:
+        from collections import deque
+
+        samples: deque[tuple[float, float]] = deque([(0.0, 1.0), (60.0, 2.0), (120.0, 3.0)])
+        assert _rate_of_change(samples, 300.0) == 5.0
+        assert _rate_of_change(samples, 300.0, min_span_s=150.0) is None
+
     def test_clear_stale_alerts_keeps_recent_non_thermal_and_unknown_level_defaults_safe(self) -> None:
         import time as _time
 

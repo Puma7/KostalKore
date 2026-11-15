@@ -29,6 +29,7 @@ from typing import Any, Final
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory, UnitOfPower
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .battery_reg_1038_owner import (
@@ -51,6 +52,8 @@ MIN_CHARGE_POWER_W: Final[float] = 100.0
 
 class GridFeedInLimiterSwitch(SwitchEntity):
     """Switch to enable dynamic battery charge limiting for grid feed-in optimization."""
+
+    _unloading: bool = False  # class default for objects built without __init__
 
     _attr_has_entity_name = True
     _english_name = "Grid Feed-In Optimizer"
@@ -77,6 +80,9 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         self._current_charge_limit: float = 0.0
         self._original_charge_limit: float | None = None
         self._restore_handled_in_turn_off: bool = False
+        # Set once the entry unload has restored REG 1038: a turn-on after
+        # that would write a limit nobody restores (the client closes next).
+        self._unloading: bool = False
 
     @property
     def is_on(self) -> bool:
@@ -100,6 +106,12 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         }
 
     def set_feed_in_limit(self, watts: float) -> None:
+        if not math.isfinite(watts):
+            # min()/max() keep a NaN operand, which would make the cap NaN and
+            # every surplus comparison False.
+            raise ServiceValidationError(
+                f"Feed-in limit must be a finite number of watts, got {watts!r}"
+            )
         self._feed_in_limit_w = max(0.0, min(self._device_power_limit_w, watts))
         _LOGGER.info("Grid feed-in limit set to %.0f W", self._feed_in_limit_w)
 
@@ -119,10 +131,20 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             _LOGGER.debug("Could not snapshot charge limit: %s", err)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        if self._unloading:
+            raise HomeAssistantError("KOSTAL KORE is unloading")
+        if self._is_on and self._task is not None and not self._task.done():
+            # Already running. Restarting would cancel the loop without
+            # awaiting it, and its finally would restore and release REG 1038
+            # under the new loop.
+            self.async_write_ha_state()
+            return
         self._restore_handled_in_turn_off = False
-        await self._snapshot_charge_limit()
+        # Acquire before the snapshot: a refused turn-on must not keep the
+        # value the current owner wrote, or a later turn-off restores it.
         acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         try:
+            await self._snapshot_charge_limit()
             self._is_on = True
             self._start_control()
             self.async_write_ha_state()
@@ -134,6 +156,7 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                     await task
                 except asyncio.CancelledError:
                     pass
+            self._original_charge_limit = None  # discard snapshot on failure
             release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
             raise
         _LOGGER.info("Grid Feed-In Optimizer ON (limit=%.0f W)", self._feed_in_limit_w)
@@ -145,6 +168,12 @@ class GridFeedInLimiterSwitch(SwitchEntity):
         return limit
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        if not self._is_on:
+            # Already off (or the control loop is restoring after an error):
+            # REG 1038 is not ours, so writing the device maximum would
+            # override whichever feature owns it now.
+            self.async_write_ha_state()
+            return
         self._is_on = False
         # Set before any await: cancelled _control_loop finally can run during
         # _write_charge_limit; without this it would call _restore_limit() again
@@ -157,8 +186,12 @@ class GridFeedInLimiterSwitch(SwitchEntity):
             except asyncio.CancelledError:
                 pass
         restore = self._restore_limit()
-        await self._write_charge_limit(restore)
-        release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+        try:
+            await self._write_charge_limit(restore)
+        finally:
+            # Also when cancelled mid-write: the switch is off now, so nothing
+            # else would release REG 1038.
+            release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
         self._current_charge_limit = 0.0
         self._modbus_read_failed_cycles = 0
         self.async_write_ha_state()
@@ -295,12 +328,28 @@ class GridFeedInLimiterSwitch(SwitchEntity):
                 _LOGGER.warning("Grid limiter write failed: %s", err)
 
     async def async_will_remove_from_hass(self) -> None:
-        self._cancel_control()
-        if self._is_on:
-            self._is_on = False
-            await self._write_charge_limit(self._restore_limit())
-            release_reg_1038(self.hass, self._entry_id, OWNER_GRID_FEEDIN)
+        await self.async_release_for_unload()
         await super().async_will_remove_from_hass()
+
+    async def async_release_for_unload(self) -> None:
+        """Restore REG 1038 and release it while the Modbus client is still open.
+
+        Called by the entry unload before the coordinator shuts the client down,
+        and again (as a no-op) when the entity is removed.
+        """
+        self._unloading = True
+        if self._is_on:
+            await self.async_turn_off()
+            return
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            # Off but the loop is still in its finally, restoring REG 1038
+            # after an error: let that restore finish instead of cancelling it.
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     def async_entity_id_changed(self, old_entity_id: str) -> None:
         """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""

@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.22] - 2026-11-15
+
+### Fixed
+- Battery features only restore the registers they changed (REG 1034/1038/1040):
+  - Stopping an idle SoC controller (every reload or unload, and Target SoC
+    set below 10 %) no longer writes REG 1038 and 1040. Before, it set both to
+    the device maximum, which lifted an active *Block Battery Charging* and
+    dropped the discharge limit you had set.
+  - Ending a SoC session restores REG 1038 once, to the value read at the
+    start. Before, `stop()` restored a second time with the snapshot already
+    used up and wrote the device maximum. A battery-temperature pause keeps the
+    snapshot. The controller no longer writes REG 1040, which it never changes.
+  - A refused *Block Battery Charging* or *Grid Feed-In Optimizer* turn-on no
+    longer remembers the other feature's REG 1038 value. Before, a later
+    turn-off "restored" it, for example 0 W, which kept charging blocked with
+    no switch on.
+  - Turning either switch off while it is already off writes nothing. Before,
+    it wrote the device maximum to REG 1038 although another feature held it.
+  - On reload or unload both switches restore REG 1038 before the Modbus
+    connection closes. Before, the restore ran after it and never reached the
+    inverter.
+  - A battery test that is refused (REG 1038 taken by another feature)
+    writes nothing. Before, it reset REG 1034/1038/1040 to 20000 W. A test that
+    stops after the pre-flight's own write check restores the limits read at
+    its start, and does so before it releases REG 1038.
+- Turning on the *Grid Feed-In Optimizer* while it is already running (which
+  automations do) is a no-op. Before, the old control loop restored and
+  released REG 1038 while the new loop kept writing.
+- A Target SoC set while the controller is stopping is no longer lost: setting
+  the target and stopping run one at a time. Once a reload or unload has
+  restored REG 1038, both switches refuse a turn-on until the entry is set up
+  again. Cancelling a turn-off, a SoC stop or a battery test during the restore
+  still releases REG 1038.
+- The *Block Battery Charging* keepalive keeps running after a failed write
+  (for example the nightly `Server device failure`) and blocks again once the
+  inverter answers. Before, one failed write ended it while the switch still
+  showed on.
+- A non-finite value (`nan`, `inf`, e.g. from a template) for Target SoC, the
+  SoC controller's charge/discharge power or the feed-in limit is rejected.
+  Before, NaN started grid charging to 95 % or set the device maximum.
+- An IPv6 inverter address works: the device link is `http://[2001:db8::5]`.
+  Before, the invalid `http://2001:db8::5` made Home Assistant reject every
+  entity of the entry.
+- *Total Grid Consumption* and *Battery Charge Total* fetch their inputs
+  themselves. Before, they stayed unknown once the raw statistic sensors they
+  are summed from were disabled.
+- Grid-code settings with a 0.01 or 0.1 step (cos φ, voltages, frequencies,
+  K factors) are read back with their decimals. Before, 0.35 showed as 0 and
+  the inverter's own min/max were rounded too.
+- The battery-mode select shows the new mode right after a change instead of
+  snapping back until the next poll.
+- The debug bundle redacts the battery serial number from the REST snapshot
+  (`BatSerialNo`, `Properties:SerialNo`).
+- A missing battery discharge counter (failed slow read) no longer records a
+  0 kWh State-of-Health sample, which skewed the degradation trend for weeks.
+- The fire-safety rate alarms for battery temperature, battery voltage and
+  controller temperature need at least 2.5 minutes of data. Before, a single
+  0.1 step right after a restart counted as "6 V/5min" or "3 °C/5min".
+- The migration and orphan-history services are removed when the last entry
+  unloads.
+- Modbus, proxy and KSEM ports are limited to 1–65535 in the options. An
+  out-of-range proxy port stored before is logged and skipped instead of
+  failing the whole setup.
+
 ## [3.0.21] - 2026-11-13
 
 ### Fixed

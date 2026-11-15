@@ -63,6 +63,9 @@ DISCOVERY_MAX_AUTH_ATTEMPTS: Final[int] = 8
 
 # Modbus options constants
 DEFAULT_MODBUS_PROXY_PORT: Final[int] = 5502
+# A TCP port. asyncio raises OverflowError (not OSError) outside 0-65535, which
+# used to escape the proxy start and fail the whole entry setup.
+_PORT: Final = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
 
 
 class NoDiscoveredInverterError(Exception):
@@ -162,7 +165,7 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_MODBUS_PORT,
                 default=defaults.get(CONF_MODBUS_PORT, DEFAULT_MODBUS_PORT),
-            ): int,
+            ): _PORT,
             vol.Optional(
                 CONF_MODBUS_UNIT_ID,
                 default=defaults.get(CONF_MODBUS_UNIT_ID, DEFAULT_MODBUS_UNIT_ID),
@@ -182,7 +185,7 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_MODBUS_PROXY_PORT,
                 default=defaults.get(CONF_MODBUS_PROXY_PORT, DEFAULT_MODBUS_PROXY_PORT),
-            ): int,
+            ): _PORT,
             vol.Optional(
                 CONF_MODBUS_PROXY_BIND,
                 default=defaults.get(CONF_MODBUS_PROXY_BIND, DEFAULT_MODBUS_PROXY_BIND),
@@ -202,7 +205,7 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_KSEM_PORT,
                 default=defaults.get(CONF_KSEM_PORT, DEFAULT_KSEM_PORT),
-            ): int,
+            ): _PORT,
             vol.Optional(
                 CONF_KSEM_UNIT_ID,
                 default=defaults.get(CONF_KSEM_UNIT_ID, DEFAULT_KSEM_UNIT_ID),

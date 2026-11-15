@@ -317,6 +317,20 @@ class PlenticoreDataSelect(
                     "Rollback also failed for %s: %s", self.entity_id, rb_err,
                 )
             raise
+        # current_option reads the coordinator snapshot, which still holds the
+        # old mode until the next poll (30-90 s); without a refresh the UI snaps
+        # back and the change looks like it failed.
+        try:
+            await self.coordinator.async_request_refresh()
+        except (
+            ApiException,
+            ClientError,
+            TimeoutError,
+            asyncio.TimeoutError,
+            UpdateFailed,
+            RuntimeError,
+        ) as err:
+            _LOGGER.debug("Select refresh after write failed: %s", err)
         self.async_write_ha_state()
 
     @property
