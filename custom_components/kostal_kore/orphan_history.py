@@ -250,7 +250,7 @@ async def apply_orphan_mapping(
     pointing orphans at unrelated integrations.
     """
     from .migration_services import (
-        _copy_legacy_history_sync,
+        _async_run_history_copy,
         _detect_recorder_backend,
         _get_recorder_instance,
     )
@@ -296,11 +296,7 @@ async def apply_orphan_mapping(
     if not accepted or dry_run:
         return report
 
-    summary = await recorder_instance.async_add_executor_job(
-        _copy_legacy_history_sync,
-        recorder_instance,
-        accepted,
-    )
+    summary = await _async_run_history_copy(recorder_instance, accepted)
     report.applied_mappings = summary.applied_mappings
     report.states_rows_moved = summary.states_rows_moved
     report.statistics_rows_moved = summary.statistics_rows_moved

@@ -310,10 +310,12 @@ async def test_apply_orphan_mapping_dry_run_does_not_call_executor(
     )
 
     executor_mock = AsyncMock()
+    queue_task_mock = MagicMock()
     fake_recorder = SimpleNamespace(
         recording=True,
         db_url="sqlite:///memory:",
         async_add_executor_job=executor_mock,
+        queue_task=queue_task_mock,
     )
     with patch(
         "custom_components.kostal_kore.migration_services._get_recorder_instance",
@@ -325,6 +327,7 @@ async def test_apply_orphan_mapping_dry_run_does_not_call_executor(
             dry_run=True,
         )
     executor_mock.assert_not_called()
+    queue_task_mock.assert_not_called()
     assert report.dry_run is True
     assert report.applied_mappings == 0
 
@@ -332,7 +335,7 @@ async def test_apply_orphan_mapping_dry_run_does_not_call_executor(
 async def test_apply_orphan_mapping_apply_invokes_existing_copy_engine(
     hass: HomeAssistant,
 ) -> None:
-    """When dry_run is False, the existing _copy_legacy_history_sync engine is called."""
+    """When dry_run is False, the shared recorder-thread copy engine is called."""
     from homeassistant.helpers import entity_registry as er
 
     registry = er.async_get(hass)
@@ -349,22 +352,28 @@ async def test_apply_orphan_mapping_apply_invokes_existing_copy_engine(
         statistics_rows_moved=7,
         short_term_rows_moved=3,
     )
-    executor_mock = AsyncMock(return_value=fake_summary)
-    fake_recorder = SimpleNamespace(
-        recording=True,
-        db_url="sqlite:///memory:",
-        async_add_executor_job=executor_mock,
-    )
-    with patch(
-        "custom_components.kostal_kore.migration_services._get_recorder_instance",
-        return_value=fake_recorder,
+    run_copy_mock = AsyncMock(return_value=fake_summary)
+    fake_recorder = SimpleNamespace(recording=True, db_url="sqlite:///memory:")
+    with (
+        patch(
+            "custom_components.kostal_kore.migration_services._get_recorder_instance",
+            return_value=fake_recorder,
+        ),
+        patch(
+            "custom_components.kostal_kore.migration_services._async_run_history_copy",
+            run_copy_mock,
+        ),
     ):
         report = await apply_orphan_mapping(
             hass,
             {"sensor.kostal_plenticore_pv_power": "sensor.kore_pv_power"},
             dry_run=False,
         )
-    executor_mock.assert_awaited_once()
+    # The copy runs as a recorder-thread job, not in a plain executor session.
+    run_copy_mock.assert_awaited_once_with(
+        fake_recorder,
+        [("sensor.kostal_plenticore_pv_power", "sensor.kore_pv_power")],
+    )
     assert report.dry_run is False
     assert report.applied_mappings == 1
     assert report.states_rows_moved == 42
