@@ -19,6 +19,13 @@ logger:
 - **Invalid authentication:** the password is the one of the inverter's web
   interface. The service code is optional and only needed for installer
   settings.
+- **Password changed after setup:** when the inverter rejects the stored
+  password, at startup or while polling, KORE stops sending requests (each
+  failed login counts towards the inverter's lockout) and Home Assistant asks
+  for re-authentication under **Settings → Devices & services**. Enter the new
+  password there; the entry reloads with it. The host stays the same, and an
+  empty service code keeps the stored one. Older versions showed the repair
+  issue *Authentication failed* instead, whose **Fix** button only deleted it.
 - **Timeouts:** the inverter answers only a limited number of requests at a
   time and is busy during updates and maintenance. KORE serialises its own
   requests; other tools polling the inverter at the same time make timeouts more

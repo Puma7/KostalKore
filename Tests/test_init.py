@@ -100,7 +100,7 @@ async def test_setup_fails_for_good_on_wrong_credentials(
     mock_config_entry: MockConfigEntry,
     mock_plenticore_client,
 ) -> None:
-    """A rejected password is not retried; the repair issue asks for new credentials."""
+    """A rejected password is not retried (see test_reauth.py for the reauth flow)."""
     mock_plenticore_client.login.side_effect = AuthenticationException(400, "bad password")
     mock_config_entry.add_to_hass(hass)
 

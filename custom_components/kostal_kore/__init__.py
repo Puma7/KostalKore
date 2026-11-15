@@ -25,7 +25,7 @@ from typing import Final
 from aiohttp.client_exceptions import ClientError
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .battery_chemistry import detect_chemistry
@@ -212,6 +212,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
         setup_success = await asyncio.wait_for(
             plenticore.async_setup(), timeout=SETUP_TIMEOUT_SECONDS
         )
+    except ConfigEntryAuthFailed:
+        # Wrong password: HA marks the entry SETUP_ERROR, stops retrying and
+        # starts the reauth flow, which reloads the entry with the new password.
+        trace.phase_end("login", success=False)
+        await plenticore.async_unload()
+        trace.phase_end("setup_entry", success=False, reason="ConfigEntryAuthFailed")
+        _log_setup_metrics(start_time, False, trace)
+        raise
     except (ConfigEntryNotReady, TimeoutError, ClientError) as err:
         # The inverter is unreachable or slow to answer (e.g. it is still booting
         # after a power cut): let Home Assistant retry instead of failing for good.
@@ -279,6 +287,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenticoreConfigEntry) -
     trace.phase_begin("event_coordinator_first_refresh")
     try:
         await event_coordinator.async_config_entry_first_refresh()
+    except ConfigEntryAuthFailed:
+        # The first refresh re-raises instead of starting reauth itself, and
+        # this coordinator stops polling after an auth failure.
+        entry.async_start_reauth(hass)
     except Exception as event_err:
         _LOGGER.debug("Initial event refresh failed (non-fatal): %s", event_err)
     trace.phase_end("event_coordinator_first_refresh")

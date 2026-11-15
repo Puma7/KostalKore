@@ -17,7 +17,11 @@ from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -55,7 +59,6 @@ from .pykoplenti import (
 from .repairs import (
     clear_issue,
     create_api_unreachable_issue,
-    create_auth_failed_issue,
     create_inverter_busy_issue,
 )
 
@@ -122,6 +125,11 @@ def _process_value_text(value: Any) -> str:
 
 class Plenticore:
     """Manages the Plenticore API."""
+
+    # Class-level defaults: set once the inverter rejects the stored
+    # credentials; a reload after reauth starts with a fresh instance.
+    _credentials_rejected: bool = False
+    _credential_check_lock: asyncio.Lock | None = None
 
     def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
         """Create a new plenticore manager instance."""
@@ -209,6 +217,65 @@ class Plenticore:
         """Return the Plenticore API client."""
         return cast(ApiClient, self._client)
 
+    def raise_if_credentials_rejected(self) -> None:
+        """Stop polling once the inverter has rejected the stored credentials.
+
+        Every further request would only repeat a failed login (each one counts
+        towards the inverter's lockout), so coordinators call this before they
+        poll.
+        """
+        if self._credentials_rejected:
+            raise ConfigEntryAuthFailed(
+                f"Inverter {self.host} rejected the stored credentials"
+            )
+
+    async def async_raise_if_credentials_rejected(
+        self, err: AuthenticationException
+    ) -> None:
+        """Raise ConfigEntryAuthFailed if ``err`` means the password is wrong.
+
+        pykoplenti raises ``AuthenticationException`` for every HTTP 400, also
+        for a bad data request, and its automatic re-login turns a rejected
+        password into the same exception. A login with a separate client
+        tells the two apart without touching the polling client's session.
+        """
+        if self._credential_check_lock is None:
+            self._credential_check_lock = asyncio.Lock()
+        async with self._credential_check_lock:
+            if not self._credentials_rejected:
+                self._credentials_rejected = await self._async_login_rejected()
+        if self._credentials_rejected:
+            _LOGGER.error(
+                "Inverter %s rejected the stored credentials; "
+                "re-authentication is required",
+                self.host,
+            )
+            raise ConfigEntryAuthFailed(
+                f"Inverter {self.host} rejected the stored credentials"
+            ) from err
+
+    async def _async_login_rejected(self) -> bool:
+        """Return True if a fresh login with the stored credentials fails."""
+        session = (
+            self._client.websession
+            if self._client is not None
+            else async_get_clientsession(self.hass)
+        )
+        try:
+            async with ApiClient(session, host=self.host) as probe:
+                await asyncio.wait_for(
+                    probe.login(
+                        self.config_entry.data[CONF_PASSWORD],
+                        service_code=self.config_entry.data.get(CONF_SERVICE_CODE),
+                    ),
+                    timeout=15.0,
+                )
+        except AuthenticationException:
+            return True
+        except Exception as err:  # noqa: BLE001 - inconclusive, keep polling
+            _LOGGER.debug("Credential check for %s was inconclusive: %s", self.host, err)
+        return False
+
     def arm_advanced_writes(
         self, ttl_seconds: int = ADVANCED_WRITE_ARM_TTL_SECONDS
     ) -> None:
@@ -290,11 +357,17 @@ class Plenticore:
             create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
             raise ConfigEntryNotReady("Login timed out") from timeout_err  # GEÄNDERT
         except AuthenticationException as err:
+            # Retrying cannot help: HA marks the entry SETUP_ERROR and starts
+            # the reauth flow, which asks for the new password.
             _LOGGER.error(
-                "Authentication exception connecting to %s: %s", self.host, err
+                "Inverter %s rejected the stored credentials: %s", self.host, err
             )
-            create_auth_failed_issue(self.hass, entry_id=self.config_entry.entry_id)
-            return False
+            # Older versions raised a repair issue instead; the reauth
+            # flow supersedes it.
+            clear_issue(self.hass, "auth_failed", entry_id=self.config_entry.entry_id)
+            raise ConfigEntryAuthFailed(
+                f"Inverter {self.host} rejected the stored credentials"
+            ) from err
         except (ClientError, TimeoutError) as err:
             _LOGGER.error("Error connecting to %s", self.host)
             create_api_unreachable_issue(self.hass, entry_id=self.config_entry.entry_id)
@@ -516,6 +589,19 @@ class Plenticore:
             _LOGGER.debug("Error during logout from %s: %s", self.host, err)
         finally:
             self._client = None
+
+
+def _raise_if_credentials_rejected(plenticore: Plenticore) -> None:
+    """Raise ConfigEntryAuthFailed before polling with rejected credentials."""
+    check = getattr(plenticore, "raise_if_credentials_rejected", None)
+    if callable(check):
+        check()
+
+
+async def _async_raise_on_auth_failure(plenticore: Plenticore, err: Exception) -> None:
+    """Turn a rejected re-login during polling into ConfigEntryAuthFailed."""
+    if isinstance(err, AuthenticationException):
+        await plenticore.async_raise_if_credentials_rejected(err)
 
 
 class DataUpdateCoordinatorMixin:
@@ -965,8 +1051,9 @@ class ProcessDataUpdateCoordinator(
         self._communication_roundtrip_ok = False
         self.fresh_fields.clear()
         try:
+            _raise_if_credentials_rejected(self._plenticore)
             result = await self._async_fetch_process_data()
-        except UpdateFailed:
+        except (UpdateFailed, ConfigEntryAuthFailed):
             self.communication_stale = True
             await self._report_rest_result(False)
             raise
@@ -1028,6 +1115,7 @@ class ProcessDataUpdateCoordinator(
             self._record_failure()
             raise UpdateFailed("Timeout fetching process data") from timeout_err
         except (ApiException, ClientError, TimeoutError, KeyError) as err:
+            await _async_raise_on_auth_failure(self._plenticore, err)
             # KeyError: pykoplenti's virtual PV sums raised it when the inverter
             # briefly omitted a requested value (e.g. pv1 'P' for a few seconds
             # around 03:10, home-assistant/core#183701). The bundled copy now
@@ -1223,8 +1311,9 @@ class SettingDataUpdateCoordinator(
         """Keep last values for display, but expose failed setting reads."""
         self._communication_roundtrip_ok = False
         try:
+            _raise_if_credentials_rejected(self._plenticore)
             result = await self._async_fetch_settings()
-        except UpdateFailed:
+        except (UpdateFailed, ConfigEntryAuthFailed):
             self.communication_stale = True
             await self._report_rest_result(False)
             raise
@@ -1266,6 +1355,7 @@ class SettingDataUpdateCoordinator(
             self._record_success()
             return result
         except (ApiException, ClientError, TimeoutError) as err:
+            await _async_raise_on_auth_failure(self._plenticore, err)
             error_msg = str(err)
             # GEÄNDERT: _record_failure() NICHT mehr unbedingt aufrufen. Bei
             # erfolgreichem 503-Fallback (cached data returned) wurde der
@@ -1407,6 +1497,7 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if client is None:
             return self._last_result
 
+        _raise_if_credentials_rejected(self._plenticore)
         try:
             events = list(await client.get_events(max_count=25))
             events.sort(key=lambda e: e.start_time, reverse=True)
@@ -1449,6 +1540,7 @@ class EventDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return result
 
         except (ApiException, ClientError, TimeoutError) as err:
+            await _async_raise_on_auth_failure(self._plenticore, err)
             error_msg = str(err)
             if "internal communication error" in error_msg.lower() or "[503]" in error_msg:
                 _LOGGER.debug("Event fetch busy (503), using last event snapshot")
@@ -1556,6 +1648,7 @@ class SelectDataUpdateCoordinator(
         if self._plenticore.client is None:
             return {}
 
+        _raise_if_credentials_rejected(self._plenticore)
         _LOGGER.debug("Fetching select %s for %s", self.name, self._fetch)
 
         # Snapshot fetch map to avoid RuntimeError when entities are added/removed
@@ -1603,6 +1696,7 @@ class SelectDataUpdateCoordinator(
                     if (hass := getattr(self._plenticore, "hass", None)) is not None:
                         clear_issue(hass, "inverter_busy", entry_id=self._plenticore.config_entry.entry_id)
                 except (ApiException, ClientError, TimeoutError) as err:
+                    await _async_raise_on_auth_failure(self._plenticore, err)
                     error_msg = str(err)
                     if "[404]" in error_msg or "not found" in error_msg.lower():
                         _LOGGER.warning(
