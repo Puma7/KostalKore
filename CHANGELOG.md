@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     writes nothing. Before, it reset REG 1034/1038/1040 to 20000 W. A test that
     stops after the pre-flight's own write check restores the limits read at
     its start, and does so before it releases REG 1038.
+- Turning on the *Grid Feed-In Optimizer* while it is already running (which
+  automations do) is a no-op. Before, the old control loop restored and
+  released REG 1038 while the new loop kept writing.
+- A Target SoC set while the controller is stopping is no longer lost: setting
+  the target and stopping run one at a time. Once a reload or unload has
+  restored REG 1038, both switches refuse a turn-on until the entry is set up
+  again. Cancelling a turn-off, a SoC stop or a battery test during the restore
+  still releases REG 1038.
 - The *Block Battery Charging* keepalive keeps running after a failed write
   (for example the nightly `Server device failure`) and blocks again once the
   inverter answers. Before, one failed write ended it while the switch still
