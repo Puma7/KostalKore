@@ -218,14 +218,14 @@ class KostalMqttBridge:
         try:
             for reg in SAFE_WRITABLE_REGISTERS:
                 topic = f"{self._topic_base}/command/{reg.name}"
-                unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
+                unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined,unused-ignore]
                     self._hass, topic, self._handle_command, QOS,
                 )
                 self._unsub_command.append(unsub)
 
             for proxy_name in PROXY_COMMAND_MAP:
                 topic = f"{self._proxy_base}/command/{proxy_name}"
-                unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined]
+                unsub = await mqtt.async_subscribe(  # type: ignore[attr-defined,unused-ignore]
                     self._hass, topic, self._handle_proxy_command, QOS,
                 )
                 self._unsub_command.append(unsub)
@@ -239,7 +239,7 @@ class KostalMqttBridge:
             # Announce availability LAST, after everything is wired up, so a
             # failure in any step above never leaves a stale retained "online"
             # behind once the partial start is rolled back.
-            await mqtt.async_publish(  # type: ignore[attr-defined]
+            await mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
                 self._hass, f"{self._topic_base}/available", "online", QOS, retain=True,
             )
             self._started = True
@@ -307,7 +307,7 @@ class KostalMqttBridge:
                 # Time-bounded so teardown/cancellation can never hang on a
                 # dead broker; wait_for runs the publish in its own task.
                 await asyncio.wait_for(
-                    mqtt.async_publish(  # type: ignore[attr-defined]
+                    mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
                         self._hass, topic, payload, QOS, retain=True,
                     ),
                     timeout=2.0,
@@ -424,7 +424,7 @@ class KostalMqttBridge:
         if _has_mqtt(self._hass):
             from homeassistant.components import mqtt
 
-            await mqtt.async_publish(  # type: ignore[attr-defined]
+            await mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
                 self._hass, f"{self._topic_base}/available", "offline", QOS, retain=True,
             )
 
@@ -463,13 +463,13 @@ class KostalMqttBridge:
             except (TypeError, ValueError):
                 safe[key] = str(val)
 
-        await mqtt.async_publish(  # type: ignore[attr-defined]
+        await mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
             self._hass, f"{self._topic_base}/state",
             json.dumps(safe, default=str), QOS, retain=True,
         )
 
         publishes = [
-            mqtt.async_publish(  # type: ignore[attr-defined]
+            mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
                 self._hass,
                 f"{self._topic_base}/register/{key}",
                 json.dumps(val, default=str) if not isinstance(val, str) else val,
@@ -527,7 +527,7 @@ class KostalMqttBridge:
 
         for name, val in proxy_map.items():
             if val is not None:
-                await mqtt.async_publish(  # type: ignore[attr-defined]
+                await mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
                     self._hass, f"{self._proxy_base}/{name}", val, QOS, retain=True,
                 )
 
@@ -562,7 +562,7 @@ class KostalMqttBridge:
         for name, reg in PROXY_COMMAND_MAP.items():
             proxy_meta[name] = f"{self._proxy_base}/command/{name}"
 
-        await mqtt.async_publish(  # type: ignore[attr-defined]
+        await mqtt.async_publish(  # type: ignore[attr-defined,unused-ignore]
             self._hass, f"{self._topic_base}/config",
             json.dumps({
                 "device_id": self._device_id,

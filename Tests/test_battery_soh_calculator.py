@@ -545,3 +545,24 @@ def test_load_failure_keeps_calculator_empty():
 
     assert c.baseline_capacity_wh is None
     assert c.sample_count == 0
+
+
+def test_missing_discharge_counter_records_no_sample(calc):
+    """A failed slow read is unknown, not a (0 kWh, cap) sample."""
+    changed = calc.update_from_modbus({"battery_work_capacity": 35700.0})
+    assert changed is True  # the baseline is still set
+    assert calc.sample_count == 0
+    assert calc.total_throughput_kwh is None
+
+    calc.update_from_modbus({
+        "battery_work_capacity": 35700.0,
+        "total_dc_charge": 500_000.0,
+        "total_dc_discharge": 400_000.0,
+    })
+    assert calc.sample_count == 1
+    assert calc.total_throughput_kwh == pytest.approx(900.0)
+
+    # The counters drop out again: the last known values stay.
+    calc.update_from_modbus({"battery_work_capacity": 35600.0})
+    assert calc.sample_count == 1
+    assert calc.total_throughput_kwh == pytest.approx(900.0)

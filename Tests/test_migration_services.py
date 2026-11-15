@@ -63,6 +63,19 @@ async def test_unregister_migration_services_ignores_unloading_entry_id(
     assert not hass.services.has_service(DOMAIN, SERVICE_COPY_LEGACY_HISTORY)
 
 
+async def test_unregister_migration_services_ignores_bookkeeping_keys(
+    hass: HomeAssistant,
+) -> None:
+    """The last unload removes the services although "_entry_lifecycle" stays."""
+    async_register_migration_services(hass)
+    hass.data.setdefault(DOMAIN, {})["_entry_lifecycle"] = {"entry-a": {}}
+    hass.data[DOMAIN]["entry-a"] = {"mock": True}
+
+    async_unregister_migration_services_if_unused(hass, unloading_entry_id="entry-a")
+    assert not hass.services.has_service(DOMAIN, SERVICE_ADOPT_LEGACY_ENTITY_IDS)
+    assert not hass.services.has_service(DOMAIN, SERVICE_COPY_LEGACY_HISTORY)
+
+
 async def test_unregister_migration_services_keeps_services_with_other_entries(
     hass: HomeAssistant,
 ) -> None:

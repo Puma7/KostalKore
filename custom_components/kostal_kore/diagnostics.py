@@ -169,6 +169,10 @@ TO_REDACT: Final[set[str]] = {
     "serial_number",
     "battery_serial",
     "battery_serial_alt",
+    # REST process/setting ids: the battery serial is a default-enabled sensor
+    # and lands in the debug bundle's rest_snapshot under its process id.
+    "BatSerialNo",
+    "Properties:SerialNo",
     "network_name",
 }
 

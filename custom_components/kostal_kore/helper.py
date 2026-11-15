@@ -16,6 +16,7 @@ from typing import Any, Final, cast
 from aiohttp.client_exceptions import ClientError
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import Unauthorized, UnknownUser
+from yarl import URL
 
 from .const import CONF_INSTALLER_ACCESS, DOMAIN
 from .const_ids import ModuleId, SettingId
@@ -901,3 +902,17 @@ def ensure_installer_access(
     if hass is not None:
         clear_issue(hass, "installer_required", entry_id=getattr(entry, "entry_id", ""))
     return True
+
+
+def device_configuration_url(host: str) -> str | None:
+    """Return the inverter's web UI URL for the device registry, or None.
+
+    An IPv6 address needs brackets in a URL (``http://[2001:db8::5]``); the
+    plain ``f"http://{host}"`` is rejected by the device registry, and then
+    every entity of the entry fails to be added. A host yarl cannot build a
+    URL from is left without a link instead.
+    """
+    try:
+        return str(URL.build(scheme="http", host=str(host).strip()))
+    except (TypeError, ValueError):
+        return None

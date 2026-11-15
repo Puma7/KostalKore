@@ -172,6 +172,11 @@ async def _get_settings_data_safe(plenticore: Any, operation: str) -> dict[str, 
         return _handle_number_error(err, operation)
 
 
+def _read_format(step: float) -> str:
+    """Formatter for reading a setting back: keep decimals for a step below 1."""
+    return "format_float" if step < 1 else "format_round"
+
+
 def create_battery_number_description(
     key: str,
     name: str,
@@ -203,14 +208,17 @@ def create_battery_number_description(
         name=name,
         native_unit_of_measurement=unit,
         native_max_value=max_value or BATTERY_MAX_POWER_WATTS,
-        native_min_value=min_value or BATTERY_MIN_POWER_WATTS,
+        # "is None", not "or": an explicit minimum of 0 must stay 0.
+        native_min_value=(
+            BATTERY_MIN_POWER_WATTS if min_value is None else min_value
+        ),
         native_step=step or BATTERY_POWER_STEP_WATTS,
         entity_category=CONFIG_ENTITY_CATEGORY,
         entity_registry_enabled_default=DEFAULT_ENTITY_REGISTRY_ENABLED,
         icon=icon or "mdi:battery",
         module_id=ModuleId.DEVICES_LOCAL,
         data_id=data_id or key,
-        fmt_from="format_round",
+        fmt_from=_read_format(step or BATTERY_POWER_STEP_WATTS),
         fmt_to="format_round_back",
     )
 
@@ -258,7 +266,7 @@ def create_power_number_description(
         icon=icon or "mdi:flash",
         module_id=ModuleId.DEVICES_LOCAL,
         data_id=data_id or key,
-        fmt_from="format_round",
+        fmt_from=_read_format(step or DEFAULT_POWER_STEP_WATTS),
         fmt_to="format_round_back",
     )
 
@@ -721,7 +729,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="ActivePower:ExtCtrlP:P_fine",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     # Inverter Control Settings
@@ -769,7 +777,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.01,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="ReactivePower:FixCosPhi:DeltaCosPhi",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -858,7 +866,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:KFactorLvrt",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -872,7 +880,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:KFactorHvrt",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -947,7 +955,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="LvrtHvrt:GradientAndTime",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     # Power of Frequency Settings
@@ -963,7 +971,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:NominalFrequency",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -978,7 +986,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:ReductionStartFrequency",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -993,7 +1001,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:ReductionEndFrequency",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -1008,7 +1016,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.1,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfF:DelayReactionTime",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     # Power of Voltage Settings
@@ -1023,7 +1031,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.01,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfU:ReductionStartVoltage",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(
@@ -1037,7 +1045,7 @@ NUMBER_SETTINGS_DATA = [
         native_step=0.01,
         module_id=ModuleId.DEVICES_LOCAL,
         data_id="POfU:ReductionEndVoltage",
-        fmt_from="format_round",
+        fmt_from="format_float",
         fmt_to="format_round_back",
     ),
     PlenticoreNumberEntityDescription(

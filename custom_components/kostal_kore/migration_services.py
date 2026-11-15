@@ -719,8 +719,12 @@ def async_unregister_migration_services_if_unused(
 
     active_entry_ids = {
         str(entry_id)
-        for entry_id in domain_data
-        if unloading_entry_id is None or str(entry_id) != unloading_entry_id
+        for entry_id, store in domain_data.items()
+        # Skip bookkeeping keys such as "_entry_lifecycle", which stay after
+        # the last entry unloads; only per-entry stores (dicts) count.
+        if not str(entry_id).startswith("_")
+        and isinstance(store, dict)
+        and (unloading_entry_id is None or str(entry_id) != unloading_entry_id)
     }
     if active_entry_ids:
         return
