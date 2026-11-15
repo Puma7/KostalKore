@@ -307,3 +307,67 @@ async def test_refused_battery_test_writes_nothing() -> None:
 
     assert coord.writes == []
     assert get_reg_1038_owner_manager(hass, ENTRY).current == OWNER_CHARGE_BLOCK
+
+
+@pytest.mark.asyncio
+async def test_battery_test_rejected_after_its_write_check_restores_the_snapshot() -> None:
+    """The pre-flight writes 1034/1038/1040 itself, so a rejection must restore."""
+    from custom_components.kostal_kore.battery_test import PreFlightResult
+
+    coord = _Registers()
+    hass = _hass()
+    suite = BatteryTestSuite(coord, hass=hass, entry_id=ENTRY)  # type: ignore[arg-type]
+
+    async def _preflight(_phases: object) -> PreFlightResult:
+        suite._original_charge_limit = 3000.0
+        suite._original_discharge_limit = 2000.0
+        await suite._wr("bat_charge_dc_abs_power", 0.0)
+        await suite._wr("bat_max_charge_limit", 20000.0)
+        await suite._wr("bat_max_discharge_limit", 20000.0)
+        return PreFlightResult(ok=False, errors=["SoC 99% → zu hoch für Laden"])
+
+    with patch.object(suite, "_preflight", side_effect=_preflight), patch.object(
+        suite, "_notify", new=AsyncMock()
+    ), patch.object(suite, "_flush_debug", new=AsyncMock()):
+        await suite.run()
+
+    assert coord.values["bat_max_charge_limit"] == 3000.0
+    assert coord.values["bat_max_discharge_limit"] == 2000.0
+    assert coord.values["bat_charge_dc_abs_power"] == 0.0
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [asyncio.CancelledError(), OSError("timeout")])
+async def test_charge_block_turn_on_that_fails_or_is_cancelled_releases_reg_1038(
+    error: BaseException,
+) -> None:
+    coord = _Registers()
+    hass = _hass()
+    switch = _charge_block(coord, hass)
+
+    with patch.object(
+        switch, "_snapshot_charge_limit", new=AsyncMock(side_effect=error)
+    ), pytest.raises((asyncio.CancelledError, HomeAssistantError)):
+        await switch.async_turn_on()
+
+    assert not switch.is_on
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None
+
+
+@pytest.mark.asyncio
+async def test_failed_repeat_turn_on_keeps_an_active_charge_block() -> None:
+    coord = _Registers({"bat_max_charge_limit": 3000.0})
+    hass = _hass()
+    switch = _charge_block(coord, hass)
+    with patch.object(switch, "_start_keepalive"):
+        await switch.async_turn_on()
+
+    with patch.object(
+        switch, "_write_block", new=AsyncMock(side_effect=OSError("busy"))
+    ), pytest.raises(HomeAssistantError):
+        await switch.async_turn_on()
+
+    assert switch.is_on
+    assert switch._original_charge_limit == 3000.0
+    assert get_reg_1038_owner_manager(hass, ENTRY).current == OWNER_CHARGE_BLOCK

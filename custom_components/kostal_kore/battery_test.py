@@ -115,6 +115,7 @@ DEFAULT_PHASES: Final[list[TestPhase]] = [
 class BatteryTestSuite:
 
     _DEFAULT_LIMIT_W: Final = 20000.0
+    _registers_written: bool = False
 
     def __init__(
         self, coordinator: ModbusDataUpdateCoordinator, hass: Any = None,
@@ -166,6 +167,9 @@ class BatteryTestSuite:
         if not reg:
             self._d(f"WR {name} FAIL:unknown")
             return False
+        # Set before the attempt: a write that timed out may still have
+        # reached the inverter, so the run must restore afterwards.
+        self._registers_written = True
         try:
             await self._coord.async_write_register(reg, value)
             self._d(f"WR {name}({reg.address})={value} OK")
@@ -272,10 +276,12 @@ class BatteryTestSuite:
         self._dbg.clear()
         results: list[PhaseResult] = []
         reg_1038_acquired = False
-        # Only a test that reached its phases has written registers. A refused
-        # or failed pre-flight must not reset REG 1034/1038/1040: no snapshot
-        # exists yet, and another feature may own REG 1038.
-        phases_started = False
+        # Only a run that wrote a register restores them: the pre-flight's own
+        # write check already does, after its snapshot. A run refused before
+        # that (REG 1038 taken, checks failed) must not reset REG
+        # 1034/1038/1040: there is no snapshot, and another feature may own
+        # REG 1038.
+        self._registers_written = False
         if phases is None:
             phases = list(DEFAULT_PHASES)
 
@@ -327,7 +333,6 @@ class BatteryTestSuite:
 
             await self._notify("Test gestartet", f"{len(phases)} Phasen | SoC {pf.battery_soc:.0f}%")
 
-            phases_started = True
             for i, phase in enumerate(phases, 1):
                 if self._abort_requested:
                     self._emit("⚠️  Abbruch")
@@ -373,7 +378,7 @@ class BatteryTestSuite:
         finally:
             # Restore before releasing REG 1038, so no other feature can take
             # it over and then have its value overwritten by this restore.
-            if phases_started:
+            if self._registers_written:
                 await self._write_normal()
             if (
                 reg_1038_acquired

@@ -103,14 +103,21 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         """Block battery charging: REG 1038 = 0."""
         # Acquire before the snapshot: a refused turn-on must not keep the
         # value the current owner wrote, or a later turn-off restores it.
+        was_on = self._is_on
         acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         try:
             await self._snapshot_charge_limit()
             await self._write_block()
-        except Exception as err:
-            self._original_charge_limit = None  # discard snapshot on failure
-            release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
-            raise HomeAssistantError("Ladung konnte nicht blockiert werden") from err
+        except BaseException as err:
+            # Also on cancellation: an off switch must not keep REG 1038, since
+            # turn_off on an off switch no longer releases it. A repeated
+            # turn-on of a switch that is already on keeps it.
+            if not was_on:
+                self._original_charge_limit = None  # discard snapshot on failure
+                release_reg_1038(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
+            if isinstance(err, Exception):
+                raise HomeAssistantError("Ladung konnte nicht blockiert werden") from err
+            raise
         self._is_on = True
         self._start_keepalive()
         self.async_write_ha_state()

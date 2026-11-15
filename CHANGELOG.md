@@ -28,8 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - On reload or unload both switches restore REG 1038 before the Modbus
     connection closes. Before, the restore ran after it and never reached the
     inverter.
-  - A battery test that is refused or fails its pre-flight writes nothing.
-    Before, it reset REG 1034/1038/1040 to 20000 W.
+  - A battery test that is refused (REG 1038 taken by another feature)
+    writes nothing. Before, it reset REG 1034/1038/1040 to 20000 W. A test that
+    stops after the pre-flight's own write check restores the limits read at
+    its start, and does so before it releases REG 1038.
 - The *Block Battery Charging* keepalive keeps running after a failed write
   (for example the nightly `Server device failure`) and blocks again once the
   inverter answers. Before, one failed write ended it while the switch still
