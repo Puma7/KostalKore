@@ -101,9 +101,11 @@ class BatteryChargeBlockSwitch(SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Block battery charging: REG 1038 = 0."""
-        await self._snapshot_charge_limit()
+        # Acquire before the snapshot: a refused turn-on must not keep the
+        # value the current owner wrote, or a later turn-off restores it.
         acquire_reg_1038_or_raise(self.hass, self._entry_id, OWNER_CHARGE_BLOCK)
         try:
+            await self._snapshot_charge_limit()
             await self._write_block()
         except Exception as err:
             self._original_charge_limit = None  # discard snapshot on failure
@@ -129,6 +131,11 @@ class BatteryChargeBlockSwitch(SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Restore charging to previous limit."""
         self._cancel_keepalive()
+        if not self._is_on:
+            # Already off: REG 1038 is not ours, so writing the device maximum
+            # would override whichever feature owns it now.
+            self.async_write_ha_state()
+            return
         restore = self._restore_limit()
         await self._write_normal(restore)
         self._is_on = False
@@ -176,24 +183,51 @@ class BatteryChargeBlockSwitch(SwitchEntity):
         self._keepalive_task = None
 
     async def _run_keepalive(self) -> None:
-        """Re-write REG 1038 = 0 every 15s to prevent deadman reset."""
+        """Re-write REG 1038 = 0 every 15s to prevent deadman reset.
+
+        A failed write does not end the loop: the switch stays on and keeps
+        REG 1038, so the block must be re-applied once the inverter answers
+        again (e.g. after the nightly "Server device failure").
+        """
+        failures = 0
         try:
             while self._is_on:
                 await asyncio.sleep(KEEPALIVE_INTERVAL)
                 if not self._is_on:
                     break
-                await self._write_block()
+                try:
+                    await self._write_block()
+                except Exception as exc:
+                    failures += 1
+                    if failures == 1:
+                        _LOGGER.warning(
+                            "Charge block keepalive write failed: %s — retrying "
+                            "every %ss, the inverter may resume charging meanwhile",
+                            exc,
+                            KEEPALIVE_INTERVAL,
+                        )
+                    continue
+                if failures:
+                    _LOGGER.info(
+                        "Charge block keepalive recovered after %d failed write(s)",
+                        failures,
+                    )
+                    failures = 0
                 _LOGGER.debug("Charge block keepalive: REG 1038 = 0")
         except asyncio.CancelledError:
             return
-        except Exception as exc:
-            _LOGGER.error(
-                "Charge block keepalive crashed: %s — inverter may resume charging",
-                exc,
-            )
 
     async def async_will_remove_from_hass(self) -> None:
         """Restore charging on entity removal."""
+        await self.async_release_for_unload()
+        await super().async_will_remove_from_hass()
+
+    async def async_release_for_unload(self) -> None:
+        """Restore REG 1038 and release it while the Modbus client is still open.
+
+        Called by the entry unload before the coordinator shuts the client down,
+        and again (as a no-op) when the entity is removed.
+        """
         self._cancel_keepalive()
         if self._is_on:
             self._is_on = False
@@ -207,7 +241,6 @@ class BatteryChargeBlockSwitch(SwitchEntity):
                     )
                 except Exception:
                     _LOGGER.debug("Failed to dismiss charge block notification on removal")
-        await super().async_will_remove_from_hass()
 
     def async_entity_id_changed(self, old_entity_id: str) -> None:
         """Let HA 2026.11+ rename the entity_id in place; nothing here depends on it."""

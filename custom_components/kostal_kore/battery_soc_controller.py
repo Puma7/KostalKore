@@ -26,6 +26,8 @@ import math
 import time
 from typing import Any, Final
 
+from homeassistant.exceptions import ServiceValidationError
+
 from .battery_reg_1038_owner import (
     OWNER_SOC_CONTROLLER,
     acquire_reg_1038_or_raise,
@@ -65,6 +67,10 @@ DIVERGENCE_CYCLES: Final[int] = 4
 class BatterySocController:
     """Manages battery charge/discharge to reach a target SoC."""
 
+    # Class-level defaults so objects built without __init__ (tests) work.
+    _wrote_1034: bool = False
+    _wrote_1038: bool = False
+
     def __init__(
         self,
         coordinator: ModbusDataUpdateCoordinator,
@@ -89,7 +95,12 @@ class BatterySocController:
         self._status: str = "idle"
         self._last_write: float = 0.0
         self._original_charge_limit: float | None = None
-        self._original_discharge_limit: float | None = None
+        # Which registers this session has written (or tried to write). Only
+        # those are put back when the session ends; an idle controller writes
+        # nothing, so a stop on reload or Target SoC 0 cannot override limits
+        # the user or another REG 1038 owner set.
+        self._wrote_1034: bool = False
+        self._wrote_1038: bool = False
         self._divergence_count: int = 0
         self._divergence_warned: bool = False
         self._divergence_clear_count: int = 0
@@ -148,6 +159,10 @@ class BatterySocController:
 
         Values are clamped to SAFE_MIN_SOC..SAFE_MAX_SOC (10-95%).
         """
+        if soc is not None and not math.isfinite(soc):
+            raise ServiceValidationError(
+                f"Target SoC must be a finite number, got {soc!r}"
+            )
         if soc is not None and self._is_battery_test_running():
             _LOGGER.warning(
                 "SoC Controller: cannot start — battery test is running"
@@ -197,7 +212,12 @@ class BatterySocController:
             raise
 
     async def _stop(self) -> None:
-        """Stop the controller and reset to automatic."""
+        """Stop the controller and reset to automatic.
+
+        The control loop's ``finally`` puts back what the session changed, so
+        cancelling it is enough; writing here again would find the snapshot
+        consumed and set REG 1038/1040 to the device maximum.
+        """
         async with self._task_lock:
             if self._task and not self._task.done():
                 self._task.cancel()
@@ -208,7 +228,7 @@ class BatterySocController:
             self._task = None
         self._target_soc = None
         self._status = "idle"
-        await self._write_normal()
+        await self._restore_session_writes()
         hass = getattr(self, "_hass", None)
         entry_id = getattr(self, "_entry_id", "")
         if hass is not None and entry_id:
@@ -224,10 +244,9 @@ class BatterySocController:
     # ------------------------------------------------------------------
 
     async def _snapshot_limits(self) -> None:
-        """Read current charge/discharge limits before taking control."""
+        """Read the current charge limit (REG 1038) before taking control."""
         for name, attr in (
             ("bat_max_charge_limit", "_original_charge_limit"),
-            ("bat_max_discharge_limit", "_original_discharge_limit"),
         ):
             reg = REGISTER_BY_NAME.get(name)
             if not reg:
@@ -247,7 +266,6 @@ class BatterySocController:
             Charging:    stop if current_soc >= target  (at or above)
             Discharging: stop if current_soc <= target  (at or below)
         """
-        await self._snapshot_limits()
         # Tri-state direction tracker. None = no action taken yet — the
         # overshoot stop branches MUST NOT fire on the first iteration,
         # otherwise (SoC < target, was_charging=False) would short-circuit
@@ -258,6 +276,9 @@ class BatterySocController:
         consecutive_read_fails = 0
         consecutive_write_fails = 0
         try:
+            # Inside the try, so a cancel during the snapshot still runs the
+            # finally (status reset, REG 1038 release).
+            await self._snapshot_limits()
             while self._target_soc is not None:
                 current_soc = await self._read_soc()
 
@@ -321,7 +342,9 @@ class BatterySocController:
                 temp = await self._read_temp()
                 if temp is not None and temp > MAX_BATTERY_TEMP_C:
                     self._status = f"paused: Temperatur {temp:.0f}°C"
-                    await self._write_normal()
+                    # Keep the snapshot: the session resumes after the pause
+                    # and must still restore the original limits at the end.
+                    await self._write_normal(keep_snapshot=True)
                     await asyncio.sleep(30)
                     continue
 
@@ -399,7 +422,7 @@ class BatterySocController:
             self._divergence_count = 0
             self._divergence_clear_count = 0
             self._divergence_warned = False
-            await self._write_normal()
+            await self._restore_session_writes()
             hass = getattr(self, "_hass", None)
             entry_id = getattr(self, "_entry_id", "")
             if hass is not None and entry_id:
@@ -414,6 +437,7 @@ class BatterySocController:
         reg = REGISTER_BY_NAME.get("bat_charge_dc_abs_power")
         if not reg:
             return False
+        self._wrote_1034 = True
         try:
             await self._coord.async_write_register(reg, float(-abs(power)))
             self._last_write = time.monotonic()
@@ -428,6 +452,7 @@ class BatterySocController:
         reg1038 = REGISTER_BY_NAME.get("bat_max_charge_limit")
         if not reg1034:
             return False
+        self._wrote_1034 = True
         try:
             await self._coord.async_write_register(reg1034, float(abs(power)))
             self._last_write = time.monotonic()
@@ -435,35 +460,50 @@ class BatterySocController:
             _LOGGER.warning("SoC Controller discharge write failed: %s", err)
             return False
         if reg1038:
+            self._wrote_1038 = True
             try:
                 await self._coord.async_write_register(reg1038, 0.0)
             except Exception as err:
                 _LOGGER.debug("SoC Controller: secondary reg1038 write failed: %s", err)
         return True
 
-    async def _write_normal(self) -> None:
-        """Reset to automatic mode, restoring original limits if available."""
+    async def _restore_session_writes(self) -> None:
+        """Put back what this session wrote, then forget the session."""
+        if self._wrote_1034 or self._wrote_1038:
+            await self._write_normal()
+        self._wrote_1034 = False
+        self._wrote_1038 = False
+        self._original_charge_limit = None
+
+    async def _write_normal(self, *, keep_snapshot: bool = False) -> None:
+        """Reset to automatic mode, restoring original limits if available.
+
+        REG 1034 goes back to 0. REG 1038 is put back only if this session set
+        it to 0 (discharging): to its snapshot, or to the device maximum without
+        one. The controller never writes REG 1040, so it leaves it alone.
+        """
         if self._coord.client.closing or not self._coord.client.connected:
             _LOGGER.debug(
                 "SoC Controller: skip register restore (Modbus unavailable)"
             )
             return
-        fallback = self._device_power_limit_w
-        charge_limit = self._original_charge_limit if self._original_charge_limit is not None else fallback
-        discharge_limit = self._original_discharge_limit if self._original_discharge_limit is not None else fallback
-        for name, val in (
-            ("bat_charge_dc_abs_power", 0.0),
-            ("bat_max_charge_limit", charge_limit),
-            ("bat_max_discharge_limit", discharge_limit),
-        ):
+        writes: list[tuple[str, float]] = [("bat_charge_dc_abs_power", 0.0)]
+        if self._wrote_1038:
+            writes.append((
+                "bat_max_charge_limit",
+                self._original_charge_limit
+                if self._original_charge_limit is not None
+                else self._device_power_limit_w,
+            ))
+        for name, val in writes:
             reg = REGISTER_BY_NAME.get(name)
             if reg:
                 try:
                     await self._coord.async_write_register(reg, val)
                 except Exception as err:
                     _LOGGER.warning("SoC Controller: failed to reset %s: %s", name, err)
-        self._original_charge_limit = None
-        self._original_discharge_limit = None
+        if not keep_snapshot:
+            self._original_charge_limit = None
 
     async def _read_soc(self) -> float | None:
         reg = REGISTER_BY_NAME.get("battery_soc")

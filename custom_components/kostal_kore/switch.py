@@ -989,9 +989,13 @@ async def async_setup_entry(
         modbus_coord = entry_data.get("modbus_coordinator") if entry_data else None
         if entry.options.get(_CME, False) and modbus_coord is not None:
             from .charge_block_switch import BatteryChargeBlockSwitch
-            entities.append(BatteryChargeBlockSwitch(
+            charge_block = BatteryChargeBlockSwitch(
                 modbus_coord, entry.entry_id, plenticore.device_info, hass=hass,
-            ))
+            )
+            entities.append(charge_block)
+            # The entry unload restores REG 1038 through this before it shuts
+            # the Modbus client down.
+            entry_data["charge_block_switch"] = charge_block
             # Pre-instantiated in __init__.py so the number platform sees it
             # even when platform setup runs in non-deterministic order.
             limiter_switch = entry_data.get("grid_feedin_limiter")

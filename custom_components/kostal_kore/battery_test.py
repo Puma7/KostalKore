@@ -272,6 +272,10 @@ class BatteryTestSuite:
         self._dbg.clear()
         results: list[PhaseResult] = []
         reg_1038_acquired = False
+        # Only a test that reached its phases has written registers. A refused
+        # or failed pre-flight must not reset REG 1034/1038/1040: no snapshot
+        # exists yet, and another feature may own REG 1038.
+        phases_started = False
         if phases is None:
             phases = list(DEFAULT_PHASES)
 
@@ -323,6 +327,7 @@ class BatteryTestSuite:
 
             await self._notify("Test gestartet", f"{len(phases)} Phasen | SoC {pf.battery_soc:.0f}%")
 
+            phases_started = True
             for i, phase in enumerate(phases, 1):
                 if self._abort_requested:
                     self._emit("⚠️  Abbruch")
@@ -366,6 +371,10 @@ class BatteryTestSuite:
                     await asyncio.sleep(3)
 
         finally:
+            # Restore before releasing REG 1038, so no other feature can take
+            # it over and then have its value overwritten by this restore.
+            if phases_started:
+                await self._write_normal()
             if (
                 reg_1038_acquired
                 and self._hass
@@ -378,7 +387,6 @@ class BatteryTestSuite:
                 )
 
                 release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
-            await self._write_normal()
             self._running = False
             self._emit("")
             self._emit("═" * 60)

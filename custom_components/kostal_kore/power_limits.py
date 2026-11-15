@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from homeassistant.exceptions import ServiceValidationError
+
 MIN_CONTROL_LIMIT_W: Final[float] = 100.0
 DEFAULT_CONTROL_LIMIT_W: Final[float] = 5000.0
 HARD_MAX_CONTROL_LIMIT_W: Final[float] = 20_000.0
@@ -67,10 +69,20 @@ def is_device_power_limit_known(coordinator: Any) -> bool:
 
 
 def clamp_control_power_w(value_w: float, *, device_limit_w: float) -> float:
-    """Clamp requested control power to inverter-specific range."""
+    """Clamp requested control power to inverter-specific range.
+
+    A non-finite request (NaN/inf, e.g. from a template rendering ``nan``)
+    raises instead of turning into the device maximum: ``min``/``max`` keep a
+    NaN operand, and HA's own range check lets NaN through.
+    """
+    value = float(value_w)
+    if not math.isfinite(value):
+        raise ServiceValidationError(
+            f"Power must be a finite number of watts, got {value_w!r}"
+        )
     return max(
         MIN_CONTROL_LIMIT_W,
-        min(_normalize_power_limit(device_limit_w), float(value_w)),
+        min(_normalize_power_limit(device_limit_w), value),
     )
 
 
