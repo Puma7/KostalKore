@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Modbus works again with pymodbus 3.6–3.9, which the manifest allows and
+  Home Assistant 2024.12–2025.8 ships for its own Modbus integration. KORE
+  passed the unit ID as `device_id=`, a keyword that exists only from pymodbus
+  3.10, so every inverter and KSEM read and write failed with `TypeError` on
+  those installs. The keyword (`slave=` or `device_id=`) is now chosen from the
+  installed pymodbus.
+
 ## [3.0.21] - 2026-11-13
 
 ### Fixed

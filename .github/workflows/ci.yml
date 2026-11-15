@@ -71,3 +71,17 @@ jobs:
       - name: Run mypy
         if: matrix.python-version == '3.12'
         run: python -m mypy custom_components/kostal_kore/
+
+      # The manifest allows pymodbus 3.6-3.9 (unit-id keyword `slave=`), which HA
+      # core's Modbus integration pins on HA 2024.12-2025.8, but the install above
+      # resolves the newest pymodbus (`device_id=`). Re-run the shim and Modbus
+      # client tests against the oldest and newest `slave=` releases. Keep this
+      # the last step: it downgrades pymodbus for everything after it.
+      - name: Run Modbus tests on pymodbus 3.6 / 3.9
+        if: matrix.python-version == '3.12'
+        run: |
+          for v in 3.6.9 3.9.2; do
+            pip install "pymodbus==$v"
+            python -m pytest Tests/test_pymodbus_compat.py Tests/test_modbus_client.py \
+              Tests/test_wave10_live_test_coverage.py --timeout=60 --no-cov
+          done
