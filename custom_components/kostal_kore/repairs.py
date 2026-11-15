@@ -1,4 +1,9 @@
-"""Repair issues for Kostal Plenticore integration."""
+"""Repair issues for Kostal Plenticore integration.
+
+Every issue is informational (``is_fixable=False``): this module defines no
+``async_create_fix_flow``. A rejected password is not a repair issue; it
+raises ``ConfigEntryAuthFailed`` and Home Assistant starts the reauth flow.
+"""
 
 from __future__ import annotations
 
@@ -13,18 +18,6 @@ def _issue_id(suffix: str, *, entry_id: str = "") -> str:
     if entry_id:
         return f"{DOMAIN}_{entry_id}_{suffix}"
     return f"{DOMAIN}_{suffix}"
-
-
-def create_auth_failed_issue(hass: HomeAssistant, *, entry_id: str = "") -> None:
-    """Create an authentication failure repair issue."""
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        _issue_id("auth_failed", entry_id=entry_id),
-        is_fixable=True,
-        severity=ir.IssueSeverity.ERROR,
-        translation_key="auth_failed",
-    )
 
 
 def create_api_unreachable_issue(hass: HomeAssistant, *, entry_id: str = "") -> None:
@@ -57,7 +50,9 @@ def create_installer_required_issue(hass: HomeAssistant, *, entry_id: str = "") 
         hass,
         DOMAIN,
         _issue_id("installer_required", entry_id=entry_id),
-        is_fixable=True,
+        # Not fixable here: this module has no fix flow (async_create_fix_flow),
+        # and the service code is entered with Reconfigure.
+        is_fixable=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key="installer_required",
     )

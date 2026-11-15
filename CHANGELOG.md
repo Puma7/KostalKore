@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A rejected password now starts Home Assistant's reauth flow. At setup, KORE
+  raises `ConfigEntryAuthFailed` instead of returning `False` (which left the
+  entry in SETUP_ERROR with no way to enter a new password); while polling, a
+  rejected re-login no longer ends as `UpdateFailed`. Because pykoplenti
+  reports every HTTP 400 as `AuthenticationException`, a polling coordinator
+  first confirms with a login on a separate client; once confirmed, all
+  coordinators stop polling until the entry is reloaded.
+- The reauth form asks only for the password and service code (the host field
+  was ignored), keeps the stored service code when the field is left empty, and
+  no longer overwrites the entry title.
+- Repair issues are no longer marked fixable: KORE has no repair fix flow, so
+  Home Assistant logged "Invalid repairs platform" and **Fix** only deleted the
+  issue. The `auth_failed` issue is gone (reauth replaces it, an old one is
+  cleared); `installer_required` stays as an informational issue.
+
+### Changed
+- Docs (EN/DE troubleshooting): what happens when the inverter password
+  changes after setup.
+
 ## [3.0.21] - 2026-11-13
 
 ### Fixed

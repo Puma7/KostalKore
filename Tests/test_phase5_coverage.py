@@ -727,11 +727,10 @@ def test_repairs_create_and_clear(hass: HomeAssistant) -> None:
     with patch("custom_components.kostal_kore.repairs.ir.async_create_issue") as create_issue, patch(
         "custom_components.kostal_kore.repairs.ir.async_delete_issue"
     ) as delete_issue:
-        repairs.create_auth_failed_issue(hass)
         repairs.create_api_unreachable_issue(hass)
         repairs.create_inverter_busy_issue(hass)
         repairs.clear_issue(hass, "auth_failed")
-        assert create_issue.call_count == 3
+        assert create_issue.call_count == 2
         delete_issue.assert_called_once()
 
 
@@ -740,13 +739,12 @@ def test_repairs_with_entry_id(hass: HomeAssistant) -> None:
     with patch("custom_components.kostal_kore.repairs.ir.async_create_issue") as create_issue, patch(
         "custom_components.kostal_kore.repairs.ir.async_delete_issue"
     ) as delete_issue:
-        repairs.create_auth_failed_issue(hass, entry_id="test_entry")
+        repairs.create_api_unreachable_issue(hass, entry_id="test_entry")
         create_issue.assert_called_once()
         issue_id = create_issue.call_args[0][2]
         assert "test_entry" in issue_id
         repairs.clear_issue(hass, "auth_failed", entry_id="test_entry")
         delete_issue.assert_called_once()
-        # Also cover create_installer_required_issue (repairs.py:54-63)
         repairs.create_installer_required_issue(hass, entry_id="test_entry")
         assert create_issue.call_count == 2
 

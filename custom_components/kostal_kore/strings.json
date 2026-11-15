@@ -52,9 +52,8 @@
     },
     "step": {
       "reauth_confirm": {
-        "description": "Re-enter your credentials. The host from the existing configuration will be used.",
+        "description": "The inverter {host} rejected the stored password. Enter the current password of the inverter's web interface. Leave the service code empty to keep the stored one.",
         "data": {
-          "host": "Host/IP (read-only, uses existing entry)",
           "password": "[%key:common::config_flow::data::password%]",
           "service_code": "[%key:component::kostal_kore::config::step::user::data::service_code%]"
         }

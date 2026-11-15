@@ -12,7 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiohttp.client_exceptions import ClientError
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -51,11 +55,12 @@ async def test_plenticore_async_setup_and_unload_error_paths(hass: HomeAssistant
     p = Plenticore(hass, entry)
 
     with patch("kostal_plenticore.coordinator.ExtendedApiClient") as client_cls:
-        # auth error -> False
+        # auth error -> ConfigEntryAuthFailed (HA starts the reauth flow)
         client = MagicMock()
         client.login = AsyncMock(side_effect=AuthenticationException(401, "bad auth"))
         client_cls.return_value = client
-        assert await p.async_setup() is False
+        with pytest.raises(ConfigEntryAuthFailed):
+            await p.async_setup()
 
         # client/network errors -> ConfigEntryNotReady
         client = MagicMock()

@@ -52,9 +52,8 @@
         },
         "step": {
             "reauth_confirm": {
-                "description": "Gib deine Zugangsdaten erneut ein. Der Host aus der bestehenden Konfiguration wird verwendet.",
+                "description": "Der Wechselrichter {host} hat das gespeicherte Passwort abgelehnt. Gib das aktuelle Passwort der Weboberfläche des Wechselrichters ein. Lass den Servicecode leer, um den gespeicherten zu behalten.",
                 "data": {
-                    "host": "Host/IP (schreibgeschützt, verwendet den bestehenden Eintrag)",
                     "password": "Passwort",
                     "service_code": "Servicecode"
                 }

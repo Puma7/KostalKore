@@ -20,6 +20,15 @@ logger:
 - **Ungültige Anmeldung:** Gemeint ist das Passwort der Weboberfläche des
   Wechselrichters. Der Servicecode ist optional und nur für
   Installateur-Einstellungen nötig.
+- **Passwort nach der Einrichtung geändert:** Lehnt der Wechselrichter das
+  gespeicherte Passwort ab, beim Start oder während des Abrufs, stellt KORE
+  seine Anfragen ein (jede fehlgeschlagene Anmeldung zählt zur Sperre des
+  Wechselrichters), und Home Assistant fordert unter **Einstellungen → Geräte &
+  Dienste** eine erneute Authentifizierung an. Trag dort das neue Passwort ein;
+  der Eintrag lädt damit neu. Der Host bleibt gleich, ein leerer Servicecode
+  behält den gespeicherten. Ältere Versionen zeigten stattdessen den
+  Reparaturhinweis *Authentifizierung fehlgeschlagen*, dessen Schaltfläche
+  **Beheben** ihn nur löschte.
 - **Zeitüberschreitungen:** Der Wechselrichter beantwortet nur wenige Anfragen
   gleichzeitig und ist bei Updates und Wartung beschäftigt. KORE stellt seine
   eigenen Anfragen hintereinander; andere Programme, die den Wechselrichter

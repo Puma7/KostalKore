@@ -91,6 +91,14 @@ DATA_SCHEMA: Final[vol.Schema] = vol.Schema(
     }
 )
 
+# Reauth keeps the host of the entry, so the form only asks for credentials.
+REAUTH_SCHEMA: Final[vol.Schema] = vol.Schema(
+    {
+        vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_SERVICE_CODE): str,
+    }
+)
+
 
 def _installer_access_from_role(access_role: str, service_code: str | None) -> bool:
     """Return whether the current authenticated role may write installer settings.
@@ -724,26 +732,34 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle re-authentication requests."""
+        """Start re-authentication after the inverter rejected the password.
+
+        Home Assistant calls this when setup or a coordinator raises
+        ``ConfigEntryAuthFailed``; ``user_input`` is the entry's stored data.
+        """
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Confirm re-authentication and update stored credentials."""
+        """Ask for the new password, store it and reload the entry."""
         errors: dict[str, str] = {}
+        entry_id = self.context.get("entry_id")
+        existing_entry = (
+            self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        )
 
         if user_input is not None:
             auth_input = _sanitize_auth_input(user_input)
-            # Reauth must use the existing host to prevent accidental rebinding
-            entry_id = self.context.get("entry_id")
-            existing_entry = (
-                self.hass.config_entries.async_get_entry(entry_id)
-                if entry_id
-                else None
-            )
-            if existing_entry and existing_entry.data.get(CONF_HOST):
-                auth_input[CONF_HOST] = existing_entry.data[CONF_HOST]
+            if existing_entry is not None:
+                # Reauth must use the existing host to prevent accidental rebinding
+                if existing_entry.data.get(CONF_HOST):
+                    auth_input[CONF_HOST] = existing_entry.data[CONF_HOST]
+                # An empty service code keeps the stored one, so a password
+                # change does not silently drop installer access.
+                stored_code = existing_entry.data.get(CONF_SERVICE_CODE)
+                if stored_code and CONF_SERVICE_CODE not in auth_input:
+                    auth_input[CONF_SERVICE_CODE] = stored_code
 
             try:
                 connection_result = await resolve_connection_safe(self.hass, auth_input)
@@ -751,9 +767,9 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors = _handle_config_flow_error(err, "reauth")
             else:
                 if existing_entry is not None:
+                    # Only the credentials change: the title may be the user's.
                     self.hass.config_entries.async_update_entry(
                         existing_entry,
-                        title=connection_result.hostname,
                         data=_build_entry_data(auth_input, connection_result),
                     )
                     from .startup_trace import async_request_config_reload
@@ -768,8 +784,13 @@ class KostalPlenticoreConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=DATA_SCHEMA,
+            data_schema=REAUTH_SCHEMA,
             errors=errors,
+            description_placeholders={
+                "host": str(existing_entry.data.get(CONF_HOST, ""))
+                if existing_entry is not None
+                else "",
+            },
         )
 
 
