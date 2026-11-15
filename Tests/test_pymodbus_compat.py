@@ -43,7 +43,8 @@ def _read_3_10(
     ids=["3.6", "3.9", "3.10"],
 )
 def test_detects_keyword_per_release_line(method: Any, expected: str) -> None:
-    # 3.6's **kwargs would silently swallow device_id= — it must pick slave.
+    # 3.6 swallows an unknown device_id= in **kwargs and sends unit ID 0, so it
+    # must pick slave even though device_id= would not raise there.
     assert detect_unit_id_keyword(method) == expected
 
 
