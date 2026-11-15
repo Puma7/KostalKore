@@ -496,3 +496,45 @@ async def test_turn_off_cancelled_during_the_restore_still_releases_reg_1038(
 
     assert not switch.is_on  # type: ignore[attr-defined]
     assert get_reg_1038_owner_manager(hass, ENTRY).current is None
+
+
+@pytest.mark.asyncio
+async def test_battery_test_cancelled_during_its_restore_still_releases_reg_1038() -> None:
+    from custom_components.kostal_kore.battery_test import PreFlightResult
+
+    coord = _Registers()
+    hass = _hass()
+    suite = BatteryTestSuite(coord, hass=hass, entry_id=ENTRY)  # type: ignore[arg-type]
+
+    async def _preflight(_phases: object) -> PreFlightResult:
+        await suite._wr("bat_max_charge_limit", 20000.0)
+        return PreFlightResult(ok=False, errors=["x"])
+
+    with patch.object(suite, "_preflight", side_effect=_preflight), patch.object(
+        suite, "_write_normal", new=AsyncMock(side_effect=asyncio.CancelledError)
+    ), patch.object(suite, "_notify", new=AsyncMock()), patch.object(
+        suite, "_flush_debug", new=AsyncMock()
+    ), pytest.raises(asyncio.CancelledError):
+        await suite.run()
+
+    assert not suite.running
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None
+
+
+@pytest.mark.asyncio
+async def test_soc_stop_cancelled_during_its_restore_still_releases_reg_1038() -> None:
+    from custom_components.kostal_kore.battery_reg_1038_owner import OWNER_SOC_CONTROLLER
+
+    coord = _Registers()
+    hass = _hass()
+    controller = BatterySocController(coord, hass=hass, entry_id=ENTRY)  # type: ignore[arg-type]
+    get_reg_1038_owner_manager(hass, ENTRY).try_acquire(OWNER_SOC_CONTROLLER)
+    controller._wrote_1034 = True
+
+    with patch.object(
+        controller, "_write_normal", new=AsyncMock(side_effect=asyncio.CancelledError)
+    ), pytest.raises(asyncio.CancelledError):
+        await controller.stop()
+
+    assert controller._wrote_1034 is False
+    assert get_reg_1038_owner_manager(hass, ENTRY).current is None

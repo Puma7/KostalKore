@@ -378,21 +378,25 @@ class BatteryTestSuite:
         finally:
             # Restore before releasing REG 1038, so no other feature can take
             # it over and then have its value overwritten by this restore.
-            if self._registers_written:
-                await self._write_normal()
-            if (
-                reg_1038_acquired
-                and self._hass
-                and self._entry_id
-                and getattr(self._hass, "data", None) is not None
-            ):
-                from .battery_reg_1038_owner import (
-                    OWNER_BATTERY_TEST,
-                    release_reg_1038,
-                )
+            try:
+                if self._registers_written:
+                    await self._write_normal()
+            finally:
+                # Also when cancelled during the restore: nothing else would
+                # release REG 1038 or clear the running flag afterwards.
+                if (
+                    reg_1038_acquired
+                    and self._hass
+                    and self._entry_id
+                    and getattr(self._hass, "data", None) is not None
+                ):
+                    from .battery_reg_1038_owner import (
+                        OWNER_BATTERY_TEST,
+                        release_reg_1038,
+                    )
 
-                release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
-            self._running = False
+                    release_reg_1038(self._hass, self._entry_id, OWNER_BATTERY_TEST)
+                self._running = False
             self._emit("")
             self._emit("═" * 60)
             s = self._summary(results)

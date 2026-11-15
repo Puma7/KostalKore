@@ -242,11 +242,10 @@ class BatterySocController:
             self._task = None
         self._target_soc = None
         self._status = "idle"
-        await self._restore_session_writes()
-        hass = getattr(self, "_hass", None)
-        entry_id = getattr(self, "_entry_id", "")
-        if hass is not None and entry_id:
-            release_reg_1038(hass, entry_id, OWNER_SOC_CONTROLLER)
+        try:
+            await self._restore_session_writes()
+        finally:
+            self._release_reg_1038()
         _LOGGER.info("SoC Controller: stopped, automatic mode")
 
     async def stop(self) -> None:
@@ -437,11 +436,12 @@ class BatterySocController:
             self._divergence_count = 0
             self._divergence_clear_count = 0
             self._divergence_warned = False
-            await self._restore_session_writes()
-            hass = getattr(self, "_hass", None)
-            entry_id = getattr(self, "_entry_id", "")
-            if hass is not None and entry_id:
-                release_reg_1038(hass, entry_id, OWNER_SOC_CONTROLLER)
+            try:
+                await self._restore_session_writes()
+            finally:
+                # Also when cancelled during the restore: nothing else would
+                # release REG 1038 once the session has ended.
+                self._release_reg_1038()
 
     # ------------------------------------------------------------------
     # Register I/O
@@ -482,13 +482,21 @@ class BatterySocController:
                 _LOGGER.debug("SoC Controller: secondary reg1038 write failed: %s", err)
         return True
 
+    def _release_reg_1038(self) -> None:
+        hass = getattr(self, "_hass", None)
+        entry_id = getattr(self, "_entry_id", "")
+        if hass is not None and entry_id:
+            release_reg_1038(hass, entry_id, OWNER_SOC_CONTROLLER)
+
     async def _restore_session_writes(self) -> None:
         """Put back what this session wrote, then forget the session."""
-        if self._wrote_1034 or self._wrote_1038:
-            await self._write_normal()
-        self._wrote_1034 = False
-        self._wrote_1038 = False
-        self._original_charge_limit = None
+        try:
+            if self._wrote_1034 or self._wrote_1038:
+                await self._write_normal()
+        finally:
+            self._wrote_1034 = False
+            self._wrote_1038 = False
+            self._original_charge_limit = None
 
     async def _write_normal(self, *, keep_snapshot: bool = False) -> None:
         """Reset to automatic mode, restoring original limits if available.
